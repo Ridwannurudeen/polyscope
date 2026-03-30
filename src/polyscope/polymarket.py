@@ -86,10 +86,10 @@ class PolymarketClient:
         for i, t in enumerate(data):
             traders.append(
                 Trader(
-                    address=t.get("userAddress", t.get("address", "")),
-                    rank=i + 1,
+                    address=t.get("proxyWallet", t.get("userAddress", t.get("address", ""))),
+                    rank=int(t.get("rank", i + 1)),
                     profit=self._float(t.get("pnl", t.get("profit", 0))),
-                    volume=self._float(t.get("volume", 0)),
+                    volume=self._float(t.get("vol", t.get("volume", 0))),
                     markets_traded=int(t.get("marketsTraded", t.get("numMarkets", 0))),
                     name=t.get("userName", t.get("displayName", "")),
                 )
@@ -124,23 +124,48 @@ class PolymarketClient:
     async def get_market_positions(
         self, market: str, limit: int = 100
     ) -> list[Position]:
-        """Fetch all positions for a specific market (v1 endpoint)."""
+        """Fetch all positions for a specific market (v1 endpoint).
+
+        Response format: [{token: str, positions: [{proxyWallet, size, outcome, ...}]}]
+        """
         params = {"market": market, "limit": limit}
         data = await self._get(f"{DATA_BASE}/v1/market-positions", params)
         if not isinstance(data, list):
             return []
-        return [
-            Position(
-                trader_address=p.get("userAddress", p.get("user", "")),
-                market_id=market,
-                side=self._infer_side(p),
-                size=self._float(p.get("size", p.get("amount", 0))),
-                avg_price=self._float(p.get("avgPrice", 0)),
-                pnl=self._float(p.get("pnl", 0)),
-            )
-            for p in data
-            if self._float(p.get("size", p.get("amount", 0))) > 0
-        ]
+
+        # Response is nested: list of token groups, each with positions
+        positions = []
+        for token_group in data:
+            if isinstance(token_group, dict) and "positions" in token_group:
+                for p in token_group["positions"]:
+                    size = self._float(p.get("size", p.get("amount", 0)))
+                    if size <= 0:
+                        continue
+                    positions.append(
+                        Position(
+                            trader_address=p.get("proxyWallet", p.get("userAddress", "")),
+                            market_id=market,
+                            side=self._infer_side(p),
+                            size=size,
+                            avg_price=self._float(p.get("avgPrice", 0)),
+                            pnl=self._float(p.get("totalPnl", p.get("pnl", 0))),
+                        )
+                    )
+            elif isinstance(token_group, dict):
+                # Flat format fallback
+                size = self._float(token_group.get("size", 0))
+                if size > 0:
+                    positions.append(
+                        Position(
+                            trader_address=token_group.get("proxyWallet", token_group.get("userAddress", "")),
+                            market_id=market,
+                            side=self._infer_side(token_group),
+                            size=size,
+                            avg_price=self._float(token_group.get("avgPrice", 0)),
+                            pnl=self._float(token_group.get("totalPnl", token_group.get("pnl", 0))),
+                        )
+                    )
+        return positions
 
     async def get_holders(self, market: str, limit: int = 100) -> list[dict]:
         params = {"market": market, "limit": limit}
@@ -261,9 +286,10 @@ class PolymarketClient:
     @staticmethod
     def _infer_side(p: dict) -> str:
         """Infer YES/NO side from position data."""
-        side = p.get("side", p.get("outcome", ""))
-        if isinstance(side, str):
-            upper = side.upper()
+        # Check outcome field first (market-positions API uses "Yes"/"No")
+        outcome = p.get("outcome", p.get("side", ""))
+        if isinstance(outcome, str):
+            upper = outcome.upper().strip()
             if upper in ("YES", "LONG", "Y", "1"):
                 return "YES"
             if upper in ("NO", "SHORT", "N", "0"):
