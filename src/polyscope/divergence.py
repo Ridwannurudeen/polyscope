@@ -48,7 +48,11 @@ def compute_divergence(
     """
     cfg = config or DivergenceConfig()
 
-    if market.price_yes <= 0 or market.open_interest < cfg.min_oi:
+    if market.price_yes <= 0:
+        return None
+    # Use volume or OI as quality gate (Gamma API doesn't always provide OI)
+    quality_metric = max(market.open_interest, market.volume_24h)
+    if quality_metric < cfg.min_oi:
         return None
 
     # Filter to positions from known top traders
@@ -74,7 +78,7 @@ def compute_divergence(
     magnitude_score = _score_magnitude(divergence_pct)
     count_score = _score_trader_count(len(sm_positions), cfg.top_n_traders)
     volume_score = _score_sm_volume(sm_positions)
-    liquidity_score = _score_liquidity(market.open_interest)
+    liquidity_score = _score_liquidity(max(market.open_interest, market.volume_24h))
 
     score = (
         cfg.weight_magnitude * magnitude_score
