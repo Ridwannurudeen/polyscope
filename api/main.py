@@ -40,10 +40,12 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
     scheduler.start()
 
-    # Run initial fetch
+    # Run initial fetch + compute
     logger.info("Running initial data fetch...")
     await fetch_markets_job()
     await fetch_leaderboard_job()
+    await compute_divergences_job()
+    await detect_movers_job()
 
     yield
 

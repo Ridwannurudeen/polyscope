@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from polyscope.divergence import DivergenceConfig, compute_divergence
 from polyscope.models import Trader
@@ -84,7 +84,7 @@ async def compute_divergences_job():
 
     signals = []
     db = await get_db()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     try:
         # For each market, fetch SM positions and compute divergence
