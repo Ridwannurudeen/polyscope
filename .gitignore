@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+data/
+*.db
+.ruff_cache/
+dist/
+*.egg-info/
+node_modules/
+.next/
+web/out/
