@@ -7,7 +7,7 @@ import { ScoreBadge } from "@/components/score-badge";
 import { StatCard } from "@/components/stat-card";
 import type { ScanResult, DivergenceSignal, MarketMover } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8020";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function Dashboard() {
   const [data, setData] = useState<ScanResult | null>(null);

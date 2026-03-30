@@ -5,7 +5,7 @@ import { Disclaimer } from "@/components/disclaimer";
 import { ScoreBadge } from "@/components/score-badge";
 import type { Trader, DivergenceSignal } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8020";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function SmartMoneyPage() {
   const [traders, setTraders] = useState<Trader[]>([]);

@@ -15,7 +15,7 @@ import { Disclaimer } from "@/components/disclaimer";
 import { ScoreBadge } from "@/components/score-badge";
 import { StatCard } from "@/components/stat-card";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8020";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface MarketDetail {
   market: {

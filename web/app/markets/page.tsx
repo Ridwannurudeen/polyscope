@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Disclaimer } from "@/components/disclaimer";
 import type { Market } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8020";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function MarketsPage() {
   const [markets, setMarkets] = useState<Market[]>([]);

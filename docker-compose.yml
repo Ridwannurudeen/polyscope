@@ -20,8 +20,6 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3020:3020"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://api:8020
     depends_on:
       api:
         condition: service_healthy

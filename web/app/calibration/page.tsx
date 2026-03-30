@@ -15,7 +15,7 @@ import { Disclaimer } from "@/components/disclaimer";
 import { StatCard } from "@/components/stat-card";
 import type { CalibrationData } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8020";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function CalibrationPage() {
   const [data, setData] = useState<CalibrationData | null>(null);
