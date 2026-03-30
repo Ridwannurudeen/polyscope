@@ -24,6 +24,16 @@ from .scheduler import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+
+async def _run_initial_scans():
+    """Run divergence + movers scans in background after startup."""
+    try:
+        await compute_divergences_job()
+        await detect_movers_job()
+        logger.info("Initial scans complete")
+    except Exception:
+        logger.exception("Initial scan failed")
+
 scheduler = AsyncIOScheduler()
 
 
@@ -40,12 +50,15 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
     scheduler.start()
 
-    # Run initial fetch + compute
+    # Run initial fetch (markets + leaderboard synchronously so API has data)
     logger.info("Running initial data fetch...")
     await fetch_markets_job()
     await fetch_leaderboard_job()
-    await compute_divergences_job()
-    await detect_movers_job()
+
+    # Run heavy scans in background so uvicorn starts immediately
+    import asyncio
+
+    asyncio.create_task(_run_initial_scans())
 
     yield
 
