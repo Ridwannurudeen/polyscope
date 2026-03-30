@@ -113,6 +113,17 @@ async def compute_divergences_job():
                 continue
 
             signal = compute_divergence(market, positions, _traders, _divergence_config)
+            if positions and not signal and len(positions) >= 1:
+                # Debug: log near-misses
+                from polyscope.divergence import _weighted_consensus
+                sm_c = _weighted_consensus(positions, _traders)
+                if sm_c is not None:
+                    div = abs(market.price_yes - sm_c)
+                    if div > 0.05:
+                        logger.debug(
+                            "Near-miss: %s | price=%.2f sm=%.2f div=%.2f traders=%d",
+                            market.question[:40], market.price_yes, sm_c, div, len(positions),
+                        )
             if signal:
                 signals.append(signal)
                 signal_dict = asdict(signal)

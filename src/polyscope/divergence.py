@@ -10,8 +10,8 @@ from polyscope.models import DivergenceSignal, Market, Position, Trader
 logger = logging.getLogger(__name__)
 
 # Minimum thresholds to generate a signal
-MIN_SM_TRADERS = 2
-MIN_DIVERGENCE_SCORE = 30
+MIN_SM_TRADERS = 1
+MIN_DIVERGENCE_SCORE = 25
 MIN_MARKET_OI = 1000  # $1K minimum open interest
 
 
@@ -156,8 +156,12 @@ def _score_magnitude(divergence_pct: float) -> float:
 
 def _score_trader_count(count: int, max_traders: int) -> float:
     """Score how many top traders are positioned. More = stronger signal."""
-    # 5 traders = 20, 25 = 50, 50 = 100
-    return min(100, (count / max(max_traders, 1)) * 100)
+    # 1 trader = 30, 2 = 50, 5 = 75, 10+ = 100
+    import math
+
+    if count <= 0:
+        return 0
+    return min(100, 30 + 70 * math.log2(count) / math.log2(max(max_traders, 2)))
 
 
 def _score_sm_volume(positions: list[Position]) -> float:
