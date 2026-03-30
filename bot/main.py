@@ -92,7 +92,7 @@ async def market_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /market <search query>")
         return
 
-    data = await _api_get(f"/api/markets?limit=5")
+    data = await _api_get("/api/markets?limit=100")
     if not data or not data.get("markets"):
         await update.message.reply_text("No markets found.")
         return
