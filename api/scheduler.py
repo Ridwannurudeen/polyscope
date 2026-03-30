@@ -85,6 +85,8 @@ async def compute_divergences_job():
     signals = []
     db = await get_db()
     now = datetime.now(timezone.utc).isoformat()
+    total_sm_matches = 0
+    markets_with_sm = 0
 
     try:
         # For each market, fetch SM positions and compute divergence
@@ -104,6 +106,9 @@ async def compute_divergences_job():
                 positions = [
                     p for p in market_positions if p.trader_address in _traders
                 ]
+                if positions:
+                    total_sm_matches += len(positions)
+                    markets_with_sm += 1
             except Exception:
                 continue
 
@@ -134,9 +139,12 @@ async def compute_divergences_job():
         await db.commit()
         cache.set("divergences", signals, ttl_seconds=600)
         logger.info(
-            "Divergence scan complete: %d signals from %d markets",
+            "Divergence scan complete: %d signals from %d markets "
+            "(%d markets with SM positions, %d total SM matches)",
             len(signals),
             len(markets),
+            markets_with_sm,
+            total_sm_matches,
         )
     except Exception:
         logger.exception("compute_divergences_job failed")

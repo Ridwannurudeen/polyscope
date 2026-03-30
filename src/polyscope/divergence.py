@@ -10,8 +10,8 @@ from polyscope.models import DivergenceSignal, Market, Position, Trader
 logger = logging.getLogger(__name__)
 
 # Minimum thresholds to generate a signal
-MIN_SM_TRADERS = 5
-MIN_DIVERGENCE_SCORE = 40
+MIN_SM_TRADERS = 2
+MIN_DIVERGENCE_SCORE = 30
 MIN_MARKET_OI = 1000  # $1K minimum open interest
 
 
