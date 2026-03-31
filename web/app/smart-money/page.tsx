@@ -4,6 +4,7 @@ import { Disclaimer } from "@/components/disclaimer";
 import { LastUpdated } from "@/components/last-updated";
 import { ScoreBadge } from "@/components/score-badge";
 import { TableSkeleton } from "@/components/skeleton";
+import { WhaleFlow } from "@/components/whale-flow";
 import { usePollingFetch } from "@/lib/hooks";
 import type { Trader, DivergenceSignal } from "@/lib/api";
 
@@ -93,6 +94,9 @@ export default function SmartMoneyPage() {
       <p className="text-gray-400 mb-6">
         Top trader rankings and counter-consensus signals. Read-only intelligence.
       </p>
+
+      {/* Whale Flow */}
+      <WhaleFlow />
 
       {/* Counter-consensus signals */}
       {divergences.length > 0 && (

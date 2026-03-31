@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from polyscope.models import Market, Position, Trader
+from polyscope.models import Market, Position, Trade, Trader
 
 logger = logging.getLogger(__name__)
 
@@ -224,13 +224,57 @@ class PolymarketClient:
 
     async def get_trades(
         self, market: str | None = None, user: str | None = None, limit: int = 50
-    ) -> list[dict]:
+    ) -> list[Trade]:
+        """Fetch trades and return parsed Trade objects."""
         params: dict[str, Any] = {"limit": limit}
         if market:
             params["market"] = market
         if user:
             params["user"] = user
-        return await self._get(f"{DATA_BASE}/trades", params) or []
+        data = await self._get(f"{DATA_BASE}/trades", params)
+        if not isinstance(data, list):
+            return []
+        trades = []
+        for t in data:
+            trader_addr = t.get("proxyWallet", t.get("maker", t.get("user", "")))
+            side_raw = t.get("side", t.get("outcome", ""))
+            side = self._infer_side({"outcome": side_raw}) if side_raw else "YES"
+            size = self._float(t.get("size", t.get("amount", 0)))
+            price = self._float(t.get("price", 0))
+            ts = t.get("createdAt", t.get("timestamp", ""))
+            market_id = t.get("market", t.get("conditionId", market or ""))
+            if size <= 0:
+                continue
+            trades.append(Trade(
+                trader_address=trader_addr,
+                market_id=market_id,
+                side=side,
+                size=size,
+                price=price,
+                timestamp=ts,
+            ))
+        return trades
+
+    async def get_sm_recent_trades(
+        self, market_id: str, sm_addresses: set[str], hours: int = 48
+    ) -> list[Trade]:
+        """Fetch recent trades for a market, filtered to SM addresses and time window."""
+        from datetime import datetime, timedelta, timezone
+
+        trades = await self.get_trades(market=market_id, limit=200)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        sm_trades = []
+        for trade in trades:
+            if trade.trader_address not in sm_addresses:
+                continue
+            try:
+                trade_time = datetime.fromisoformat(trade.timestamp.replace("Z", "+00:00"))
+                if trade_time < cutoff:
+                    continue
+            except (ValueError, AttributeError):
+                continue
+            sm_trades.append(trade)
+        return sm_trades
 
     # ── CLOB API ───────────────────────────────────────────────
 

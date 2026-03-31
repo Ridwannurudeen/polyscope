@@ -1,7 +1,8 @@
-"""PolyScope Telegram Bot — divergence alerts and market intelligence."""
+"""PolyScope Telegram Bot — divergence alerts, whale flow, and market intelligence."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -45,6 +46,17 @@ async def _api_get(path: str) -> dict | None:
         return None
 
 
+async def _api_post(path: str, json: dict | None = None) -> dict | None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(f"{API_BASE}{path}", json=json or {})
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        logger.exception("API POST failed: %s", path)
+        return None
+
+
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "*Welcome to PolyScope*\n\n"
@@ -53,6 +65,10 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/divergences — Current counter\\-consensus signals\n"
         "/movers — Biggest probability shifts \\(24h\\)\n"
         "/market <query> — Search market details\n"
+        "/whales — Recent whale trades\n"
+        "/subscribe — Subscribe to whale alerts\n"
+        "/unsubscribe — Stop whale alerts\n"
+        "/threshold <amount> — Set min trade size filter\n"
         "/calibration — Polymarket accuracy summary\n"
         "/accuracy — Signal track record\n"
         "/help — Command list"
@@ -141,6 +157,109 @@ async def market_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
 
 
+async def whales_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show recent whale trades."""
+    data = await _api_get("/api/whale-flow?hours=24&min_size=10000")
+    if not data or not data.get("alerts"):
+        await update.message.reply_text("No whale trades in the last 24h\\." + DISCLAIMER, parse_mode="MarkdownV2")
+        return
+
+    lines = ["*Recent Whale Trades*\n"]
+    for a in data["alerts"][:10]:
+        side_emoji = "🟢" if a["side"] == "YES" else "🔴"
+        q = _esc(str(a.get("question", ""))[:50])
+        size = _esc(f"${a['size']:,.0f}")
+        rank = _esc(f"#{a['trader_rank']}")
+        price = _esc(f"{a['price']:.0%}")
+        lines.append(
+            f"{side_emoji} Trader {rank} bought {size} {a['side']}\n"
+            f"  *{q}*\n"
+            f"  Price: {price}\n"
+        )
+
+    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
+
+
+async def subscribe_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Subscribe to whale alerts."""
+    chat_id = update.effective_chat.id
+    # Store subscription via direct DB access (bot runs in same container)
+    try:
+        from api.database import get_db, save_subscription
+
+        db = await get_db()
+        try:
+            await save_subscription(db, chat_id)
+            await db.commit()
+        finally:
+            await db.close()
+        await update.message.reply_text(
+            "Subscribed to whale alerts\\! You'll get notified when SM traders make large trades\\." + DISCLAIMER,
+            parse_mode="MarkdownV2",
+        )
+    except Exception:
+        logger.exception("subscribe failed")
+        await update.message.reply_text("Failed to subscribe\\. Try again later\\.", parse_mode="MarkdownV2")
+
+
+async def unsubscribe_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Unsubscribe from whale alerts."""
+    chat_id = update.effective_chat.id
+    try:
+        from api.database import get_db, remove_subscription
+
+        db = await get_db()
+        try:
+            await remove_subscription(db, chat_id)
+            await db.commit()
+        finally:
+            await db.close()
+        await update.message.reply_text(
+            "Unsubscribed from whale alerts\\." + DISCLAIMER,
+            parse_mode="MarkdownV2",
+        )
+    except Exception:
+        logger.exception("unsubscribe failed")
+        await update.message.reply_text("Failed to unsubscribe\\. Try again later\\.", parse_mode="MarkdownV2")
+
+
+async def threshold_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Set minimum trade size filter for whale alerts."""
+    if not ctx.args:
+        await update.message.reply_text("Usage: /threshold <amount>\nExample: /threshold 25000")
+        return
+
+    try:
+        amount = float(ctx.args[0])
+        if amount < 0:
+            raise ValueError
+    except (ValueError, IndexError):
+        await update.message.reply_text("Please provide a valid positive number\\.", parse_mode="MarkdownV2")
+        return
+
+    chat_id = update.effective_chat.id
+    try:
+        from api.database import get_db
+
+        db = await get_db()
+        try:
+            await db.execute(
+                "UPDATE bot_subscriptions SET min_trade_size = ? WHERE chat_id = ?",
+                (amount, chat_id),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+        await update.message.reply_text(
+            f"Threshold set to ${_esc(f'{amount:,.0f}')}\\. "
+            f"You'll only get alerts for trades above this size\\." + DISCLAIMER,
+            parse_mode="MarkdownV2",
+        )
+    except Exception:
+        logger.exception("threshold update failed")
+        await update.message.reply_text("Failed to update threshold\\.", parse_mode="MarkdownV2")
+
+
 async def calibration(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = await _api_get("/api/calibration")
     if not data:
@@ -214,12 +333,63 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/divergences — Counter\\-consensus signals\n"
         "/movers — Biggest probability shifts\n"
         "/market <query> — Search markets\n"
+        "/whales — Recent whale trades\n"
+        "/subscribe — Subscribe to whale alerts\n"
+        "/unsubscribe — Stop whale alerts\n"
+        "/threshold <amount> — Min trade size filter\n"
         "/calibration — Accuracy dashboard\n"
         "/accuracy — Signal track record\n"
         "/help — This message"
         + DISCLAIMER,
         parse_mode="MarkdownV2",
     )
+
+
+async def alert_loop(app: Application):
+    """Background task: push whale alerts to subscribed chats."""
+    while True:
+        try:
+            data = await _api_get("/api/whale-flow/pending")
+            if data and data.get("alerts"):
+                from api.database import get_active_subscriptions, get_db, mark_alerts_notified
+
+                db = await get_db()
+                try:
+                    subs = await get_active_subscriptions(db)
+                    if subs:
+                        for alert in data["alerts"]:
+                            side_emoji = "🟢" if alert["side"] == "YES" else "🔴"
+                            size_str = _esc(f"${alert['size']:,.0f}")
+                            price_str = _esc(f"{alert['price']:.0%}")
+                            rank_str = _esc(str(alert["trader_rank"]))
+                            q_str = _esc(str(alert.get("question", ""))[:60])
+                            msg = (
+                                f"{side_emoji} *Whale Alert*\n"
+                                f"Trader \\#{rank_str} bought "
+                                f"{size_str} {alert['side']} on\n"
+                                f"*{q_str}*\n"
+                                f"Price: {price_str}"
+                            )
+                            for sub in subs:
+                                if alert["size"] >= sub.get("min_trade_size", 10000):
+                                    try:
+                                        await app.bot.send_message(
+                                            chat_id=sub["chat_id"],
+                                            text=msg + DISCLAIMER,
+                                            parse_mode="MarkdownV2",
+                                        )
+                                    except Exception:
+                                        logger.warning("Failed to send alert to chat %s", sub["chat_id"])
+
+                        alert_ids = [a["id"] for a in data["alerts"]]
+                        await mark_alerts_notified(db, alert_ids)
+                        await db.commit()
+                finally:
+                    await db.close()
+        except Exception:
+            logger.exception("alert_loop error")
+
+        await asyncio.sleep(60)
 
 
 def main():
@@ -232,9 +402,19 @@ def main():
     app.add_handler(CommandHandler("divergences", divergences))
     app.add_handler(CommandHandler("movers", movers))
     app.add_handler(CommandHandler("market", market_search))
+    app.add_handler(CommandHandler("whales", whales_cmd))
+    app.add_handler(CommandHandler("subscribe", subscribe_cmd))
+    app.add_handler(CommandHandler("unsubscribe", unsubscribe_cmd))
+    app.add_handler(CommandHandler("threshold", threshold_cmd))
     app.add_handler(CommandHandler("calibration", calibration))
     app.add_handler(CommandHandler("accuracy", accuracy))
     app.add_handler(CommandHandler("help", help_cmd))
+
+    # Start alert loop as post_init
+    async def post_init(application: Application):
+        asyncio.create_task(alert_loop(application))
+
+    app.post_init = post_init
 
     logger.info("PolyScope bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

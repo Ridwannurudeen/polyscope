@@ -5,8 +5,10 @@ import pytest
 import aiosqlite
 
 from api.database import (
-    init_db,
+    expire_converged_signals,
+    get_expired_signal_count,
     get_signal_accuracy,
+    init_db,
     save_divergence_signal,
     save_resolved_market,
     update_signal_outcomes,
@@ -28,6 +30,10 @@ async def db(tmp_path, monkeypatch):
 
     conn = await aiosqlite.connect(str(test_db))
     await conn.executescript(SCHEMA)
+    # Add migration columns
+    await conn.execute("ALTER TABLE divergence_signals ADD COLUMN expired INTEGER DEFAULT 0")
+    await conn.execute("ALTER TABLE divergence_signals ADD COLUMN expired_at TEXT")
+    await conn.execute("ALTER TABLE divergence_signals ADD COLUMN signal_source TEXT DEFAULT 'positions'")
     await conn.commit()
     conn.row_factory = aiosqlite.Row
     yield conn
@@ -89,6 +95,7 @@ async def test_update_signal_outcomes_correct(db):
         "sm_direction": "YES",
         "question": "Test?",
         "category": "crypto",
+        "signal_source": "positions",
     }
     await save_divergence_signal(db, signal)
     await db.commit()
@@ -119,6 +126,7 @@ async def test_update_signal_outcomes_incorrect(db):
         "sm_direction": "YES",
         "question": "Test?",
         "category": "crypto",
+        "signal_source": "positions",
     }
     await save_divergence_signal(db, signal)
     await db.commit()
@@ -149,6 +157,7 @@ async def test_update_signal_outcomes_no_direction_correct(db):
         "sm_direction": "NO",
         "question": "Test?",
         "category": "sports",
+        "signal_source": "positions",
     }
     await save_divergence_signal(db, signal)
     await db.commit()
@@ -188,8 +197,8 @@ async def test_get_signal_accuracy_populated(db):
             """INSERT INTO divergence_signals
                (market_id, timestamp, market_price, sm_consensus, divergence_pct,
                 signal_strength, sm_trader_count, sm_direction, question, category,
-                resolved, outcome_correct)
-               VALUES (?, datetime('now'), 0.5, 0.8, 0.3, ?, 3, ?, 'Test', 'crypto', 1, ?)""",
+                resolved, outcome_correct, expired, signal_source)
+               VALUES (?, datetime('now'), 0.5, 0.8, 0.3, ?, 3, ?, 'Test', 'crypto', 1, ?, 0, 'positions')""",
             (mid, score, direction, correct),
         )
     await db.commit()
@@ -205,3 +214,100 @@ async def test_get_signal_accuracy_populated(db):
     assert stats["by_tier"]["medium"]["correct"] == 0
     assert stats["by_tier"]["low"]["total"] == 1
     assert stats["by_tier"]["low"]["correct"] == 1
+
+
+@pytest.mark.anyio
+async def test_expire_converged_signals(db):
+    """Signals should be expired when divergence drops below threshold."""
+    # Insert an active unresolved signal
+    signal = {
+        "market_id": "m-expire",
+        "timestamp": "2026-03-29T12:00:00Z",
+        "market_price": 0.50,
+        "sm_consensus": 0.80,
+        "divergence_pct": 0.30,
+        "score": 70.0,
+        "sm_trader_count": 5,
+        "sm_direction": "YES",
+        "question": "Expire test?",
+        "category": "crypto",
+        "signal_source": "positions",
+    }
+    await save_divergence_signal(db, signal)
+    await db.commit()
+
+    # Current divergence is below threshold — should expire
+    await expire_converged_signals(db, {"m-expire": 0.03}, threshold=0.05)
+    await db.commit()
+
+    cursor = await db.execute(
+        "SELECT expired, expired_at FROM divergence_signals WHERE market_id = ?",
+        ("m-expire",),
+    )
+    row = await cursor.fetchone()
+    assert row[0] == 1  # expired
+    assert row[1] is not None  # expired_at set
+
+
+@pytest.mark.anyio
+async def test_expire_does_not_touch_resolved(db):
+    """Already resolved signals should not be expired."""
+    await db.execute(
+        """INSERT INTO divergence_signals
+           (market_id, timestamp, market_price, sm_consensus, divergence_pct,
+            signal_strength, sm_trader_count, sm_direction, question, category,
+            resolved, outcome_correct, expired, signal_source)
+           VALUES ('m-resolved', datetime('now'), 0.5, 0.8, 0.3, 70, 3, 'YES',
+                   'Test', 'crypto', 1, 1, 0, 'positions')""",
+    )
+    await db.commit()
+
+    await expire_converged_signals(db, {"m-resolved": 0.02}, threshold=0.05)
+    await db.commit()
+
+    cursor = await db.execute(
+        "SELECT expired FROM divergence_signals WHERE market_id = ?",
+        ("m-resolved",),
+    )
+    row = await cursor.fetchone()
+    assert row[0] == 0  # should NOT be expired (already resolved)
+
+
+@pytest.mark.anyio
+async def test_expired_signals_excluded_from_accuracy(db):
+    """Expired signals should not count toward accuracy stats."""
+    # Insert a correct expired signal and a correct non-expired signal
+    for mid, expired in [("m-exp", 1), ("m-active", 0)]:
+        await db.execute(
+            """INSERT INTO divergence_signals
+               (market_id, timestamp, market_price, sm_consensus, divergence_pct,
+                signal_strength, sm_trader_count, sm_direction, question, category,
+                resolved, outcome_correct, expired, signal_source)
+               VALUES (?, datetime('now'), 0.5, 0.8, 0.3, 70, 3, 'YES',
+                       'Test', 'crypto', 1, 1, ?, 'positions')""",
+            (mid, expired),
+        )
+    await db.commit()
+
+    stats = await get_signal_accuracy(db)
+    # Only m-active should count
+    assert stats["overall"]["total_signals"] == 1
+    assert stats["overall"]["correct"] == 1
+
+
+@pytest.mark.anyio
+async def test_get_expired_signal_count(db):
+    for mid, expired in [("e1", 1), ("e2", 1), ("e3", 0)]:
+        await db.execute(
+            """INSERT INTO divergence_signals
+               (market_id, timestamp, market_price, sm_consensus, divergence_pct,
+                signal_strength, sm_trader_count, sm_direction, question, category,
+                expired, signal_source)
+               VALUES (?, datetime('now'), 0.5, 0.8, 0.3, 50, 3, 'YES',
+                       'Test', 'crypto', ?, 'positions')""",
+            (mid, expired),
+        )
+    await db.commit()
+
+    count = await get_expired_signal_count(db)
+    assert count == 2

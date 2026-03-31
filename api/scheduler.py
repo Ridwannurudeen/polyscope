@@ -13,10 +13,15 @@ from polyscope.polymarket import PolymarketClient
 
 from .cache import cache
 from .database import (
+    expire_converged_signals,
+    get_category_weights,
     get_db,
+    rebuild_trader_category_stats,
     save_divergence_signal,
     save_resolved_market,
+    save_sm_trades,
     save_snapshot,
+    save_whale_alert,
     update_signal_outcomes,
 )
 
@@ -26,6 +31,7 @@ logger = logging.getLogger(__name__)
 _client: PolymarketClient | None = None
 _traders: dict[str, Trader] = {}
 _divergence_config = DivergenceConfig()
+_category_weights: dict[str, dict[str, float]] = {}
 
 
 def get_client() -> PolymarketClient:
@@ -73,7 +79,13 @@ async def fetch_leaderboard_job():
 
 
 async def compute_divergences_job():
-    """Run divergence scoring across all active markets."""
+    """Run divergence scoring across all active markets.
+
+    Two-pass approach:
+    1. Position scan all markets (fast)
+    2. For candidates with high divergence or volume, fetch recent trades
+       and recompute with trade-weighted consensus
+    """
     client = get_client()
     markets = cache.get("markets")
     if not markets:
@@ -89,22 +101,24 @@ async def compute_divergences_job():
     now = datetime.now(timezone.utc).isoformat()
     total_sm_matches = 0
     markets_with_sm = 0
+    divergences_map: dict[str, float] = {}
+
+    # Track candidates for trade-based pass
+    trade_candidates = []
 
     try:
-        # For each market, fetch SM positions and compute divergence
-        trader_addresses = list(_traders.keys())
+        # ── Pass 1: Position-based scan ──
+        trader_addresses = set(_traders.keys())
 
         for market in markets:
             if not market.condition_id or market.price_yes <= 0:
                 continue
 
-            # Fetch positions for this market from top traders
             positions = []
             try:
                 market_positions = await client.get_market_positions(
                     market.condition_id, limit=200
                 )
-                # Filter to only SM traders
                 positions = [
                     p for p in market_positions if p.trader_address in _traders
                 ]
@@ -114,22 +128,33 @@ async def compute_divergences_job():
             except Exception:
                 continue
 
-            signal = compute_divergence(market, positions, _traders, _divergence_config)
+            signal = compute_divergence(
+                market, positions, _traders, _divergence_config,
+                category_weights=_category_weights,
+            )
             if positions and not signal and len(positions) >= 1:
-                # Debug: log near-misses
                 from polyscope.divergence import _weighted_consensus
                 sm_c = _weighted_consensus(positions, _traders)
                 if sm_c is not None:
                     div = abs(market.price_yes - sm_c)
+                    divergences_map[market.condition_id] = div
                     if div > 0.05:
                         logger.debug(
                             "Near-miss: %s | price=%.2f sm=%.2f div=%.2f traders=%d",
                             market.question[:40], market.price_yes, sm_c, div, len(positions),
                         )
+
             if signal:
+                divergences_map[market.condition_id] = signal.divergence_pct
                 signals.append(signal)
                 signal_dict = asdict(signal)
                 await save_divergence_signal(db, signal_dict)
+
+                # Mark as candidate for trade-based refinement
+                if signal.divergence_pct > 0.05 or market.volume_24h > 100000:
+                    trade_candidates.append((market, positions))
+            elif market.volume_24h > 100000 and positions:
+                trade_candidates.append((market, positions))
 
             # Save snapshot
             snapshot = {
@@ -146,18 +171,68 @@ async def compute_divergences_job():
             }
             await save_snapshot(db, snapshot)
 
-            # Rate limit: small delay between markets
             await asyncio.sleep(0.1)
+
+        # ── Pass 2: Trade-based refinement for candidates (max ~80) ──
+        for market, positions in trade_candidates[:80]:
+            try:
+                sm_trades = await client.get_sm_recent_trades(
+                    market.condition_id, trader_addresses, hours=48
+                )
+                if len(sm_trades) >= 2:
+                    # Save trades for historical reference
+                    trade_dicts = [
+                        {
+                            "trader_address": t.trader_address,
+                            "market_id": t.market_id,
+                            "side": t.side,
+                            "size": t.size,
+                            "price": t.price,
+                            "trade_timestamp": t.timestamp,
+                        }
+                        for t in sm_trades
+                    ]
+                    await save_sm_trades(db, trade_dicts)
+
+                    # Recompute with trade data
+                    trade_signal = compute_divergence(
+                        market, positions, _traders, _divergence_config,
+                        trades=sm_trades,
+                        category_weights=_category_weights,
+                    )
+                    if trade_signal and trade_signal.signal_source == "trades":
+                        # Replace position-based signal if trade-based is stronger
+                        existing = next(
+                            (s for s in signals if s.market_id == market.condition_id),
+                            None,
+                        )
+                        if existing:
+                            if trade_signal.score > existing.score:
+                                signals.remove(existing)
+                                signals.append(trade_signal)
+                                await save_divergence_signal(db, asdict(trade_signal))
+                        else:
+                            signals.append(trade_signal)
+                            await save_divergence_signal(db, asdict(trade_signal))
+                            divergences_map[market.condition_id] = trade_signal.divergence_pct
+
+                await asyncio.sleep(0.2)
+            except Exception:
+                continue
+
+        # ── Expire converged signals ──
+        await expire_converged_signals(db, divergences_map)
 
         await db.commit()
         cache.set("divergences", signals, ttl_seconds=600)
         logger.info(
             "Divergence scan complete: %d signals from %d markets "
-            "(%d markets with SM positions, %d total SM matches)",
+            "(%d markets with SM positions, %d total SM matches, %d trade candidates)",
             len(signals),
             len(markets),
             markets_with_sm,
             total_sm_matches,
+            len(trade_candidates),
         )
     except Exception:
         logger.exception("compute_divergences_job failed")
@@ -191,6 +266,8 @@ async def detect_movers_job():
 
 async def track_outcomes_job():
     """Fetch closed markets, determine outcomes, update signal accuracy."""
+    global _category_weights
+
     from polyscope.calibration import brier_score
     from polyscope.polymarket import PolymarketClient
 
@@ -213,8 +290,6 @@ async def track_outcomes_job():
                 if not market_id:
                     continue
 
-                # Use last trade price for Brier score (pre-resolution prediction)
-                # Resolved price (0 or 1) gives trivial Brier=0 — meaningless
                 last_trade = float(raw.get("lastTradePrice", 0) or 0)
                 final_price = last_trade if last_trade > 0 else _resolved_price
                 bs = brier_score(final_price, outcome)
@@ -240,10 +315,88 @@ async def track_outcomes_job():
             if len(batch) < 100:
                 break
 
+        # Rebuild category stats after processing outcomes
+        await rebuild_trader_category_stats(db)
+        _category_weights = await get_category_weights(db)
+
         await db.commit()
-        logger.info("Outcome tracking complete: %d resolved markets saved", saved)
+        logger.info(
+            "Outcome tracking complete: %d resolved markets saved, %d category weights loaded",
+            saved,
+            sum(len(v) for v in _category_weights.values()),
+        )
     except Exception:
         logger.exception("track_outcomes_job failed")
+    finally:
+        await db.close()
+
+
+async def detect_whale_trades_job():
+    """Detect large SM trades (>= $10K) on top markets."""
+    client = get_client()
+    markets = cache.get("markets")
+    if not markets or not _traders:
+        return
+
+    db = await get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    trader_addresses = set(_traders.keys())
+    new_alerts = 0
+
+    try:
+        # Top 50 markets by volume
+        sorted_markets = sorted(markets, key=lambda m: m.volume_24h, reverse=True)[:50]
+
+        for market in sorted_markets:
+            if not market.condition_id:
+                continue
+
+            try:
+                trades = await client.get_sm_recent_trades(
+                    market.condition_id, trader_addresses, hours=2
+                )
+
+                for trade in trades:
+                    if trade.size < 10000:
+                        continue
+
+                    trader = _traders.get(trade.trader_address)
+                    if not trader:
+                        continue
+
+                    # Dedupe: check if we already have this alert
+                    cursor = await db.execute(
+                        """SELECT COUNT(*) FROM whale_alerts
+                           WHERE trader_address = ? AND market_id = ?
+                                 AND trade_timestamp = ?""",
+                        (trade.trader_address, trade.market_id, trade.timestamp),
+                    )
+                    row = await cursor.fetchone()
+                    if row[0] > 0:
+                        continue
+
+                    await save_whale_alert(db, {
+                        "trader_address": trade.trader_address,
+                        "trader_rank": trader.rank,
+                        "market_id": market.condition_id,
+                        "question": market.question,
+                        "side": trade.side,
+                        "size": trade.size,
+                        "price": trade.price,
+                        "trade_timestamp": trade.timestamp,
+                        "detected_at": now,
+                    })
+                    new_alerts += 1
+
+                await asyncio.sleep(0.2)
+            except Exception:
+                continue
+
+        await db.commit()
+        if new_alerts:
+            logger.info("Whale detection: %d new alerts", new_alerts)
+    except Exception:
+        logger.exception("detect_whale_trades_job failed")
     finally:
         await db.close()
 

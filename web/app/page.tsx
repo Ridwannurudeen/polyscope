@@ -7,6 +7,7 @@ import { ScoreBadge } from "@/components/score-badge";
 import { SignalTrackRecord } from "@/components/signal-track-record";
 import { DashboardSkeleton } from "@/components/skeleton";
 import { StatCard } from "@/components/stat-card";
+import { WhaleFlow } from "@/components/whale-flow";
 import { usePollingFetch } from "@/lib/hooks";
 import type { ScanResult, DivergenceSignal, MarketMover } from "@/lib/api";
 
@@ -166,6 +167,9 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      {/* Whale Flow */}
+      <WhaleFlow />
 
       {/* Market Movers */}
       <section className="mb-10">

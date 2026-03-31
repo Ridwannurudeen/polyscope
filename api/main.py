@@ -11,12 +11,26 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .cache import cache
-from .database import get_db, get_divergence_history, get_divergence_signals, get_resolved_markets, get_signal_accuracy, get_signal_pnl_simulation, get_signal_history_for_market, init_db
+from .database import (
+    get_db,
+    get_divergence_history,
+    get_divergence_signals,
+    get_expired_signal_count,
+    get_pending_whale_alerts,
+    get_resolved_markets,
+    get_signal_accuracy,
+    get_signal_pnl_simulation,
+    get_signal_history_for_market,
+    get_whale_alerts,
+    init_db,
+    mark_alerts_notified,
+)
 from .scheduler import (
     cleanup_job,
     close_client,
     compute_divergences_job,
     detect_movers_job,
+    detect_whale_trades_job,
     fetch_leaderboard_job,
     fetch_markets_job,
     track_outcomes_job,
@@ -50,6 +64,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(compute_divergences_job, "interval", minutes=5, id="compute_divergences")
     scheduler.add_job(detect_movers_job, "interval", minutes=5, id="detect_movers")
     scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes")
+    scheduler.add_job(detect_whale_trades_job, "interval", minutes=2, id="detect_whales")
     scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
     scheduler.start()
 
@@ -74,7 +89,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="PolyScope",
     description="Counter-consensus intelligence for Polymarket",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -95,7 +110,7 @@ DISCLAIMER = (
 
 @app.get("/")
 async def root():
-    return {"name": "PolyScope", "version": "0.1.0", "disclaimer": DISCLAIMER}
+    return {"name": "PolyScope", "version": "0.3.0", "disclaimer": DISCLAIMER}
 
 
 @app.get("/api/scan/latest")
@@ -135,6 +150,13 @@ async def get_divergences():
     """Current counter-consensus signals."""
     divergences = cache.get("divergences")
     source = "cache"
+
+    db = await get_db()
+    try:
+        expired_count = await get_expired_signal_count(db)
+    finally:
+        await db.close()
+
     if divergences is None:
         db = await get_db()
         try:
@@ -142,6 +164,7 @@ async def get_divergences():
             return {
                 "signals": rows,
                 "count": len(rows),
+                "expired_count": expired_count,
                 "source": "db_fallback",
                 "disclaimer": DISCLAIMER,
             }
@@ -151,6 +174,7 @@ async def get_divergences():
     return {
         "signals": [asdict(d) for d in divergences],
         "count": len(divergences),
+        "expired_count": expired_count,
         "source": source,
         "disclaimer": DISCLAIMER,
     }
@@ -388,3 +412,35 @@ async def list_events(limit: int = Query(20, le=50)):
 
     events.sort(key=lambda e: e["total_volume"], reverse=True)
     return {"events": events[:limit], "total": len(events)}
+
+
+# ── Whale Flow Endpoints ───────────────────────────────────
+
+
+@app.get("/api/whale-flow")
+async def whale_flow(
+    hours: int = Query(24, ge=1, le=168),
+    min_size: float = Query(10000, ge=0),
+):
+    """Recent whale trade alerts."""
+    db = await get_db()
+    try:
+        alerts = await get_whale_alerts(db, hours=hours, min_size=min_size)
+        return {
+            "alerts": alerts,
+            "count": len(alerts),
+            "disclaimer": DISCLAIMER,
+        }
+    finally:
+        await db.close()
+
+
+@app.get("/api/whale-flow/pending")
+async def whale_flow_pending():
+    """Unnotified whale alerts (internal, for bot)."""
+    db = await get_db()
+    try:
+        alerts = await get_pending_whale_alerts(db)
+        return {"alerts": alerts, "count": len(alerts)}
+    finally:
+        await db.close()

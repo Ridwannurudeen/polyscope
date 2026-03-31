@@ -18,7 +18,21 @@ export interface DivergenceSignal {
   sm_trader_count: number;
   sm_direction: string;
   category: string;
+  signal_source: string;
   timestamp: string;
+}
+
+export interface WhaleAlert {
+  id: number;
+  trader_address: string;
+  trader_rank: number;
+  market_id: string;
+  question: string;
+  side: string;
+  size: number;
+  price: number;
+  trade_timestamp: string;
+  detected_at: string;
 }
 
 export interface MarketMover {

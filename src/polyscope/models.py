@@ -47,6 +47,16 @@ class Position:
 
 
 @dataclass
+class Trade:
+    trader_address: str
+    market_id: str
+    side: str  # "YES" or "NO"
+    size: float
+    price: float
+    timestamp: str
+
+
+@dataclass
 class DivergenceSignal:
     market_id: str
     question: str
@@ -57,6 +67,7 @@ class DivergenceSignal:
     sm_trader_count: int
     sm_direction: str  # "YES" or "NO" — what smart money favors
     category: str = ""
+    signal_source: str = "positions"  # "positions" or "trades"
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
