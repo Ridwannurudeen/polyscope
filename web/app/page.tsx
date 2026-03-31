@@ -10,9 +10,26 @@ import { StatCard } from "@/components/stat-card";
 import { usePollingFetch } from "@/lib/hooks";
 import type { ScanResult, DivergenceSignal, MarketMover } from "@/lib/api";
 
+interface EventCluster {
+  title: string;
+  market_count: number;
+  total_volume: number;
+  divergence_signals: number;
+  avg_divergence: number;
+  markets: { condition_id: string; question: string; price_yes: number }[];
+}
+interface EventsResponse {
+  events: EventCluster[];
+  total: number;
+}
+
 export default function Dashboard() {
   const { data, loading, error, lastUpdated, retry } =
     usePollingFetch<ScanResult>("/api/scan/latest", 60_000);
+  const { data: eventsData } = usePollingFetch<EventsResponse>(
+    "/api/events?limit=5",
+    120_000
+  );
 
   if (loading) {
     return <DashboardSkeleton />;
@@ -198,6 +215,47 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      {/* Event Clusters */}
+      {eventsData && eventsData.events.length > 0 && (
+        <section className="mb-10">
+          <h2 className="text-xl font-semibold text-white mb-4">
+            Event Clusters
+          </h2>
+          <div className="space-y-3">
+            {eventsData.events.map((e) => (
+              <div
+                key={e.title}
+                className="bg-gray-900 border border-gray-800 rounded-xl p-4"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white font-medium truncate">{e.title}</p>
+                    <div className="flex items-center gap-4 mt-2 text-sm">
+                      <span className="text-gray-400">
+                        {e.market_count} markets
+                      </span>
+                      <span className="text-gray-400">
+                        Vol: ${e.total_volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                      {e.divergence_signals > 0 && (
+                        <span className="text-amber-400">
+                          {e.divergence_signals} divergence{e.divergence_signals > 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {e.avg_divergence > 0 && (
+                    <span className="text-lg font-bold text-amber-400">
+                      {(e.avg_divergence * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <Disclaimer />
     </div>

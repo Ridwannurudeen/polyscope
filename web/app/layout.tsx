@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import Link from "next/link";
 import "./globals.css";
+import { MobileNav } from "@/components/mobile-nav";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -18,6 +19,20 @@ export const metadata: Metadata = {
   title: "PolyScope — Counter-Consensus Intelligence",
   description:
     "See what smart money sees, before the crowd catches up. Prediction market intelligence powered by divergence detection.",
+  openGraph: {
+    title: "PolyScope — Counter-Consensus Intelligence",
+    description:
+      "See what smart money sees, before the crowd catches up. Prediction market intelligence powered by divergence detection.",
+    url: "https://polyscope.gudman.xyz",
+    siteName: "PolyScope",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "PolyScope — Counter-Consensus Intelligence",
+    description:
+      "Counter-consensus intelligence for Polymarket. Divergence detection powered by smart money tracking.",
+  },
 };
 
 const NAV_ITEMS = [
@@ -25,6 +40,7 @@ const NAV_ITEMS = [
   { href: "/markets", label: "Markets" },
   { href: "/smart-money", label: "Smart Money" },
   { href: "/calibration", label: "Calibration" },
+  { href: "/api/docs", label: "API", external: true },
 ];
 
 export default function RootLayout({
@@ -46,17 +62,30 @@ export default function RootLayout({
                   BETA
                 </span>
               </Link>
-              <div className="flex items-center gap-1">
-                {NAV_ITEMS.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className="px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
-                  >
-                    {item.label}
-                  </Link>
-                ))}
+              <div className="hidden md:flex items-center gap-1">
+                {NAV_ITEMS.map((item) =>
+                  item.external ? (
+                    <a
+                      key={item.href}
+                      href={item.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+                    >
+                      {item.label}
+                    </a>
+                  ) : (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className="px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+                    >
+                      {item.label}
+                    </Link>
+                  )
+                )}
               </div>
+              <MobileNav items={NAV_ITEMS} />
             </div>
           </div>
         </nav>

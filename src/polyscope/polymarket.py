@@ -132,14 +132,17 @@ class PolymarketClient:
             return []
         traders = []
         for i, t in enumerate(data):
+            profit = self._float(t.get("pnl", t.get("profit", 0)))
+            volume = self._float(t.get("vol", t.get("volume", 0)))
             traders.append(
                 Trader(
                     address=t.get("proxyWallet", t.get("userAddress", t.get("address", ""))),
                     rank=int(t.get("rank", i + 1)),
-                    profit=self._float(t.get("pnl", t.get("profit", 0))),
-                    volume=self._float(t.get("vol", t.get("volume", 0))),
+                    profit=profit,
+                    volume=volume,
                     markets_traded=int(t.get("marketsTraded", t.get("numMarkets", 0))),
                     name=t.get("userName", t.get("displayName", "")),
+                    alpha_ratio=profit / max(volume, 1),
                 )
             )
         return traders

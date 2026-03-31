@@ -128,6 +128,9 @@ def _weighted_consensus(
             continue
 
         weight = 1.0 / trader.rank
+        # Boost weight by alpha ratio (profit/volume) — true alpha traders matter more
+        alpha_ratio = trader.profit / max(trader.volume, 1)
+        weight *= 1.0 + alpha_ratio * 100
         # Scale weight by position size (log scale to avoid one whale dominating)
         if pos.size > 0:
             import math

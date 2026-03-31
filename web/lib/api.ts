@@ -51,6 +51,7 @@ export interface Trader {
   volume: number;
   markets_traded: number;
   name: string;
+  alpha_ratio: number;
 }
 
 export interface CalibrationBucket {
@@ -82,6 +83,13 @@ export interface SignalAccuracyTier {
   win_rate: number;
 }
 
+export interface PnlSimulation {
+  total_wagered: number;
+  total_return: number;
+  roi_pct: number;
+  avg_odds_on_hits: number;
+}
+
 export interface SignalAccuracy {
   overall: {
     total_signals: number;
@@ -95,4 +103,5 @@ export interface SignalAccuracy {
     low: SignalAccuracyTier;
   };
   rolling_30d: SignalAccuracyTier;
+  simulation?: PnlSimulation;
 }

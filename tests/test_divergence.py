@@ -24,8 +24,8 @@ def _make_market(**kwargs) -> Market:
     return Market(**defaults)
 
 
-def _make_trader(address: str, rank: int, profit: float = 10000) -> Trader:
-    return Trader(address=address, rank=rank, profit=profit)
+def _make_trader(address: str, rank: int, profit: float = 10000, volume: float = 100000) -> Trader:
+    return Trader(address=address, rank=rank, profit=profit, volume=volume, alpha_ratio=profit / max(volume, 1))
 
 
 def _make_position(
@@ -108,6 +108,24 @@ class TestWeightedConsensus:
 
     def test_empty_positions(self):
         assert _weighted_consensus([], {}) is None
+
+    def test_alpha_ratio_boosts_high_alpha_traders(self):
+        """High alpha (profit/volume) traders should get more weight."""
+        # Trader A: rank 5, high alpha (40% profit/volume)
+        # Trader B: rank 5, low alpha (0.2% profit/volume)
+        traders = {
+            "0xA": Trader(address="0xA", rank=5, profit=200000, volume=500000),
+            "0xB": Trader(address="0xB", rank=5, profit=1000, volume=500000),
+        }
+        # A says YES, B says NO — A should dominate due to higher alpha
+        positions = [
+            _make_position("0xA", "mkt", "YES", avg_price=0.80),
+            _make_position("0xB", "mkt", "NO", avg_price=0.80),
+        ]
+        consensus = _weighted_consensus(positions, traders)
+        assert consensus is not None
+        # Should lean YES because trader A has much higher alpha
+        assert consensus > 0.5
 
 
 class TestComputeDivergence:

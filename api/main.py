@@ -11,7 +11,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .cache import cache
-from .database import get_db, get_divergence_history, get_divergence_signals, get_resolved_markets, get_signal_accuracy, init_db
+from .database import get_db, get_divergence_history, get_divergence_signals, get_resolved_markets, get_signal_accuracy, get_signal_pnl_simulation, get_signal_history_for_market, init_db
 from .scheduler import (
     cleanup_job,
     close_client,
@@ -74,8 +74,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="PolyScope",
     description="Counter-consensus intelligence for Polymarket",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
 )
 
 app.add_middleware(
@@ -224,10 +226,18 @@ async def get_market(condition_id: str):
         price_history = await client.get_price_history(condition_id)
         cache.set(cache_key, price_history, ttl_seconds=300)
 
+    # Get signal history from DB
+    db = await get_db()
+    try:
+        signal_history = await get_signal_history_for_market(db, condition_id)
+    finally:
+        await db.close()
+
     return {
         "market": asdict(market),
         "divergence": asdict(signal) if signal else None,
         "price_history": price_history[:100],
+        "signal_history": signal_history,
     }
 
 
@@ -291,10 +301,12 @@ async def calibration_overview():
 
 @app.get("/api/signals/accuracy")
 async def signals_accuracy():
-    """Signal track record — win rates by tier and rolling 30-day."""
+    """Signal track record — win rates by tier, rolling 30-day, and simulated P&L."""
     db = await get_db()
     try:
         stats = await get_signal_accuracy(db)
+        simulation = await get_signal_pnl_simulation(db)
+        stats["simulation"] = simulation
         return stats
     finally:
         await db.close()
@@ -331,3 +343,48 @@ async def calibration_by_category(category: str):
         "calibration": [asdict(b) for b in compute_calibration(markets)],
         "total_resolved": len(markets),
     }
+
+
+@app.get("/api/events")
+async def list_events(limit: int = Query(20, le=50)):
+    """Group markets by event — aggregate SM sentiment per event cluster."""
+    markets_list = cache.get("markets") or []
+    divergences = cache.get("divergences") or []
+
+    # Build divergence lookup
+    div_map = {d.market_id: d for d in divergences}
+
+    # Group by question prefix (first 40 chars) as a heuristic
+    from collections import defaultdict
+
+    groups: dict[str, list] = defaultdict(list)
+    for m in markets_list:
+        prefix = m.question[:40].rsplit(" ", 1)[0] if len(m.question) > 40 else m.question
+        groups[prefix].append(m)
+
+    # Only keep groups with 2+ markets (actual event clusters)
+    events = []
+    for title, mkts in groups.items():
+        if len(mkts) < 2:
+            continue
+        total_vol = sum(m.volume_24h for m in mkts)
+        div_signals = [div_map[m.condition_id] for m in mkts if m.condition_id in div_map]
+        avg_div = (
+            sum(d.divergence_pct for d in div_signals) / len(div_signals)
+            if div_signals
+            else 0
+        )
+        events.append({
+            "title": title,
+            "market_count": len(mkts),
+            "total_volume": round(total_vol, 2),
+            "divergence_signals": len(div_signals),
+            "avg_divergence": round(avg_div, 4),
+            "markets": [
+                {"condition_id": m.condition_id, "question": m.question, "price_yes": m.price_yes}
+                for m in mkts[:5]
+            ],
+        })
+
+    events.sort(key=lambda e: e["total_volume"], reverse=True)
+    return {"events": events[:limit], "total": len(events)}

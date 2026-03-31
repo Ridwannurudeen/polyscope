@@ -33,6 +33,7 @@ class Trader:
     volume: float = 0.0
     markets_traded: int = 0
     name: str = ""
+    alpha_ratio: float = 0.0
 
 
 @dataclass

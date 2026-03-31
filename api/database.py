@@ -326,3 +326,78 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
     }
 
     return {"overall": overall, "by_tier": by_tier, "rolling_30d": rolling_30d}
+
+
+async def get_signal_pnl_simulation(db: aiosqlite.Connection) -> dict:
+    """Simulate P&L if $100 was bet on each best-per-market signal.
+
+    If SM said YES at market price 30% and outcome=YES: profit = (1/0.30 - 1) * 100
+    If wrong: loss = -100
+    """
+    cursor = await db.execute(
+        """WITH best AS (
+               SELECT market_id,
+                      MAX(signal_strength) AS signal_strength,
+                      market_price,
+                      sm_consensus,
+                      sm_direction,
+                      outcome_correct
+               FROM divergence_signals
+               WHERE resolved = 1 AND outcome_correct IS NOT NULL
+               GROUP BY market_id
+           )
+           SELECT market_price, sm_direction, outcome_correct
+           FROM best"""
+    )
+    rows = await cursor.fetchall()
+    if not rows:
+        return {"total_wagered": 0, "total_return": 0, "roi_pct": 0, "avg_odds_on_hits": 0}
+
+    total_wagered = 0.0
+    total_return = 0.0
+    hit_odds = []
+    for r in rows:
+        price = r[0]
+        direction = r[1]
+        correct = r[2]
+        total_wagered += 100
+
+        # Odds based on buying the SM-favored side
+        if direction == "YES":
+            buy_price = max(price, 0.01)
+        else:
+            buy_price = max(1.0 - price, 0.01)
+
+        if correct == 1:
+            payout = (1.0 / buy_price) * 100
+            total_return += payout
+            hit_odds.append(1.0 / buy_price)
+        else:
+            total_return += 0  # total loss
+
+    roi_pct = ((total_return - total_wagered) / max(total_wagered, 1)) * 100
+    avg_odds = sum(hit_odds) / len(hit_odds) if hit_odds else 0
+
+    return {
+        "total_wagered": round(total_wagered, 2),
+        "total_return": round(total_return, 2),
+        "roi_pct": round(roi_pct, 2),
+        "avg_odds_on_hits": round(avg_odds, 2),
+    }
+
+
+async def get_signal_history_for_market(
+    db: aiosqlite.Connection, market_id: str, limit: int = 10
+) -> list[dict]:
+    """Get recent divergence signals for a specific market."""
+    cursor = await db.execute(
+        """SELECT timestamp, market_price, sm_consensus, divergence_pct,
+                  signal_strength, sm_trader_count, sm_direction,
+                  resolved, outcome_correct
+           FROM divergence_signals
+           WHERE market_id = ?
+           ORDER BY timestamp DESC LIMIT ?""",
+        (market_id, limit),
+    )
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]

@@ -139,7 +139,7 @@ export default function SmartMoneyPage() {
           <h2 className="text-xl font-semibold text-white mb-4">
             Resolved Signals
           </h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
@@ -194,7 +194,7 @@ export default function SmartMoneyPage() {
         <h2 className="text-xl font-semibold text-white mb-4">
           Top Traders by Profit
         </h2>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
@@ -202,32 +202,45 @@ export default function SmartMoneyPage() {
                 <th className="text-left p-3">Trader</th>
                 <th className="text-right p-3">Profit</th>
                 <th className="text-right p-3">Volume</th>
+                <th className="text-right p-3">Alpha</th>
               </tr>
             </thead>
             <tbody>
-              {traders.slice(0, 50).map((t) => (
-                <tr
-                  key={t.address}
-                  className="border-b border-gray-800/50 hover:bg-gray-800/30"
-                >
-                  <td className="p-3 text-gray-400 text-sm">#{t.rank}</td>
-                  <td className="p-3">
-                    <p className="text-white text-sm font-medium">
-                      {t.name || `${t.address.slice(0, 6)}...${t.address.slice(-4)}`}
-                    </p>
-                  </td>
-                  <td
-                    className={`p-3 text-right text-sm font-medium ${
-                      t.profit >= 0 ? "text-emerald-400" : "text-red-400"
-                    }`}
+              {traders.slice(0, 50).map((t) => {
+                const alpha = (t.alpha_ratio || 0) * 100;
+                const alphaColor =
+                  alpha > 5
+                    ? "text-emerald-400"
+                    : alpha > 1
+                      ? "text-amber-400"
+                      : "text-gray-500";
+                return (
+                  <tr
+                    key={t.address}
+                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
                   >
-                    ${t.profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  </td>
-                  <td className="p-3 text-right text-sm text-gray-400">
-                    ${t.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  </td>
-                </tr>
-              ))}
+                    <td className="p-3 text-gray-400 text-sm">#{t.rank}</td>
+                    <td className="p-3">
+                      <p className="text-white text-sm font-medium">
+                        {t.name || `${t.address.slice(0, 6)}...${t.address.slice(-4)}`}
+                      </p>
+                    </td>
+                    <td
+                      className={`p-3 text-right text-sm font-medium ${
+                        t.profit >= 0 ? "text-emerald-400" : "text-red-400"
+                      }`}
+                    >
+                      ${t.profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </td>
+                    <td className="p-3 text-right text-sm text-gray-400">
+                      ${t.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </td>
+                    <td className={`p-3 text-right text-sm font-medium ${alphaColor}`}>
+                      {alpha.toFixed(1)}%
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

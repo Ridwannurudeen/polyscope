@@ -160,7 +160,7 @@ export default function CalibrationPage() {
         <h2 className="text-xl font-semibold text-white mb-4">
           Accuracy by Category
         </h2>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
           {Object.keys(categories).length > 0 ? (
             <table className="w-full">
               <thead>

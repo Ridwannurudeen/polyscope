@@ -93,6 +93,37 @@ export function SignalTrackRecord() {
               </div>
             </div>
 
+            {data.simulation && data.simulation.total_wagered > 0 && (
+              <div className="border-t border-gray-800 pt-4 mt-4">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-3">
+                  Simulated P&L ($100/signal)
+                </p>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className={`text-lg font-bold ${data.simulation.roi_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {data.simulation.roi_pct >= 0 ? "+" : ""}
+                      {data.simulation.roi_pct.toFixed(1)}%
+                    </p>
+                    <p className="text-xs text-gray-500">Simulated ROI</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-white">
+                      ${data.simulation.total_return.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      on ${data.simulation.total_wagered.toLocaleString(undefined, { maximumFractionDigits: 0 })} wagered
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-amber-400">
+                      {data.simulation.avg_odds_on_hits.toFixed(1)}x
+                    </p>
+                    <p className="text-xs text-gray-500">Avg odds on hits</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {rolling_30d.total > 0 && (
               <div className="border-t border-gray-800 pt-4 mt-4 text-center">
                 <p className="text-xs text-gray-500">

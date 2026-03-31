@@ -17,6 +17,18 @@ import { SkeletonCard } from "@/components/skeleton";
 import { StatCard } from "@/components/stat-card";
 import { usePollingFetch } from "@/lib/hooks";
 
+interface SignalHistoryEntry {
+  timestamp: string;
+  market_price: number;
+  sm_consensus: number;
+  divergence_pct: number;
+  signal_strength: number;
+  sm_trader_count: number;
+  sm_direction: string;
+  resolved: number;
+  outcome_correct: number | null;
+}
+
 interface MarketDetail {
   market: {
     condition_id: string;
@@ -38,6 +50,7 @@ interface MarketDetail {
     sm_direction: string;
   } | null;
   price_history: { t: number; p: number }[];
+  signal_history?: SignalHistoryEntry[];
 }
 
 export default function MarketPage() {
@@ -86,7 +99,7 @@ export default function MarketPage() {
     );
   }
 
-  const { market, divergence, price_history } = data;
+  const { market, divergence, price_history, signal_history } = data;
 
   const chartData = (price_history || []).map(
     (p: { t: number; p: number }) => ({
@@ -197,6 +210,70 @@ export default function MarketPage() {
           )}
         </div>
       </section>
+
+      {/* Signal History */}
+      {signal_history && signal_history.length > 0 && (
+        <section className="mb-10">
+          <h2 className="text-xl font-semibold text-white mb-4">
+            Signal History
+          </h2>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
+                  <th className="text-left p-3">Date</th>
+                  <th className="text-center p-3">SM Direction</th>
+                  <th className="text-center p-3">Market</th>
+                  <th className="text-center p-3">SM Consensus</th>
+                  <th className="text-center p-3">Divergence</th>
+                  <th className="text-center p-3">Score</th>
+                  <th className="text-center p-3">Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {signal_history.map((s, i) => (
+                  <tr
+                    key={s.timestamp + i}
+                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                  >
+                    <td className="p-3 text-gray-400 text-xs whitespace-nowrap">
+                      {new Date(s.timestamp).toLocaleDateString()}
+                    </td>
+                    <td
+                      className={`p-3 text-center text-sm font-medium ${
+                        s.sm_direction === "YES"
+                          ? "text-emerald-400"
+                          : "text-red-400"
+                      }`}
+                    >
+                      {s.sm_direction}
+                    </td>
+                    <td className="p-3 text-center text-sm text-gray-400">
+                      {(s.market_price * 100).toFixed(0)}%
+                    </td>
+                    <td className="p-3 text-center text-sm text-gray-400">
+                      {(s.sm_consensus * 100).toFixed(0)}%
+                    </td>
+                    <td className="p-3 text-center text-sm text-amber-400">
+                      {(s.divergence_pct * 100).toFixed(0)}%
+                    </td>
+                    <td className="p-3 text-center text-sm text-white">
+                      {s.signal_strength.toFixed(0)}
+                    </td>
+                    <td className="p-3 text-center text-lg">
+                      {s.resolved
+                        ? s.outcome_correct === 1
+                          ? "\u2705"
+                          : "\u274c"
+                        : "\u2014"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <Disclaimer />
     </div>
