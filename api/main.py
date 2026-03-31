@@ -247,7 +247,7 @@ async def get_market(condition_id: str):
         from .scheduler import get_client
 
         client = get_client()
-        price_history = await client.get_price_history(condition_id)
+        price_history = await client.get_price_history(market.token_id_yes or condition_id)
         cache.set(cache_key, price_history, ttl_seconds=300)
 
     # Get signal history from DB

@@ -402,14 +402,18 @@ class PolymarketClient:
         tokens = m.get("clobTokenIds", m.get("tokens", []))
         token_yes = ""
         token_no = ""
+        if isinstance(tokens, str):
+            # JSON string like '["token1", "token2"]' or comma-separated
+            import json as _json
+            try:
+                tokens = _json.loads(tokens)
+            except (ValueError, _json.JSONDecodeError):
+                parts = tokens.split(",")
+                if len(parts) >= 2:
+                    token_yes, token_no = parts[0].strip(), parts[1].strip()
         if isinstance(tokens, list) and len(tokens) >= 2:
             token_yes = tokens[0] if isinstance(tokens[0], str) else str(tokens[0])
             token_no = tokens[1] if isinstance(tokens[1], str) else str(tokens[1])
-        elif isinstance(tokens, str):
-            # Sometimes comma-separated
-            parts = tokens.split(",")
-            if len(parts) >= 2:
-                token_yes, token_no = parts[0].strip(), parts[1].strip()
 
         outcomes_prices = m.get("outcomePrices", m.get("bestAsk", []))
         price_yes = 0.0
