@@ -77,7 +77,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://polyscope.gudman.xyz"],
     allow_methods=["GET"],
     allow_headers=["*"],
 )
@@ -166,6 +166,11 @@ async def list_markets(
 @app.get("/api/market/{condition_id}")
 async def get_market(condition_id: str):
     """Single market detail + divergence info."""
+    import re
+
+    if not re.fullmatch(r"[0-9a-zA-Z_-]{1,128}", condition_id):
+        return {"error": "Invalid condition ID"}
+
     markets = cache.get("markets") or []
     market = next((m for m in markets if m.condition_id == condition_id), None)
     if not market:
@@ -175,11 +180,15 @@ async def get_market(condition_id: str):
     divergences = cache.get("divergences") or []
     signal = next((d for d in divergences if d.market_id == condition_id), None)
 
-    # Get price history
-    from .scheduler import get_client
+    # Get price history (cached 5 min to prevent upstream abuse)
+    cache_key = f"price_history:{condition_id}"
+    price_history = cache.get(cache_key)
+    if price_history is None:
+        from .scheduler import get_client
 
-    client = get_client()
-    price_history = await client.get_price_history(condition_id)
+        client = get_client()
+        price_history = await client.get_price_history(condition_id)
+        cache.set(cache_key, price_history, ttl_seconds=300)
 
     return {
         "market": asdict(market),

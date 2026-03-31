@@ -15,9 +15,22 @@ logger = logging.getLogger(__name__)
 API_BASE = os.getenv("POLYSCOPE_API_URL", "http://localhost:8020")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
+_MD_ESCAPE = str.maketrans({
+    "_": r"\_", "*": r"\*", "[": r"\[", "]": r"\]",
+    "(": r"\(", ")": r"\)", "~": r"\~", "`": r"\`",
+    ">": r"\>", "#": r"\#", "+": r"\+", "-": r"\-",
+    "=": r"\=", "|": r"\|", "{": r"\{", "}": r"\}",
+    ".": r"\.", "!": r"\!",
+})
+
+
+def _esc(text: str) -> str:
+    """Escape Markdown V2 metacharacters in untrusted text."""
+    return text.translate(_MD_ESCAPE)
+
 DISCLAIMER = (
-    "\n\n_PolyScope provides market intelligence only. "
-    "It does not facilitate, recommend, or enable participation in prediction markets._"
+    "\n\n_PolyScope provides market intelligence only\\. "
+    "It does not facilitate, recommend, or enable participation in prediction markets\\._"
 )
 
 
@@ -35,55 +48,63 @@ async def _api_get(path: str) -> dict | None:
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "*Welcome to PolyScope*\n\n"
-        "Counter-consensus intelligence for Polymarket.\n\n"
+        "Counter\\-consensus intelligence for Polymarket\\.\n\n"
         "Commands:\n"
-        "/divergences — Current counter-consensus signals\n"
-        "/movers — Biggest probability shifts (24h)\n"
+        "/divergences — Current counter\\-consensus signals\n"
+        "/movers — Biggest probability shifts \\(24h\\)\n"
         "/market <query> — Search market details\n"
         "/calibration — Polymarket accuracy summary\n"
         "/help — Command list"
         + DISCLAIMER,
-        parse_mode="Markdown",
+        parse_mode="MarkdownV2",
     )
 
 
 async def divergences(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = await _api_get("/api/divergences")
     if not data or not data.get("signals"):
-        await update.message.reply_text("No divergence signals right now." + DISCLAIMER)
+        await update.message.reply_text("No divergence signals right now\\." + DISCLAIMER, parse_mode="MarkdownV2")
         return
 
-    lines = ["*Counter-Consensus Signals*\n"]
+    lines = ["*Counter\\-Consensus Signals*\n"]
     for s in data["signals"][:10]:
         direction = s["sm_direction"]
         arrow = "↑" if direction == "YES" else "↓"
+        q = _esc(s["question"][:60])
+        mp = _esc(f"{s['market_price']:.0%}")
+        sc = _esc(f"{s['sm_consensus']:.0%}")
+        dp = _esc(f"{s['divergence_pct']:.0%}")
+        score = _esc(f"{s['score']:.0f}")
         lines.append(
-            f"{arrow} *{s['question'][:60]}*\n"
-            f"  Market: {s['market_price']:.0%} YES\n"
-            f"  Smart Money: {s['sm_consensus']:.0%} (favors {direction})\n"
-            f"  Divergence: {s['divergence_pct']:.0%} | Score: {s['score']:.0f}/100\n"
+            f"{arrow} *{q}*\n"
+            f"  Market: {mp} YES\n"
+            f"  Smart Money: {sc} \\(favors {direction}\\)\n"
+            f"  Divergence: {dp} \\| Score: {score}/100\n"
             f"  Traders: {s['sm_trader_count']}\n"
         )
 
-    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="Markdown")
+    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
 
 
 async def movers(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = await _api_get("/api/movers?timeframe=24h")
     if not data or not data.get("movers"):
-        await update.message.reply_text("No significant movers right now." + DISCLAIMER)
+        await update.message.reply_text("No significant movers right now\\." + DISCLAIMER, parse_mode="MarkdownV2")
         return
 
-    lines = ["*Biggest Movers (24h)*\n"]
+    lines = ["*Biggest Movers \\(24h\\)*\n"]
     for m in data["movers"][:10]:
         arrow = "↑" if m["change_pct"] > 0 else "↓"
+        q = _esc(m["question"][:60])
+        before = _esc(f"{m['price_before']:.0%}")
+        now = _esc(f"{m['price_now']:.0%}")
+        change = _esc(f"{m['change_pct']:+.0%}")
         lines.append(
-            f"{arrow} *{m['question'][:60]}*\n"
-            f"  {m['price_before']:.0%} → {m['price_now']:.0%} "
-            f"({m['change_pct']:+.0%})\n"
+            f"{arrow} *{q}*\n"
+            f"  {before} → {now} \\({change}\\)\n"
         )
 
-    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="Markdown")
+    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
 
 
 async def market_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -94,7 +115,7 @@ async def market_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     data = await _api_get("/api/markets?limit=100")
     if not data or not data.get("markets"):
-        await update.message.reply_text("No markets found.")
+        await update.message.reply_text("No markets found\\.", parse_mode="MarkdownV2")
         return
 
     # Simple client-side filter
@@ -102,49 +123,58 @@ async def market_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         m for m in data["markets"] if query.lower() in m.get("question", "").lower()
     ]
     if not matches:
-        await update.message.reply_text(f"No markets matching '{query}'.")
+        await update.message.reply_text(f"No markets matching '{_esc(query)}'\\.", parse_mode="MarkdownV2")
         return
 
-    lines = [f"*Markets matching '{query}':*\n"]
+    eq = _esc(query)
+    lines = [f"*Markets matching '{eq}':*\n"]
     for m in matches[:5]:
+        q = _esc(m["question"][:70])
+        price = _esc(f"{m['price_yes']:.0%}")
+        vol = _esc(f"${m['volume_24h']:,.0f}")
         lines.append(
-            f"*{m['question'][:70]}*\n"
-            f"  YES: {m['price_yes']:.0%} | Vol 24h: ${m['volume_24h']:,.0f}\n"
+            f"*{q}*\n"
+            f"  YES: {price} \\| Vol 24h: {vol}\n"
         )
 
-    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="Markdown")
+    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
 
 
 async def calibration(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = await _api_get("/api/calibration")
     if not data:
-        await update.message.reply_text("Calibration data not available yet." + DISCLAIMER)
+        await update.message.reply_text("Calibration data not available yet\\." + DISCLAIMER, parse_mode="MarkdownV2")
         return
 
+    brier = _esc(f"{data['overall_brier']:.4f}")
+    total = _esc(str(data["total_resolved"]))
     lines = [
-        f"*Polymarket Calibration*\n",
-        f"Overall Brier Score: {data['overall_brier']:.4f}",
-        f"Total Resolved Markets: {data['total_resolved']}\n",
+        "*Polymarket Calibration*\n",
+        f"Overall Brier Score: {brier}",
+        f"Total Resolved Markets: {total}\n",
     ]
 
     if data.get("by_category"):
         lines.append("*By Category:*")
         for cat, info in list(data["by_category"].items())[:8]:
-            lines.append(f"  {cat}: {info['brier_score']:.4f} ({info['count']} markets)")
+            c = _esc(cat)
+            bs = _esc(f"{info['brier_score']:.4f}")
+            cnt = _esc(str(info["count"]))
+            lines.append(f"  {c}: {bs} \\({cnt} markets\\)")
 
-    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="Markdown")
+    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
 
 
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "*PolyScope Commands*\n\n"
-        "/divergences — Counter-consensus signals\n"
+        "/divergences — Counter\\-consensus signals\n"
         "/movers — Biggest probability shifts\n"
         "/market <query> — Search markets\n"
         "/calibration — Accuracy dashboard\n"
         "/help — This message"
         + DISCLAIMER,
-        parse_mode="Markdown",
+        parse_mode="MarkdownV2",
     )
 
 
