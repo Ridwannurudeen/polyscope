@@ -199,11 +199,14 @@ async def cleanup_old_snapshots(db: aiosqlite.Connection, days: int = 30):
 
 
 async def save_resolved_market(db: aiosqlite.Connection, market: dict):
-    """Insert a resolved market (idempotent via INSERT OR IGNORE on unique market_id)."""
+    """Upsert a resolved market (updates brier_score on re-run)."""
     await db.execute(
-        """INSERT OR IGNORE INTO resolved_markets
+        """INSERT INTO resolved_markets
            (market_id, question, category, final_price, outcome, resolved_at, brier_score)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(market_id) DO UPDATE SET
+               final_price = excluded.final_price,
+               brier_score = excluded.brier_score""",
         (
             market["market_id"],
             market.get("question"),

@@ -208,11 +208,15 @@ async def track_outcomes_job():
                 if result is None:
                     continue
 
-                outcome, final_price = result
+                outcome, _resolved_price = result
                 market_id = raw.get("conditionId", raw.get("condition_id", ""))
                 if not market_id:
                     continue
 
+                # Use last trade price for Brier score (pre-resolution prediction)
+                # Resolved price (0 or 1) gives trivial Brier=0 — meaningless
+                last_trade = float(raw.get("lastTradePrice", 0) or 0)
+                final_price = last_trade if last_trade > 0 else _resolved_price
                 bs = brier_score(final_price, outcome)
 
                 tags_raw = raw.get("tags", [])
