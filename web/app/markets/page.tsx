@@ -13,33 +13,55 @@ interface MarketsResponse {
   total: number;
 }
 
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  Politics: ["trump", "biden", "president", "election", "congress", "senate", "governor", "democrat", "republican", "vote", "party", "political", "iran", "tariff", "nato", "war", "regime", "sanction", "cabinet", "impeach", "poll"],
+  Crypto: ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana", "sol", "token", "defi", "nft", "blockchain", "binance", "coinbase", "altcoin", "memecoin"],
+  Sports: ["nba", "nfl", "mlb", "nhl", "soccer", "football", "basketball", "baseball", "hockey", "ufc", "fight", "match", "championship", "playoff", "world cup", "fifa", "premier league", "champion", "medal", "olympics", "grand prix", "f1", "tennis", "golf", "win the", "beat the"],
+  Finance: ["stock", "s&p", "nasdaq", "fed", "interest rate", "gdp", "inflation", "recession", "dow", "treasury", "bond", "market cap", "ipo"],
+  Tech: ["ai", "openai", "google", "apple", "meta", "microsoft", "spacex", "tesla", "tiktok", "app store", "chatgpt", "artificial intelligence"],
+  Entertainment: ["oscar", "grammy", "emmy", "movie", "album", "spotify", "netflix", "kardashian", "celebrity", "music", "film"],
+};
+
+function autoCategory(question: string): string {
+  const q = question.toLowerCase();
+  for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (keywords.some((kw) => q.includes(kw))) return cat;
+  }
+  return "Other";
+}
+
 export default function MarketsPage() {
   const [category, setCategory] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const params = new URLSearchParams({ limit: "200", offset: "0" });
-  if (category) params.set("category", category);
-
   const { data, loading, error, lastUpdated, retry } =
-    usePollingFetch<MarketsResponse>(`/api/markets?${params}`, 300_000);
+    usePollingFetch<MarketsResponse>(`/api/markets?limit=200&offset=0`, 300_000);
 
   const markets = data?.markets || [];
   const total = data?.total || 0;
 
-  const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return markets;
-    const q = searchQuery.toLowerCase();
-    return markets.filter((m) => m.question.toLowerCase().includes(q));
-  }, [markets, searchQuery]);
+  const categorized = useMemo(
+    () => markets.map((m) => ({ ...m, _cat: autoCategory(m.question) })),
+    [markets]
+  );
 
-  const categories = [
-    "",
-    "politics",
-    "crypto",
-    "sports",
-    "science",
-    "entertainment",
-  ];
+  const categories = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of categorized) {
+      counts[m._cat] = (counts[m._cat] || 0) + 1;
+    }
+    return ["", ...Object.keys(counts).sort((a, b) => (counts[b] || 0) - (counts[a] || 0))];
+  }, [categorized]);
+
+  const filtered = useMemo(() => {
+    let list = categorized;
+    if (category) list = list.filter((m) => m._cat === category);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((m) => m.question.toLowerCase().includes(q));
+    }
+    return list;
+  }, [categorized, category, searchQuery]);
 
   return (
     <div>
@@ -48,7 +70,7 @@ export default function MarketsPage() {
         <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
       </div>
       <p className="text-gray-400 mb-6">
-        Browse {total} active prediction markets.
+        Browse {total} active prediction markets.{category && ` Showing ${filtered.length} in ${category}.`}
       </p>
 
       <div className="flex gap-2 mb-4 flex-wrap">
