@@ -242,15 +242,34 @@ async def update_signal_outcomes(
 
 
 async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
-    """Aggregate signal accuracy stats."""
+    """Aggregate signal accuracy stats.
+
+    Deduplicates by market_id — keeps the strongest signal per market so that
+    a market scanned 100 times counts as 1 signal, not 100.  This gives an
+    honest per-market win rate rather than an inflated/deflated per-row rate.
+    """
+    # CTE: one row per market (strongest signal)
+    _BEST_PER_MARKET = """
+        WITH best AS (
+            SELECT market_id,
+                   MAX(signal_strength) AS signal_strength,
+                   outcome_correct,
+                   sm_direction,
+                   timestamp
+            FROM divergence_signals
+            WHERE resolved = 1 AND outcome_correct IS NOT NULL
+            GROUP BY market_id
+        )
+    """
+
     # Overall
     cursor = await db.execute(
+        _BEST_PER_MARKET +
         """SELECT
                COUNT(*) as total,
                SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct,
                AVG(signal_strength) as avg_score
-           FROM divergence_signals
-           WHERE resolved = 1 AND outcome_correct IS NOT NULL"""
+           FROM best"""
     )
     row = await cursor.fetchone()
     total = row[0] or 0
@@ -268,12 +287,12 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
     by_tier = {}
     for tier, low, high in [("high", 70, 101), ("medium", 40, 70), ("low", 0, 40)]:
         cursor = await db.execute(
+            _BEST_PER_MARKET +
             """SELECT
                    COUNT(*) as total,
                    SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct
-               FROM divergence_signals
-               WHERE resolved = 1 AND outcome_correct IS NOT NULL
-                 AND signal_strength >= ? AND signal_strength < ?""",
+               FROM best
+               WHERE signal_strength >= ? AND signal_strength < ?""",
             (low, high),
         )
         r = await cursor.fetchone()
@@ -287,12 +306,14 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
 
     # Rolling 30-day
     cursor = await db.execute(
+        _BEST_PER_MARKET.replace(
+            "WHERE resolved = 1",
+            "WHERE resolved = 1 AND timestamp >= datetime('now', '-30 days')",
+        ) +
         """SELECT
                COUNT(*) as total,
                SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct
-           FROM divergence_signals
-           WHERE resolved = 1 AND outcome_correct IS NOT NULL
-             AND timestamp >= datetime('now', '-30 days')"""
+           FROM best"""
     )
     r30 = await cursor.fetchone()
     t30 = r30[0] or 0

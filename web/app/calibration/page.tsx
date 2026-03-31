@@ -76,8 +76,18 @@ export default function CalibrationPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <StatCard
           title="Overall Brier Score"
-          value={data?.overall_brier?.toFixed(4) || "\u2014"}
-          subtitle="Lower is better (0 = perfect)"
+          value={data?.overall_brier != null ? data.overall_brier.toFixed(6) : "\u2014"}
+          subtitle={
+            data?.overall_brier != null
+              ? data.overall_brier < 0.05
+                ? "Excellent (< 0.05)"
+                : data.overall_brier < 0.1
+                  ? "Good (< 0.10)"
+                  : data.overall_brier < 0.25
+                    ? "Fair (< 0.25)"
+                    : "Needs improvement"
+              : "Lower is better (0 = perfect)"
+          }
         />
         <StatCard
           title="Resolved Markets"
