@@ -75,3 +75,24 @@ export interface CalibrationData {
   by_category: Record<string, { brier_score: number; count: number }>;
   total_resolved: number;
 }
+
+export interface SignalAccuracyTier {
+  total: number;
+  correct: number;
+  win_rate: number;
+}
+
+export interface SignalAccuracy {
+  overall: {
+    total_signals: number;
+    correct: number;
+    win_rate: number;
+    avg_score: number;
+  };
+  by_tier: {
+    high: SignalAccuracyTier;
+    medium: SignalAccuracyTier;
+    low: SignalAccuracyTier;
+  };
+  rolling_30d: SignalAccuracyTier;
+}

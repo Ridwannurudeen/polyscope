@@ -15,7 +15,9 @@ from .cache import cache
 from .database import (
     get_db,
     save_divergence_signal,
+    save_resolved_market,
     save_snapshot,
+    update_signal_outcomes,
 )
 
 logger = logging.getLogger(__name__)
@@ -183,6 +185,61 @@ async def detect_movers_job():
         logger.info("Detected %d total movers across timeframes", total)
     except Exception:
         logger.exception("detect_movers_job failed")
+    finally:
+        await db.close()
+
+
+async def track_outcomes_job():
+    """Fetch closed markets, determine outcomes, update signal accuracy."""
+    from polyscope.calibration import brier_score
+    from polyscope.polymarket import PolymarketClient
+
+    client = get_client()
+    db = await get_db()
+    saved = 0
+    try:
+        for offset in range(0, 500, 100):
+            batch = await client.get_closed_markets(limit=100, offset=offset)
+            if not batch:
+                break
+
+            for raw in batch:
+                result = PolymarketClient.determine_outcome(raw)
+                if result is None:
+                    continue
+
+                outcome, final_price = result
+                market_id = raw.get("conditionId", raw.get("condition_id", ""))
+                if not market_id:
+                    continue
+
+                bs = brier_score(final_price, outcome)
+
+                tags_raw = raw.get("tags", [])
+                category = ""
+                if isinstance(tags_raw, list) and tags_raw:
+                    first = tags_raw[0]
+                    category = first.get("label", first) if isinstance(first, dict) else str(first)
+
+                await save_resolved_market(db, {
+                    "market_id": market_id,
+                    "question": raw.get("question", raw.get("title", "")),
+                    "category": category or raw.get("groupItemTitle", ""),
+                    "final_price": final_price,
+                    "outcome": outcome,
+                    "resolved_at": raw.get("endDate", raw.get("end_date_iso", "")),
+                    "brier_score": round(bs, 6),
+                })
+                await update_signal_outcomes(db, market_id, outcome)
+                saved += 1
+
+            if len(batch) < 100:
+                break
+
+        await db.commit()
+        logger.info("Outcome tracking complete: %d resolved markets saved", saved)
+    except Exception:
+        logger.exception("track_outcomes_job failed")
     finally:
         await db.close()
 

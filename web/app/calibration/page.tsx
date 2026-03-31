@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
   XAxis,
   YAxis,
@@ -12,27 +11,41 @@ import {
   ReferenceLine,
 } from "recharts";
 import { Disclaimer } from "@/components/disclaimer";
+import { LastUpdated } from "@/components/last-updated";
+import { SkeletonCard } from "@/components/skeleton";
 import { StatCard } from "@/components/stat-card";
+import { usePollingFetch } from "@/lib/hooks";
 import type { CalibrationData } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
-
 export default function CalibrationPage() {
-  const [data, setData] = useState<CalibrationData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`${API_BASE}/api/calibration`)
-      .then((r) => r.json())
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, []);
+  const { data, loading, error, lastUpdated, retry } =
+    usePollingFetch<CalibrationData>("/api/calibration", 600_000);
 
   if (loading) {
     return (
-      <div className="animate-pulse text-gray-400 text-center py-12">
-        Loading calibration data...
+      <div>
+        <div className="h-8 w-56 bg-gray-800 rounded animate-pulse mb-2" />
+        <div className="h-4 w-96 bg-gray-800/60 rounded animate-pulse mb-6" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl h-[400px] animate-pulse" />
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-red-400 mb-3">Failed to load calibration data.</p>
+        <button
+          onClick={retry}
+          className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -50,9 +63,12 @@ export default function CalibrationPage() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-white mb-2">
-        Calibration Dashboard
-      </h1>
+      <div className="flex items-start justify-between mb-2">
+        <h1 className="text-3xl font-bold text-white">
+          Calibration Dashboard
+        </h1>
+        <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
+      </div>
       <p className="text-gray-400 mb-6">
         How accurate are Polymarket predictions? Brier scores and calibration curves.
       </p>

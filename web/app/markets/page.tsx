@@ -1,31 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { Disclaimer } from "@/components/disclaimer";
+import { LastUpdated } from "@/components/last-updated";
+import { SkeletonRow } from "@/components/skeleton";
+import { usePollingFetch } from "@/lib/hooks";
 import type { Market } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+interface MarketsResponse {
+  markets: Market[];
+  total: number;
+}
 
 export default function MarketsPage() {
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    const params = new URLSearchParams({ limit: "50", offset: "0" });
-    if (category) params.set("category", category);
+  const params = new URLSearchParams({ limit: "200", offset: "0" });
+  if (category) params.set("category", category);
 
-    fetch(`${API_BASE}/api/markets?${params}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setMarkets(data.markets || []);
-        setTotal(data.total || 0);
-      })
-      .catch(() => setMarkets([]))
-      .finally(() => setLoading(false));
-  }, [category]);
+  const { data, loading, error, lastUpdated, retry } =
+    usePollingFetch<MarketsResponse>(`/api/markets?${params}`, 300_000);
+
+  const markets = data?.markets || [];
+  const total = data?.total || 0;
+
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return markets;
+    const q = searchQuery.toLowerCase();
+    return markets.filter((m) => m.question.toLowerCase().includes(q));
+  }, [markets, searchQuery]);
 
   const categories = [
     "",
@@ -38,19 +43,19 @@ export default function MarketsPage() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-white mb-2">Markets</h1>
+      <div className="flex items-start justify-between mb-2">
+        <h1 className="text-3xl font-bold text-white">Markets</h1>
+        <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
+      </div>
       <p className="text-gray-400 mb-6">
         Browse {total} active prediction markets.
       </p>
 
-      <div className="flex gap-2 mb-6 flex-wrap">
+      <div className="flex gap-2 mb-4 flex-wrap">
         {categories.map((cat) => (
           <button
             key={cat}
-            onClick={() => {
-              setCategory(cat);
-              setLoading(true);
-            }}
+            onClick={() => setCategory(cat)}
             className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
               category === cat
                 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
@@ -62,13 +67,39 @@ export default function MarketsPage() {
         ))}
       </div>
 
+      <input
+        type="text"
+        placeholder="Search markets..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        className="w-full px-4 py-2.5 mb-4 bg-gray-900 border border-gray-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-gray-600"
+      />
+
+      {searchQuery && (
+        <p className="text-sm text-gray-500 mb-3">
+          {filtered.length} of {markets.length} markets matching &ldquo;{searchQuery}&rdquo;
+        </p>
+      )}
+
       {loading ? (
-        <div className="animate-pulse text-gray-400 text-center py-12">
-          Loading markets...
+        <div className="space-y-2">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <SkeletonRow key={i} />
+          ))}
+        </div>
+      ) : error && !data ? (
+        <div className="text-center py-12">
+          <p className="text-red-400 mb-3">Failed to load markets.</p>
+          <button
+            onClick={retry}
+            className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+          >
+            Retry
+          </button>
         </div>
       ) : (
         <div className="space-y-2">
-          {markets.map((m) => (
+          {filtered.map((m) => (
             <Link
               key={m.condition_id}
               href={`/market/${m.condition_id}`}

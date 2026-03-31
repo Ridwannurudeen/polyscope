@@ -72,6 +72,54 @@ class PolymarketClient:
         }
         return await self._get(f"{GAMMA_BASE}/events", params) or []
 
+    async def get_closed_markets(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[dict]:
+        """Fetch closed/resolved markets from Gamma API (raw dicts)."""
+        params: dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+            "active": "false",
+            "closed": "true",
+            "order": "volume24hr",
+            "ascending": "false",
+        }
+        data = await self._get(f"{GAMMA_BASE}/markets", params)
+        if not isinstance(data, list):
+            return []
+        return data
+
+    @staticmethod
+    def determine_outcome(market_raw: dict) -> tuple[int, float] | None:
+        """Parse outcome from a closed Gamma API market.
+
+        Returns (outcome, final_price) or None if not definitively resolved.
+        outcome: 1 = YES won, 0 = NO won.
+        """
+        import json as _json
+
+        prices_raw = market_raw.get("outcomePrices", [])
+        if isinstance(prices_raw, str):
+            try:
+                prices_raw = _json.loads(prices_raw)
+            except (ValueError, _json.JSONDecodeError):
+                return None
+
+        if not isinstance(prices_raw, list) or len(prices_raw) < 2:
+            return None
+
+        try:
+            p_yes = float(prices_raw[0])
+            p_no = float(prices_raw[1])
+        except (TypeError, ValueError):
+            return None
+
+        if p_yes >= 0.99:
+            return (1, p_yes)
+        if p_no >= 0.99:
+            return (0, 1.0 - p_no)
+        return None
+
     # ── Data API ───────────────────────────────────────────────
 
     async def get_leaderboard(

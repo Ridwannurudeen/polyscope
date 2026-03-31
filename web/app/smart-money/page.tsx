@@ -1,41 +1,95 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
+import { LastUpdated } from "@/components/last-updated";
 import { ScoreBadge } from "@/components/score-badge";
+import { TableSkeleton } from "@/components/skeleton";
+import { usePollingFetch } from "@/lib/hooks";
 import type { Trader, DivergenceSignal } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+interface LeaderboardResponse {
+  traders: Trader[];
+  count: number;
+}
+
+interface DivergencesResponse {
+  signals: DivergenceSignal[];
+  count: number;
+}
+
+interface HistorySignal {
+  market_id: string;
+  question: string;
+  sm_direction: string;
+  market_price: number;
+  sm_consensus: number;
+  outcome_correct: number | null;
+  timestamp: string;
+}
+
+interface HistoryResponse {
+  history: HistorySignal[];
+  count: number;
+}
 
 export default function SmartMoneyPage() {
-  const [traders, setTraders] = useState<Trader[]>([]);
-  const [divergences, setDivergences] = useState<DivergenceSignal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: lbData,
+    loading: lbLoading,
+    error: lbError,
+    lastUpdated,
+    retry,
+  } = usePollingFetch<LeaderboardResponse>(
+    "/api/smart-money/leaderboard",
+    60_000
+  );
 
-  useEffect(() => {
-    Promise.all([
-      fetch(`${API_BASE}/api/smart-money/leaderboard`).then((r) => r.json()),
-      fetch(`${API_BASE}/api/divergences`).then((r) => r.json()),
-    ])
-      .then(([lb, div]) => {
-        setTraders(lb.traders || []);
-        setDivergences(div.signals || []);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+  const { data: divData } = usePollingFetch<DivergencesResponse>(
+    "/api/divergences",
+    60_000
+  );
 
-  if (loading) {
+  const { data: histData } = usePollingFetch<HistoryResponse>(
+    "/api/divergences/history?limit=50",
+    60_000
+  );
+
+  const traders = lbData?.traders || [];
+  const divergences = divData?.signals || [];
+  const history = histData?.history || [];
+
+  if (lbLoading) {
     return (
-      <div className="animate-pulse text-gray-400 text-center py-12">
-        Loading smart money data...
+      <div>
+        <div className="mb-2">
+          <div className="h-8 w-48 bg-gray-800 rounded animate-pulse mb-2" />
+          <div className="h-4 w-80 bg-gray-800/60 rounded animate-pulse mb-6" />
+        </div>
+        <TableSkeleton rows={10} />
+      </div>
+    );
+  }
+
+  if (lbError && !lbData) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-red-400 mb-3">Failed to load smart money data.</p>
+        <button
+          onClick={retry}
+          className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+        >
+          Retry
+        </button>
       </div>
     );
   }
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-white mb-2">Smart Money Feed</h1>
+      <div className="flex items-start justify-between mb-2">
+        <h1 className="text-3xl font-bold text-white">Smart Money Feed</h1>
+        <LastUpdated lastUpdated={lastUpdated} error={lbError} retry={retry} />
+      </div>
       <p className="text-gray-400 mb-6">
         Top trader rankings and counter-consensus signals. Read-only intelligence.
       </p>
@@ -79,6 +133,62 @@ export default function SmartMoneyPage() {
         </section>
       )}
 
+      {/* Resolved Signals */}
+      {history.length > 0 && (
+        <section className="mb-10">
+          <h2 className="text-xl font-semibold text-white mb-4">
+            Resolved Signals
+          </h2>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
+                  <th className="text-left p-3">Date</th>
+                  <th className="text-left p-3">Market</th>
+                  <th className="text-center p-3">SM Called</th>
+                  <th className="text-center p-3">Crowd Said</th>
+                  <th className="text-center p-3">Correct</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((h, i) => (
+                  <tr
+                    key={h.market_id + i}
+                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                  >
+                    <td className="p-3 text-gray-400 text-xs whitespace-nowrap">
+                      {new Date(h.timestamp).toLocaleDateString()}
+                    </td>
+                    <td className="p-3 text-white text-sm truncate max-w-[300px]">
+                      {h.question}
+                    </td>
+                    <td
+                      className={`p-3 text-center text-sm font-medium ${
+                        h.sm_direction === "YES"
+                          ? "text-emerald-400"
+                          : "text-red-400"
+                      }`}
+                    >
+                      {h.sm_direction}
+                    </td>
+                    <td className="p-3 text-center text-sm text-gray-400">
+                      {(h.market_price * 100).toFixed(0)}% YES
+                    </td>
+                    <td className="p-3 text-center text-lg">
+                      {h.outcome_correct === 1
+                        ? "\u2705"
+                        : h.outcome_correct === 0
+                          ? "\u274c"
+                          : "\u2014"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* Leaderboard */}
       <section>
         <h2 className="text-xl font-semibold text-white mb-4">
@@ -92,7 +202,6 @@ export default function SmartMoneyPage() {
                 <th className="text-left p-3">Trader</th>
                 <th className="text-right p-3">Profit</th>
                 <th className="text-right p-3">Volume</th>
-                <th className="text-right p-3">Markets</th>
               </tr>
             </thead>
             <tbody>
@@ -116,9 +225,6 @@ export default function SmartMoneyPage() {
                   </td>
                   <td className="p-3 text-right text-sm text-gray-400">
                     ${t.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  </td>
-                  <td className="p-3 text-right text-sm text-gray-400">
-                    {t.markets_traded}
                   </td>
                 </tr>
               ))}

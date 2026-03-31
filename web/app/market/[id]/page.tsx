@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   AreaChart,
@@ -12,10 +11,11 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { Disclaimer } from "@/components/disclaimer";
+import { LastUpdated } from "@/components/last-updated";
 import { ScoreBadge } from "@/components/score-badge";
+import { SkeletonCard } from "@/components/skeleton";
 import { StatCard } from "@/components/stat-card";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+import { usePollingFetch } from "@/lib/hooks";
 
 interface MarketDetail {
   market: {
@@ -43,21 +43,37 @@ interface MarketDetail {
 export default function MarketPage() {
   const params = useParams();
   const id = params.id as string;
-  const [data, setData] = useState<MarketDetail | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetch(`${API_BASE}/api/market/${id}`)
-      .then((r) => r.json())
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [id]);
+  const { data, loading, error, lastUpdated, retry } =
+    usePollingFetch<MarketDetail>(`/api/market/${id}`, 120_000);
 
   if (loading) {
     return (
-      <div className="animate-pulse text-gray-400 text-center py-12">
-        Loading market data...
+      <div>
+        <div className="mb-6">
+          <div className="h-3 w-16 bg-gray-800 rounded animate-pulse mb-2" />
+          <div className="h-7 w-3/4 bg-gray-800 rounded animate-pulse" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl h-[300px] animate-pulse" />
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-red-400 mb-3">Failed to load market data.</p>
+        <button
+          onClick={retry}
+          className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -81,15 +97,18 @@ export default function MarketPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        {market.category && (
-          <span className="text-xs text-gray-500 uppercase tracking-wide">
-            {market.category}
-          </span>
-        )}
-        <h1 className="text-2xl font-bold text-white mt-1">
-          {market.question}
-        </h1>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          {market.category && (
+            <span className="text-xs text-gray-500 uppercase tracking-wide">
+              {market.category}
+            </span>
+          )}
+          <h1 className="text-2xl font-bold text-white mt-1">
+            {market.question}
+          </h1>
+        </div>
+        <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">

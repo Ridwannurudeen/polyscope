@@ -83,3 +83,17 @@ async def test_calibration(client):
     data = resp.json()
     assert "overall_brier" in data
     assert "calibration" in data
+
+
+@pytest.mark.anyio
+async def test_signals_accuracy(client):
+    resp = await client.get("/api/signals/accuracy")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "overall" in data
+    assert "by_tier" in data
+    assert "rolling_30d" in data
+    assert "total_signals" in data["overall"]
+    assert "win_rate" in data["overall"]
+    for tier in ("high", "medium", "low"):
+        assert tier in data["by_tier"]

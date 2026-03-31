@@ -1,30 +1,33 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Disclaimer } from "@/components/disclaimer";
+import { LastUpdated } from "@/components/last-updated";
 import { ScoreBadge } from "@/components/score-badge";
+import { SignalTrackRecord } from "@/components/signal-track-record";
+import { DashboardSkeleton } from "@/components/skeleton";
 import { StatCard } from "@/components/stat-card";
+import { usePollingFetch } from "@/lib/hooks";
 import type { ScanResult, DivergenceSignal, MarketMover } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
-
 export default function Dashboard() {
-  const [data, setData] = useState<ScanResult | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`${API_BASE}/api/scan/latest`)
-      .then((r) => r.json())
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, []);
+  const { data, loading, error, lastUpdated, retry } =
+    usePollingFetch<ScanResult>("/api/scan/latest", 60_000);
 
   if (loading) {
+    return <DashboardSkeleton />;
+  }
+
+  if (error && !data) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="animate-pulse text-gray-400">Loading scan data...</div>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <p className="text-red-400">Failed to load dashboard data.</p>
+        <button
+          onClick={retry}
+          className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -34,13 +37,16 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white">
-          Counter-Consensus Intelligence
-        </h1>
-        <p className="text-gray-400 mt-1">
-          See what smart money sees, before the crowd catches up.
-        </p>
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-white">
+            Counter-Consensus Intelligence
+          </h1>
+          <p className="text-gray-400 mt-1">
+            See what smart money sees, before the crowd catches up.
+          </p>
+        </div>
+        <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
@@ -70,6 +76,8 @@ export default function Dashboard() {
           }
         />
       </div>
+
+      <SignalTrackRecord />
 
       {/* Divergence Signals */}
       <section className="mb-10">

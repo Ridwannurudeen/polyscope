@@ -11,7 +11,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .cache import cache
-from .database import get_db, get_divergence_history, get_divergence_signals, get_resolved_markets, init_db
+from .database import get_db, get_divergence_history, get_divergence_signals, get_resolved_markets, get_signal_accuracy, init_db
 from .scheduler import (
     cleanup_job,
     close_client,
@@ -19,6 +19,7 @@ from .scheduler import (
     detect_movers_job,
     fetch_leaderboard_job,
     fetch_markets_job,
+    track_outcomes_job,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -26,10 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_initial_scans():
-    """Run divergence + movers scans in background after startup."""
+    """Run divergence + movers + outcome scans in background after startup."""
     try:
         await compute_divergences_job()
         await detect_movers_job()
+        await track_outcomes_job()
         logger.info("Initial scans complete")
     except Exception:
         logger.exception("Initial scan failed")
@@ -47,6 +49,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(fetch_leaderboard_job, "interval", minutes=10, id="fetch_leaderboard")
     scheduler.add_job(compute_divergences_job, "interval", minutes=5, id="compute_divergences")
     scheduler.add_job(detect_movers_job, "interval", minutes=5, id="detect_movers")
+    scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes")
     scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
     scheduler.start()
 
@@ -96,15 +99,31 @@ async def root():
 @app.get("/api/scan/latest")
 async def scan_latest():
     """Latest scan: divergences + movers + summary."""
-    divergences = cache.get("divergences") or []
+    divergences = cache.get("divergences")
+    source = "cache"
+    if divergences is None:
+        db = await get_db()
+        try:
+            rows = await get_divergence_signals(db, limit=50, hours=1)
+            divergences = rows
+            source = "db_fallback"
+        finally:
+            await db.close()
+
     movers = cache.get("movers") or {}
     markets = cache.get("markets") or []
 
+    if source == "db_fallback":
+        div_out = divergences[:20]
+    else:
+        div_out = [asdict(d) for d in divergences[:20]]
+
     return {
-        "divergences": [asdict(d) for d in divergences[:20]],
+        "divergences": div_out,
         "movers_24h": [asdict(m) for m in (movers.get("24h") or [])[:10]],
         "total_markets": len(markets),
         "total_divergences": len(divergences),
+        "source": source,
         "disclaimer": DISCLAIMER,
     }
 
@@ -112,10 +131,25 @@ async def scan_latest():
 @app.get("/api/divergences")
 async def get_divergences():
     """Current counter-consensus signals."""
-    divergences = cache.get("divergences") or []
+    divergences = cache.get("divergences")
+    source = "cache"
+    if divergences is None:
+        db = await get_db()
+        try:
+            rows = await get_divergence_signals(db, limit=50, hours=1)
+            return {
+                "signals": rows,
+                "count": len(rows),
+                "source": "db_fallback",
+                "disclaimer": DISCLAIMER,
+            }
+        finally:
+            await db.close()
+
     return {
         "signals": [asdict(d) for d in divergences],
         "count": len(divergences),
+        "source": source,
         "disclaimer": DISCLAIMER,
     }
 
@@ -253,6 +287,17 @@ async def calibration_overview():
         "by_category": category_brier_scores(markets),
         "total_resolved": len(markets),
     }
+
+
+@app.get("/api/signals/accuracy")
+async def signals_accuracy():
+    """Signal track record — win rates by tier and rolling 30-day."""
+    db = await get_db()
+    try:
+        stats = await get_signal_accuracy(db)
+        return stats
+    finally:
+        await db.close()
 
 
 @app.get("/api/calibration/category/{category}")

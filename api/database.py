@@ -196,3 +196,109 @@ async def cleanup_old_snapshots(db: aiosqlite.Connection, days: int = 30):
         (f"-{days} days",),
     )
     await db.commit()
+
+
+async def save_resolved_market(db: aiosqlite.Connection, market: dict):
+    """Insert a resolved market (idempotent via INSERT OR IGNORE on unique market_id)."""
+    await db.execute(
+        """INSERT OR IGNORE INTO resolved_markets
+           (market_id, question, category, final_price, outcome, resolved_at, brier_score)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            market["market_id"],
+            market.get("question"),
+            market.get("category"),
+            market["final_price"],
+            market["outcome"],
+            market["resolved_at"],
+            market["brier_score"],
+        ),
+    )
+
+
+async def update_signal_outcomes(
+    db: aiosqlite.Connection, market_id: str, outcome: int
+):
+    """Mark all divergence signals for a market as resolved and score correctness.
+
+    SM was correct if:
+      sm_direction='YES' AND outcome=1
+      sm_direction='NO'  AND outcome=0
+    """
+    await db.execute(
+        """UPDATE divergence_signals
+           SET resolved = 1,
+               outcome_correct = CASE
+                   WHEN (sm_direction = 'YES' AND ? = 1) THEN 1
+                   WHEN (sm_direction = 'NO'  AND ? = 0) THEN 1
+                   ELSE 0
+               END
+           WHERE market_id = ? AND resolved = 0""",
+        (outcome, outcome, market_id),
+    )
+
+
+async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
+    """Aggregate signal accuracy stats."""
+    # Overall
+    cursor = await db.execute(
+        """SELECT
+               COUNT(*) as total,
+               SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct,
+               AVG(signal_strength) as avg_score
+           FROM divergence_signals
+           WHERE resolved = 1 AND outcome_correct IS NOT NULL"""
+    )
+    row = await cursor.fetchone()
+    total = row[0] or 0
+    correct = row[1] or 0
+    avg_score = row[2] or 0.0
+
+    overall = {
+        "total_signals": total,
+        "correct": correct,
+        "win_rate": round(correct / total, 4) if total > 0 else 0.0,
+        "avg_score": round(avg_score, 2),
+    }
+
+    # By tier (high >= 70, medium 40-70, low < 40)
+    by_tier = {}
+    for tier, low, high in [("high", 70, 101), ("medium", 40, 70), ("low", 0, 40)]:
+        cursor = await db.execute(
+            """SELECT
+                   COUNT(*) as total,
+                   SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct
+               FROM divergence_signals
+               WHERE resolved = 1 AND outcome_correct IS NOT NULL
+                 AND signal_strength >= ? AND signal_strength < ?""",
+            (low, high),
+        )
+        r = await cursor.fetchone()
+        t = r[0] or 0
+        c = r[1] or 0
+        by_tier[tier] = {
+            "total": t,
+            "correct": c,
+            "win_rate": round(c / t, 4) if t > 0 else 0.0,
+        }
+
+    # Rolling 30-day
+    cursor = await db.execute(
+        """SELECT
+               COUNT(*) as total,
+               SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct
+           FROM divergence_signals
+           WHERE resolved = 1 AND outcome_correct IS NOT NULL
+             AND timestamp >= datetime('now', '-30 days')"""
+    )
+    r30 = await cursor.fetchone()
+    t30 = r30[0] or 0
+    c30 = r30[1] or 0
+
+    rolling_30d = {
+        "total": t30,
+        "correct": c30,
+        "win_rate": round(c30 / t30, 4) if t30 > 0 else 0.0,
+    }
+
+    return {"overall": overall, "by_tier": by_tier, "rolling_30d": rolling_30d}

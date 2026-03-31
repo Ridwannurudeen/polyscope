@@ -54,6 +54,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/movers — Biggest probability shifts \\(24h\\)\n"
         "/market <query> — Search market details\n"
         "/calibration — Polymarket accuracy summary\n"
+        "/accuracy — Signal track record\n"
         "/help — Command list"
         + DISCLAIMER,
         parse_mode="MarkdownV2",
@@ -165,6 +166,48 @@ async def calibration(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
 
 
+async def accuracy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    data = await _api_get("/api/signals/accuracy")
+    if not data or not data.get("overall"):
+        await update.message.reply_text(
+            "No accuracy data yet\\. Signals will be scored as markets resolve\\." + DISCLAIMER,
+            parse_mode="MarkdownV2",
+        )
+        return
+
+    o = data["overall"]
+    tiers = data.get("by_tier", {})
+    r30 = data.get("rolling_30d", {})
+
+    wr = _esc(f"{o['win_rate'] * 100:.1f}%")
+    total = _esc(str(o["total_signals"]))
+    correct = _esc(str(o["correct"]))
+
+    lines = [
+        "*Signal Track Record*\n",
+        f"Win Rate: {wr}",
+        f"Signals Tracked: {total}",
+        f"Correct Calls: {correct}\n",
+    ]
+
+    if tiers:
+        lines.append("*By Confidence Tier:*")
+        for tier in ("high", "medium", "low"):
+            t = tiers.get(tier, {})
+            if t.get("total", 0) > 0:
+                twr = _esc(f"{t['win_rate'] * 100:.0f}%")
+                tc = _esc(str(t["total"]))
+                lines.append(f"  {_esc(tier.title())}: {twr} \\({tc} signals\\)")
+
+    if r30.get("total", 0) > 0:
+        rwr = _esc(f"{r30['win_rate'] * 100:.1f}%")
+        rc = _esc(str(r30["correct"]))
+        rt = _esc(str(r30["total"]))
+        lines.append(f"\n*30\\-Day Rolling:* {rwr} \\({rc}/{rt}\\)")
+
+    await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
+
+
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "*PolyScope Commands*\n\n"
@@ -172,6 +215,7 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/movers — Biggest probability shifts\n"
         "/market <query> — Search markets\n"
         "/calibration — Accuracy dashboard\n"
+        "/accuracy — Signal track record\n"
         "/help — This message"
         + DISCLAIMER,
         parse_mode="MarkdownV2",
@@ -189,6 +233,7 @@ def main():
     app.add_handler(CommandHandler("movers", movers))
     app.add_handler(CommandHandler("market", market_search))
     app.add_handler(CommandHandler("calibration", calibration))
+    app.add_handler(CommandHandler("accuracy", accuracy))
     app.add_handler(CommandHandler("help", help_cmd))
 
     logger.info("PolyScope bot starting...")
