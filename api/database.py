@@ -210,6 +210,14 @@ async def get_latest_snapshots(db: aiosqlite.Connection, hours: int = 168) -> li
     return [dict(r) for r in rows]
 
 
+def _normalize_signal(row: dict) -> dict:
+    """Normalize DB signal rows so field names match the DivergenceSignal dataclass."""
+    d = dict(row)
+    if "signal_strength" in d and "score" not in d:
+        d["score"] = d["signal_strength"]
+    return d
+
+
 async def get_divergence_signals(
     db: aiosqlite.Connection, limit: int = 50, hours: int | None = None
 ) -> list[dict]:
@@ -227,7 +235,7 @@ async def get_divergence_signals(
             (limit,),
         )
     rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
+    return [_normalize_signal(r) for r in rows]
 
 
 async def get_divergence_history(
@@ -240,7 +248,7 @@ async def get_divergence_history(
         (limit,),
     )
     rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
+    return [_normalize_signal(r) for r in rows]
 
 
 async def get_resolved_markets(db: aiosqlite.Connection) -> list[dict]:
