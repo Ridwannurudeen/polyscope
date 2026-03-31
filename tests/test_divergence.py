@@ -57,7 +57,9 @@ class TestScoreComponents:
         assert _score_trader_count(50, 50) == 100
 
     def test_trader_count_half(self):
-        assert _score_trader_count(25, 50) == 50
+        # log2 scale: 30 + 70 * log2(25)/log2(50) ≈ 87.6
+        result = _score_trader_count(25, 50)
+        assert 85 < result < 90
 
     def test_trader_count_zero(self):
         assert _score_trader_count(0, 50) == 0
