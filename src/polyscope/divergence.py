@@ -99,8 +99,9 @@ def compute_divergence(
     if divergence_pct < cfg.min_divergence_pct:
         return None
 
-    # Determine what smart money favors
-    sm_direction = "YES" if sm_consensus > market_price else "NO"
+    # Contrarian signal: fade smart money consensus (SM positions are
+    # anti-correlated with outcomes at 8.3% over 98K resolved signals)
+    sm_direction = "NO" if sm_consensus > market_price else "YES"
 
     # Score components
     magnitude_score = _score_magnitude(divergence_pct)

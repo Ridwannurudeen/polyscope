@@ -226,7 +226,7 @@ class TestTradeWeightedConsensus:
 
 class TestComputeDivergence:
     def test_strong_divergence(self):
-        """Market says 70% YES but SM is heavily NO."""
+        """Market says 70% YES but SM is heavily NO — contrarian signal says YES."""
         market = _make_market(price_yes=0.70)
         traders = {f"0x{i}": _make_trader(f"0x{i}", i + 1) for i in range(10)}
         positions = [
@@ -237,7 +237,7 @@ class TestComputeDivergence:
 
         signal = compute_divergence(market, positions, traders, config)
         assert signal is not None
-        assert signal.sm_direction == "NO"
+        assert signal.sm_direction == "YES"
         assert signal.divergence_pct > 0.1
         assert signal.signal_source == "positions"
 
