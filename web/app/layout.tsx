@@ -41,6 +41,7 @@ const NAV_ITEMS = [
   { href: "/smart-money", label: "Smart Money" },
   { href: "/traders", label: "Traders" },
   { href: "/calibration", label: "Calibration" },
+  { href: "/methodology", label: "Methodology" },
   { href: "/api/docs", label: "API", external: true },
 ];
 

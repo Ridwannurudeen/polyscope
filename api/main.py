@@ -19,6 +19,7 @@ from .database import (
     get_pending_whale_alerts,
     get_resolved_markets,
     get_signal_accuracy,
+    get_methodology_stats,
     get_signal_evidence,
     get_signal_pnl_simulation,
     get_signal_history_for_market,
@@ -331,6 +332,16 @@ async def traders_accuracy_leaderboard(
         "order": order,
         "min_signals": min_signals,
     }
+
+
+@app.get("/api/methodology/stats")
+async def methodology_stats():
+    """Live dataset statistics for the public methodology page."""
+    db = await get_db()
+    try:
+        return await get_methodology_stats(db)
+    finally:
+        await db.close()
 
 
 @app.get("/api/signals/evidence/{market_id}")

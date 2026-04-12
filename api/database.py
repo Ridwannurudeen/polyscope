@@ -529,6 +529,86 @@ async def get_trader_accuracy_leaderboard(
     return [dict(r) for r in rows]
 
 
+async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
+    """Live dataset stats for the public methodology page."""
+    # Signal counts and time range
+    cursor = await db.execute(
+        """SELECT COUNT(*),
+                  SUM(CASE WHEN resolved = 1 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END),
+                  MIN(timestamp), MAX(timestamp)
+           FROM divergence_signals"""
+    )
+    row = await cursor.fetchone()
+    total, resolved, correct, min_ts, max_ts = row
+
+    resolved = resolved or 0
+    correct = correct or 0
+    win_rate = (correct / resolved * 100) if resolved > 0 else None
+
+    # Win rate by market skew (the honest breakdown)
+    cursor = await db.execute(
+        """
+        SELECT
+            CASE
+                WHEN market_price >= 0.9 OR market_price <= 0.1 THEN 'very_lopsided'
+                WHEN market_price >= 0.75 OR market_price <= 0.25 THEN 'lopsided'
+                WHEN market_price >= 0.6  OR market_price <= 0.4  THEN 'moderate'
+                ELSE 'tight'
+            END AS skew,
+            COUNT(*) AS total,
+            SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) AS correct
+        FROM divergence_signals
+        WHERE resolved = 1
+        GROUP BY skew
+        """
+    )
+    skew_rows = await cursor.fetchall()
+    skew_breakdown = {}
+    for r in skew_rows:
+        t = r[1] or 0
+        c = r[2] or 0
+        skew_breakdown[r[0]] = {
+            "total": t,
+            "correct": c,
+            "win_rate_pct": (c / t * 100) if t > 0 else None,
+        }
+
+    # Resolved markets tracked
+    cursor = await db.execute("SELECT COUNT(*) FROM resolved_markets")
+    resolved_markets = (await cursor.fetchone())[0] or 0
+
+    # Traders scored
+    cursor = await db.execute(
+        "SELECT COUNT(*), AVG(accuracy_pct) FROM trader_accuracy WHERE total_divergent_signals >= 1"
+    )
+    tr_row = await cursor.fetchone()
+    traders_scored = tr_row[0] or 0
+    avg_trader_accuracy = tr_row[1]
+
+    # Per-trader records captured
+    cursor = await db.execute("SELECT COUNT(*) FROM signal_trader_positions")
+    trader_records = (await cursor.fetchone())[0] or 0
+
+    return {
+        "signals": {
+            "total": total or 0,
+            "resolved": resolved,
+            "correct": correct,
+            "overall_win_rate_pct": win_rate,
+            "first_captured": min_ts,
+            "latest_captured": max_ts,
+        },
+        "skew_breakdown": skew_breakdown,
+        "resolved_markets": resolved_markets,
+        "per_trader": {
+            "records_captured": trader_records,
+            "traders_scored": traders_scored,
+            "avg_accuracy_pct": avg_trader_accuracy,
+        },
+    }
+
+
 async def get_signal_evidence(
     db: aiosqlite.Connection, market_id: str
 ) -> dict | None:
