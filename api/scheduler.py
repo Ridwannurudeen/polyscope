@@ -20,6 +20,7 @@ from .database import (
     expire_converged_signals,
     get_category_weights,
     get_db,
+    rebuild_trader_accuracy,
     rebuild_trader_category_stats,
     save_divergence_signal,
     save_resolved_market,
@@ -364,11 +365,15 @@ async def track_outcomes_job():
         await rebuild_trader_category_stats(db)
         _category_weights = await get_category_weights(db)
 
+        # Rebuild per-trader accuracy leaderboard from resolved signals
+        accuracy_updated = await rebuild_trader_accuracy(db)
+
         await db.commit()
         logger.info(
-            "Outcome tracking complete: %d resolved markets saved, %d category weights loaded",
+            "Outcome tracking complete: %d resolved markets saved, %d category weights loaded, %d traders scored",
             saved,
             sum(len(v) for v in _category_weights.values()),
+            accuracy_updated,
         )
     except Exception:
         logger.exception("track_outcomes_job failed")

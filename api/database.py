@@ -370,6 +370,180 @@ async def update_signal_outcomes(
     )
 
 
+# ── Per-Trader Accuracy ────────────────────────────────────
+
+
+async def rebuild_trader_accuracy(db: aiosqlite.Connection) -> int:
+    """Recompute per-trader predictive accuracy from resolved signals.
+
+    A trader's prediction for a signal is their own position direction
+    (YES/NO), NOT the aggregate consensus. A trader is "correct" when
+    their position direction matches the market outcome.
+
+    Returns the number of trader rows updated.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+
+    # Pull per-trader hit/miss aggregated against resolved outcomes.
+    # We join signal_trader_positions to divergence_signals to the
+    # resolved_markets outcome so each trader's individual direction
+    # is compared to the market's final outcome.
+    cursor = await db.execute(
+        """
+        SELECT
+            stp.trader_address,
+            COUNT(*) AS total,
+            SUM(CASE
+                WHEN (stp.position_direction = 'YES' AND rm.outcome = 1) THEN 1
+                WHEN (stp.position_direction = 'NO'  AND rm.outcome = 0) THEN 1
+                ELSE 0
+            END) AS correct_count
+        FROM signal_trader_positions stp
+        JOIN divergence_signals ds ON ds.id = stp.signal_id
+        JOIN resolved_markets rm ON rm.market_id = ds.market_id
+        WHERE ds.resolved = 1 AND rm.outcome IN (0, 1)
+        GROUP BY stp.trader_address
+        """
+    )
+    overall_rows = await cursor.fetchall()
+
+    if not overall_rows:
+        return 0
+
+    # Per-trader skew breakdown
+    cursor = await db.execute(
+        """
+        SELECT
+            stp.trader_address,
+            CASE
+                WHEN ds.market_price >= 0.9 OR ds.market_price <= 0.1 THEN 'very_lopsided'
+                WHEN ds.market_price >= 0.75 OR ds.market_price <= 0.25 THEN 'lopsided'
+                WHEN ds.market_price >= 0.6  OR ds.market_price <= 0.4  THEN 'moderate'
+                ELSE 'tight'
+            END AS skew,
+            COUNT(*) AS total,
+            SUM(CASE
+                WHEN (stp.position_direction = 'YES' AND rm.outcome = 1) THEN 1
+                WHEN (stp.position_direction = 'NO'  AND rm.outcome = 0) THEN 1
+                ELSE 0
+            END) AS correct_count
+        FROM signal_trader_positions stp
+        JOIN divergence_signals ds ON ds.id = stp.signal_id
+        JOIN resolved_markets rm ON rm.market_id = ds.market_id
+        WHERE ds.resolved = 1 AND rm.outcome IN (0, 1)
+        GROUP BY stp.trader_address, skew
+        """
+    )
+    skew_rows = await cursor.fetchall()
+    skew_map: dict[str, dict[str, dict[str, int]]] = {}
+    for r in skew_rows:
+        skew_map.setdefault(r[0], {})[r[1]] = {"total": r[2], "correct": r[3]}
+
+    # Per-trader category breakdown
+    cursor = await db.execute(
+        """
+        SELECT
+            stp.trader_address,
+            COALESCE(ds.category, '') AS sig_category,
+            COUNT(*) AS total,
+            SUM(CASE
+                WHEN (stp.position_direction = 'YES' AND rm.outcome = 1) THEN 1
+                WHEN (stp.position_direction = 'NO'  AND rm.outcome = 0) THEN 1
+                ELSE 0
+            END) AS correct_count
+        FROM signal_trader_positions stp
+        JOIN divergence_signals ds ON ds.id = stp.signal_id
+        JOIN resolved_markets rm ON rm.market_id = ds.market_id
+        WHERE ds.resolved = 1 AND rm.outcome IN (0, 1)
+        GROUP BY stp.trader_address, sig_category
+        """
+    )
+    cat_rows = await cursor.fetchall()
+    cat_map: dict[str, dict[str, dict[str, int]]] = {}
+    for r in cat_rows:
+        cat_map.setdefault(r[0], {})[r[1]] = {"total": r[2], "correct": r[3]}
+
+    now = datetime.now(timezone.utc).isoformat()
+    updated = 0
+    for row in overall_rows:
+        trader_address, total, correct = row[0], row[1], row[2] or 0
+        wrong = total - correct
+        accuracy_pct = (correct / total * 100) if total > 0 else 0.0
+        accuracy_by_skew = _json.dumps(skew_map.get(trader_address, {}))
+        accuracy_by_category = _json.dumps(cat_map.get(trader_address, {}))
+
+        await db.execute(
+            """INSERT INTO trader_accuracy
+               (trader_address, total_divergent_signals, correct_predictions,
+                wrong_predictions, accuracy_pct, accuracy_by_skew,
+                accuracy_by_category, last_updated)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(trader_address) DO UPDATE SET
+                   total_divergent_signals = excluded.total_divergent_signals,
+                   correct_predictions = excluded.correct_predictions,
+                   wrong_predictions = excluded.wrong_predictions,
+                   accuracy_pct = excluded.accuracy_pct,
+                   accuracy_by_skew = excluded.accuracy_by_skew,
+                   accuracy_by_category = excluded.accuracy_by_category,
+                   last_updated = excluded.last_updated""",
+            (
+                trader_address,
+                total,
+                correct,
+                wrong,
+                accuracy_pct,
+                accuracy_by_skew,
+                accuracy_by_category,
+                now,
+            ),
+        )
+        updated += 1
+
+    return updated
+
+
+async def get_trader_accuracy_leaderboard(
+    db: aiosqlite.Connection,
+    order: str = "predictive",
+    limit: int = 100,
+    min_signals: int = 10,
+) -> list[dict]:
+    """Return top traders by predictive accuracy.
+
+    order='predictive': highest accuracy first
+    order='anti-predictive': lowest accuracy first (fade list)
+    """
+    direction = "DESC" if order == "predictive" else "ASC"
+    cursor = await db.execute(
+        f"""SELECT trader_address, total_divergent_signals, correct_predictions,
+                   wrong_predictions, accuracy_pct, accuracy_by_skew,
+                   accuracy_by_category, last_updated
+            FROM trader_accuracy
+            WHERE total_divergent_signals >= ?
+            ORDER BY accuracy_pct {direction}, total_divergent_signals DESC
+            LIMIT ?""",
+        (min_signals, limit),
+    )
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_trader_profile(
+    db: aiosqlite.Connection, trader_address: str
+) -> dict | None:
+    cursor = await db.execute(
+        """SELECT trader_address, total_divergent_signals, correct_predictions,
+                  wrong_predictions, accuracy_pct, accuracy_by_skew,
+                  accuracy_by_category, last_updated
+           FROM trader_accuracy
+           WHERE trader_address = ?""",
+        (trader_address,),
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
 # ── Signal Expiration ──────────────────────────────────────
 
 

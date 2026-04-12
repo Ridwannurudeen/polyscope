@@ -21,6 +21,8 @@ from .database import (
     get_signal_accuracy,
     get_signal_pnl_simulation,
     get_signal_history_for_market,
+    get_trader_accuracy_leaderboard,
+    get_trader_profile,
     get_whale_alerts,
     init_db,
     mark_alerts_notified,
@@ -285,6 +287,77 @@ async def smart_money_leaderboard():
         "traders": [asdict(t) for t in leaderboard],
         "count": len(leaderboard),
     }
+
+
+@app.get("/api/traders/leaderboard")
+async def traders_accuracy_leaderboard(
+    order: str = Query("predictive", pattern="^(predictive|anti-predictive)$"),
+    limit: int = Query(100, ge=1, le=500),
+    min_signals: int = Query(10, ge=1),
+):
+    """Traders ranked by per-signal predictive accuracy.
+
+    order=predictive      — highest accuracy first (the real smart money)
+    order=anti-predictive — lowest accuracy first (fade list)
+
+    Only traders with >= min_signals divergent positions are included.
+    """
+    import json
+
+    db = await get_db()
+    try:
+        rows = await get_trader_accuracy_leaderboard(
+            db, order=order, limit=limit, min_signals=min_signals
+        )
+    finally:
+        await db.close()
+
+    for r in rows:
+        if r.get("accuracy_by_skew"):
+            try:
+                r["accuracy_by_skew"] = json.loads(r["accuracy_by_skew"])
+            except (ValueError, TypeError):
+                r["accuracy_by_skew"] = {}
+        if r.get("accuracy_by_category"):
+            try:
+                r["accuracy_by_category"] = json.loads(r["accuracy_by_category"])
+            except (ValueError, TypeError):
+                r["accuracy_by_category"] = {}
+
+    return {
+        "traders": rows,
+        "count": len(rows),
+        "order": order,
+        "min_signals": min_signals,
+    }
+
+
+@app.get("/api/traders/{trader_address}")
+async def trader_profile(trader_address: str):
+    """Individual trader accuracy profile with skew/category breakdowns."""
+    import json
+
+    db = await get_db()
+    try:
+        profile = await get_trader_profile(db, trader_address)
+    finally:
+        await db.close()
+
+    if not profile:
+        return {"error": "trader not found or has no scored signals"}
+
+    if profile.get("accuracy_by_skew"):
+        try:
+            profile["accuracy_by_skew"] = json.loads(profile["accuracy_by_skew"])
+        except (ValueError, TypeError):
+            profile["accuracy_by_skew"] = {}
+    if profile.get("accuracy_by_category"):
+        try:
+            profile["accuracy_by_category"] = json.loads(profile["accuracy_by_category"])
+        except (ValueError, TypeError):
+            profile["accuracy_by_category"] = {}
+
+    return profile
 
 
 @app.get("/api/calibration")

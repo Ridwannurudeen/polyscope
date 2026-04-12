@@ -8,7 +8,10 @@ from api.database import (
     expire_converged_signals,
     get_expired_signal_count,
     get_signal_accuracy,
+    get_trader_accuracy_leaderboard,
+    get_trader_profile,
     init_db,
+    rebuild_trader_accuracy,
     save_divergence_signal,
     save_resolved_market,
     save_signal_trader_positions,
@@ -395,3 +398,144 @@ async def test_save_signal_trader_positions_empty_is_noop(db):
     cursor = await db.execute("SELECT COUNT(*) FROM signal_trader_positions")
     row = await cursor.fetchone()
     assert row[0] == 0
+
+
+async def _seed_signal_with_traders(
+    db, market_id: str, market_price: float, category: str,
+    trader_directions: list[tuple[str, str]],  # (address, YES|NO)
+):
+    """Helper: insert a signal + resolved market + per-trader rows."""
+    signal = {
+        "market_id": market_id,
+        "timestamp": "2026-04-12T00:00:00+00:00",
+        "market_price": market_price,
+        "sm_consensus": 0.8 if market_price < 0.5 else 0.2,
+        "divergence_pct": 0.2,
+        "score": 75.0,
+        "sm_trader_count": len(trader_directions),
+        "sm_direction": "NO",
+        "question": "Test?",
+        "category": category,
+        "signal_source": "positions",
+    }
+    signal_id = await save_divergence_signal(db, signal)
+    await save_signal_trader_positions(
+        db,
+        [
+            {
+                "signal_id": signal_id,
+                "market_id": market_id,
+                "trader_address": addr,
+                "trader_rank": 1,
+                "position_direction": direction,
+                "position_size": 5000.0,
+                "avg_price": 0.5,
+                "weight_in_consensus": 1.0,
+                "timestamp": "2026-04-12T00:00:00+00:00",
+            }
+            for addr, direction in trader_directions
+        ],
+    )
+    # Mark signal resolved so rebuild picks it up
+    await db.execute(
+        "UPDATE divergence_signals SET resolved = 1 WHERE id = ?",
+        (signal_id,),
+    )
+    return signal_id
+
+
+@pytest.mark.anyio
+async def test_rebuild_trader_accuracy_basic(db):
+    # Seed: 2 signals, 2 traders.
+    # 0xaaa: always picks YES on markets that resolve YES → 100% accurate
+    # 0xbbb: always picks NO on markets that resolve YES → 0% accurate
+    await _seed_signal_with_traders(
+        db, "m1", 0.6, "crypto",
+        [("0xaaa", "YES"), ("0xbbb", "NO")],
+    )
+    await _seed_signal_with_traders(
+        db, "m2", 0.6, "crypto",
+        [("0xaaa", "YES"), ("0xbbb", "NO")],
+    )
+    await save_resolved_market(db, {
+        "market_id": "m1", "question": "", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    await save_resolved_market(db, {
+        "market_id": "m2", "question": "", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    await db.commit()
+
+    updated = await rebuild_trader_accuracy(db)
+    assert updated == 2
+    await db.commit()
+
+    profile_a = await get_trader_profile(db, "0xaaa")
+    profile_b = await get_trader_profile(db, "0xbbb")
+    assert profile_a["accuracy_pct"] == 100.0
+    assert profile_a["correct_predictions"] == 2
+    assert profile_b["accuracy_pct"] == 0.0
+    assert profile_b["wrong_predictions"] == 2
+
+
+@pytest.mark.anyio
+async def test_trader_leaderboard_ordering(db):
+    # High accuracy trader
+    for i in range(10):
+        await _seed_signal_with_traders(
+            db, f"m{i}", 0.6, "crypto", [("0xgood", "YES")],
+        )
+        await save_resolved_market(db, {
+            "market_id": f"m{i}", "question": "", "category": "crypto",
+            "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+        })
+    # Low accuracy trader
+    for i in range(10, 20):
+        await _seed_signal_with_traders(
+            db, f"m{i}", 0.6, "crypto", [("0xbad", "NO")],
+        )
+        await save_resolved_market(db, {
+            "market_id": f"m{i}", "question": "", "category": "crypto",
+            "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+        })
+    await db.commit()
+
+    await rebuild_trader_accuracy(db)
+    await db.commit()
+
+    predictive = await get_trader_accuracy_leaderboard(db, order="predictive", min_signals=5)
+    anti = await get_trader_accuracy_leaderboard(db, order="anti-predictive", min_signals=5)
+
+    assert predictive[0]["trader_address"] == "0xgood"
+    assert predictive[0]["accuracy_pct"] == 100.0
+    assert anti[0]["trader_address"] == "0xbad"
+    assert anti[0]["accuracy_pct"] == 0.0
+
+
+@pytest.mark.anyio
+async def test_trader_leaderboard_respects_min_signals(db):
+    # Trader with only 2 signals should not appear when min_signals=5
+    await _seed_signal_with_traders(db, "m1", 0.6, "crypto", [("0xlow", "YES")])
+    await _seed_signal_with_traders(db, "m2", 0.6, "crypto", [("0xlow", "YES")])
+    await save_resolved_market(db, {
+        "market_id": "m1", "question": "", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    await save_resolved_market(db, {
+        "market_id": "m2", "question": "", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    await db.commit()
+
+    await rebuild_trader_accuracy(db)
+    await db.commit()
+
+    result = await get_trader_accuracy_leaderboard(db, min_signals=5)
+    assert len(result) == 0
+
+
+@pytest.mark.anyio
+async def test_rebuild_returns_zero_without_data(db):
+    updated = await rebuild_trader_accuracy(db)
+    assert updated == 0
