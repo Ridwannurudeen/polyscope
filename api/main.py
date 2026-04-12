@@ -7,16 +7,19 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 from .cache import cache
 from .database import (
+    add_to_watchlist,
     get_db,
     get_divergence_history,
     get_divergence_signals,
     get_expired_signal_count,
     get_pending_whale_alerts,
+    get_portfolio,
     get_resolved_markets,
     get_signal_accuracy,
     get_methodology_stats,
@@ -25,9 +28,12 @@ from .database import (
     get_signal_history_for_market,
     get_trader_accuracy_leaderboard,
     get_trader_profile,
+    get_watchlist,
     get_whale_alerts,
     init_db,
     mark_alerts_notified,
+    record_user_action,
+    remove_from_watchlist,
 )
 from .scheduler import (
     cleanup_job,
@@ -548,5 +554,90 @@ async def whale_flow_pending():
     try:
         alerts = await get_pending_whale_alerts(db)
         return {"alerts": alerts, "count": len(alerts)}
+    finally:
+        await db.close()
+
+
+# ── Portfolio / Watchlist ──────────────────────────────────
+#
+# Anonymous per-client storage keyed by a UUID the frontend generates
+# and persists in localStorage. No auth, no account system — v1 is a
+# convenience layer, not an identity system.
+
+
+class WatchlistAddRequest(BaseModel):
+    client_id: str = Field(min_length=8, max_length=64)
+    market_id: str = Field(min_length=1, max_length=128)
+
+
+class UserActionRequest(BaseModel):
+    client_id: str = Field(min_length=8, max_length=64)
+    market_id: str = Field(min_length=1, max_length=128)
+    action_direction: str = Field(pattern="^(YES|NO)$")
+    size: float = Field(gt=0)
+    price: float = Field(gt=0, lt=1)
+    watchlist_id: int | None = None
+
+
+@app.post("/api/watchlist/add")
+async def watchlist_add(body: WatchlistAddRequest):
+    db = await get_db()
+    try:
+        result = await add_to_watchlist(db, body.client_id, body.market_id)
+        await db.commit()
+    finally:
+        await db.close()
+    if not result:
+        raise HTTPException(status_code=404, detail="no signal for this market")
+    return result
+
+
+@app.delete("/api/watchlist/{watchlist_id}")
+async def watchlist_remove(watchlist_id: int, client_id: str = Query(..., min_length=8)):
+    db = await get_db()
+    try:
+        removed = await remove_from_watchlist(db, client_id, watchlist_id)
+        await db.commit()
+    finally:
+        await db.close()
+    if not removed:
+        raise HTTPException(status_code=404, detail="not found or not yours")
+    return {"removed": True}
+
+
+@app.get("/api/watchlist")
+async def watchlist_list(client_id: str = Query(..., min_length=8)):
+    db = await get_db()
+    try:
+        items = await get_watchlist(db, client_id)
+    finally:
+        await db.close()
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/portfolio/act")
+async def portfolio_act(body: UserActionRequest):
+    db = await get_db()
+    try:
+        action_id = await record_user_action(
+            db,
+            client_id=body.client_id,
+            market_id=body.market_id,
+            action_direction=body.action_direction,
+            size=body.size,
+            price=body.price,
+            watchlist_id=body.watchlist_id,
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"id": action_id}
+
+
+@app.get("/api/portfolio")
+async def portfolio(client_id: str = Query(..., min_length=8)):
+    db = await get_db()
+    try:
+        return await get_portfolio(db, client_id)
     finally:
         await db.close()

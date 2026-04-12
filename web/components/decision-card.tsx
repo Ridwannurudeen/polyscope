@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { LogTrade } from "@/components/log-trade";
 import { ScoreBadge } from "@/components/score-badge";
 import { SignalEvidence } from "@/components/signal-evidence";
+import { WatchlistButton } from "@/components/watchlist-button";
 import type { DivergenceSignal } from "@/lib/api";
 
 function tierFromScore(score: number): {
@@ -73,6 +75,20 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
         <div className="flex items-center gap-2 shrink-0">
           <ScoreBadge score={signal.score} label="Score" />
         </div>
+      </div>
+
+      {/* Action bar */}
+      <div className="px-4 pb-3 flex items-center gap-2 flex-wrap">
+        <WatchlistButton marketId={signal.market_id} />
+        <LogTrade
+          marketId={signal.market_id}
+          defaultDirection={signal.sm_direction}
+          defaultPrice={
+            signal.sm_direction === "YES"
+              ? signal.market_price
+              : 1 - signal.market_price
+          }
+        />
       </div>
 
       {/* Thesis */}

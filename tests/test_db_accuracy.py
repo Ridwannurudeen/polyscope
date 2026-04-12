@@ -5,14 +5,19 @@ import pytest
 import aiosqlite
 
 from api.database import (
+    add_to_watchlist,
     expire_converged_signals,
     get_expired_signal_count,
+    get_portfolio,
     get_signal_accuracy,
     get_signal_evidence,
     get_trader_accuracy_leaderboard,
     get_trader_profile,
+    get_watchlist,
     init_db,
     rebuild_trader_accuracy,
+    record_user_action,
+    remove_from_watchlist,
     save_divergence_signal,
     save_resolved_market,
     save_signal_trader_positions,
@@ -581,6 +586,135 @@ async def test_get_signal_evidence_full_trail(db):
     # skew: 0.65 falls into moderate (0.6-0.75)
     assert evidence["skew"]["band"] == "moderate"
     assert evidence["category"]["name"] == "crypto"
+
+
+@pytest.mark.anyio
+async def test_watchlist_add_returns_none_without_signal(db):
+    result = await add_to_watchlist(db, "client1", "no-such-market")
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_watchlist_add_and_list(db):
+    # Seed a signal
+    await _seed_signal_with_traders(
+        db, "mw1", 0.6, "crypto", [("0xaaa", "YES")]
+    )
+    await db.commit()
+
+    result = await add_to_watchlist(db, "client1", "mw1")
+    await db.commit()
+    assert result is not None
+    assert result["market_id"] == "mw1"
+
+    items = await get_watchlist(db, "client1")
+    assert len(items) == 1
+    assert items[0]["market_id"] == "mw1"
+    assert items[0]["sm_direction_at_add"] is not None
+
+
+@pytest.mark.anyio
+async def test_watchlist_idempotent(db):
+    await _seed_signal_with_traders(
+        db, "mw2", 0.6, "crypto", [("0xaaa", "YES")]
+    )
+    await db.commit()
+
+    first = await add_to_watchlist(db, "client1", "mw2")
+    await db.commit()
+    second = await add_to_watchlist(db, "client1", "mw2")
+    await db.commit()
+
+    items = await get_watchlist(db, "client1")
+    assert len(items) == 1
+    assert first["id"] == second["id"]
+
+
+@pytest.mark.anyio
+async def test_watchlist_scoped_by_client(db):
+    await _seed_signal_with_traders(
+        db, "mw3", 0.6, "crypto", [("0xaaa", "YES")]
+    )
+    await db.commit()
+
+    await add_to_watchlist(db, "alice", "mw3")
+    await db.commit()
+
+    alice_items = await get_watchlist(db, "alice")
+    bob_items = await get_watchlist(db, "bob")
+    assert len(alice_items) == 1
+    assert len(bob_items) == 0
+
+
+@pytest.mark.anyio
+async def test_watchlist_remove_only_own(db):
+    await _seed_signal_with_traders(
+        db, "mw4", 0.6, "crypto", [("0xaaa", "YES")]
+    )
+    await db.commit()
+    result = await add_to_watchlist(db, "alice", "mw4")
+    await db.commit()
+
+    # Bob can't remove Alice's
+    ok = await remove_from_watchlist(db, "bob", result["id"])
+    await db.commit()
+    assert ok is False
+
+    # Alice can
+    ok = await remove_from_watchlist(db, "alice", result["id"])
+    await db.commit()
+    assert ok is True
+
+
+@pytest.mark.anyio
+async def test_portfolio_scores_resolved_actions(db):
+    # Seed resolved market
+    await _seed_signal_with_traders(
+        db, "pf1", 0.6, "crypto", [("0xaaa", "YES")]
+    )
+    await save_resolved_market(db, {
+        "market_id": "pf1", "question": "", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    await db.commit()
+
+    # User bought YES at 0.5 for 100 shares — correct call
+    await record_user_action(
+        db, "client1", "pf1", "YES", size=100.0, price=0.5
+    )
+    await db.commit()
+
+    port = await get_portfolio(db, "client1")
+    assert port["stats"]["total_actions"] == 1
+    assert port["stats"]["resolved_actions"] == 1
+    assert port["stats"]["correct"] == 1
+    assert port["stats"]["win_rate_pct"] == 100.0
+    # $100 @ $0.5 → win $0.5/share → $50 profit
+    assert port["stats"]["pnl_estimate_usd"] == 50.0
+
+
+@pytest.mark.anyio
+async def test_portfolio_handles_wrong_call(db):
+    await _seed_signal_with_traders(
+        db, "pf2", 0.4, "crypto", [("0xaaa", "NO")]
+    )
+    await save_resolved_market(db, {
+        "market_id": "pf2", "question": "", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    await db.commit()
+
+    # User bought NO at 0.6 for 100 shares — wrong call, market resolved YES
+    await record_user_action(
+        db, "client2", "pf2", "NO", size=100.0, price=0.6
+    )
+    await db.commit()
+
+    port = await get_portfolio(db, "client2")
+    assert port["stats"]["correct"] == 0
+    assert port["stats"]["win_rate_pct"] == 0.0
+    # Paid 100 * 0.6 = 60, lost it all
+    assert port["stats"]["pnl_estimate_usd"] == -60.0
 
 
 @pytest.mark.anyio

@@ -129,6 +129,33 @@ CREATE TABLE IF NOT EXISTS trader_accuracy (
     last_updated TEXT
 );
 
+CREATE TABLE IF NOT EXISTS watchlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id TEXT NOT NULL,
+    market_id TEXT NOT NULL,
+    signal_id_at_add INTEGER,
+    sm_direction_at_add TEXT,
+    market_price_at_add REAL,
+    sm_consensus_at_add REAL,
+    divergence_pct_at_add REAL,
+    question TEXT,
+    category TEXT,
+    added_at TEXT,
+    UNIQUE(client_id, market_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id TEXT NOT NULL,
+    market_id TEXT NOT NULL,
+    watchlist_id INTEGER,
+    action_direction TEXT,
+    size REAL,
+    price REAL,
+    acted_at TEXT,
+    FOREIGN KEY (watchlist_id) REFERENCES watchlist(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_snapshots_market_ts ON market_snapshots(market_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON market_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_ts ON divergence_signals(timestamp);
@@ -142,6 +169,10 @@ CREATE INDEX IF NOT EXISTS idx_stp_signal ON signal_trader_positions(signal_id);
 CREATE INDEX IF NOT EXISTS idx_stp_trader ON signal_trader_positions(trader_address);
 CREATE INDEX IF NOT EXISTS idx_stp_market ON signal_trader_positions(market_id);
 CREATE INDEX IF NOT EXISTS idx_trader_accuracy_pct ON trader_accuracy(accuracy_pct);
+CREATE INDEX IF NOT EXISTS idx_watchlist_client ON watchlist(client_id);
+CREATE INDEX IF NOT EXISTS idx_watchlist_market ON watchlist(market_id);
+CREATE INDEX IF NOT EXISTS idx_user_actions_client ON user_actions(client_id);
+CREATE INDEX IF NOT EXISTS idx_user_actions_market ON user_actions(market_id);
 """
 
 
@@ -527,6 +558,184 @@ async def get_trader_accuracy_leaderboard(
     )
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+async def add_to_watchlist(
+    db: aiosqlite.Connection, client_id: str, market_id: str
+) -> dict | None:
+    """Add the latest signal for market_id to a client's watchlist.
+
+    Returns the new row as dict, or None if no signal exists for the market.
+    Idempotent per (client_id, market_id).
+    """
+    from datetime import datetime, timezone
+
+    cursor = await db.execute(
+        """SELECT id, sm_direction, market_price, sm_consensus, divergence_pct,
+                  question, category
+           FROM divergence_signals
+           WHERE market_id = ?
+           ORDER BY timestamp DESC
+           LIMIT 1""",
+        (market_id,),
+    )
+    sig = await cursor.fetchone()
+    if not sig:
+        return None
+
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        cursor = await db.execute(
+            """INSERT INTO watchlist
+               (client_id, market_id, signal_id_at_add, sm_direction_at_add,
+                market_price_at_add, sm_consensus_at_add, divergence_pct_at_add,
+                question, category, added_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                client_id, market_id, sig["id"], sig["sm_direction"],
+                sig["market_price"], sig["sm_consensus"],
+                sig["divergence_pct"], sig["question"], sig["category"], now,
+            ),
+        )
+        row_id = cursor.lastrowid
+    except Exception:
+        # Likely UNIQUE constraint — already watchlisted
+        cursor = await db.execute(
+            "SELECT id FROM watchlist WHERE client_id = ? AND market_id = ?",
+            (client_id, market_id),
+        )
+        existing = await cursor.fetchone()
+        row_id = existing["id"] if existing else None
+
+    return {"id": row_id, "market_id": market_id}
+
+
+async def remove_from_watchlist(
+    db: aiosqlite.Connection, client_id: str, watchlist_id: int
+) -> bool:
+    cursor = await db.execute(
+        "DELETE FROM watchlist WHERE id = ? AND client_id = ?",
+        (watchlist_id, client_id),
+    )
+    return (cursor.rowcount or 0) > 0
+
+
+async def get_watchlist(
+    db: aiosqlite.Connection, client_id: str
+) -> list[dict]:
+    """Watchlist items with current signal state and resolved outcome if any."""
+    cursor = await db.execute(
+        """SELECT
+               w.id, w.market_id, w.sm_direction_at_add,
+               w.market_price_at_add, w.sm_consensus_at_add,
+               w.divergence_pct_at_add, w.question, w.category, w.added_at,
+               (SELECT market_price FROM divergence_signals
+                  WHERE market_id = w.market_id
+                  ORDER BY timestamp DESC LIMIT 1) AS current_market_price,
+               (SELECT sm_direction FROM divergence_signals
+                  WHERE market_id = w.market_id
+                  ORDER BY timestamp DESC LIMIT 1) AS current_sm_direction,
+               rm.outcome AS resolved_outcome,
+               rm.final_price AS resolved_final_price
+           FROM watchlist w
+           LEFT JOIN resolved_markets rm ON rm.market_id = w.market_id
+           WHERE w.client_id = ?
+           ORDER BY w.added_at DESC""",
+        (client_id,),
+    )
+    rows = await cursor.fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        if d["resolved_outcome"] is not None and d["sm_direction_at_add"]:
+            d["outcome_matched_direction"] = (
+                (d["sm_direction_at_add"] == "YES" and d["resolved_outcome"] == 1)
+                or (d["sm_direction_at_add"] == "NO" and d["resolved_outcome"] == 0)
+            )
+        else:
+            d["outcome_matched_direction"] = None
+        result.append(d)
+    return result
+
+
+async def record_user_action(
+    db: aiosqlite.Connection,
+    client_id: str,
+    market_id: str,
+    action_direction: str,
+    size: float,
+    price: float,
+    watchlist_id: int | None = None,
+) -> int:
+    """Record that a user manually acted on a signal."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = await db.execute(
+        """INSERT INTO user_actions
+           (client_id, market_id, watchlist_id, action_direction, size, price, acted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (client_id, market_id, watchlist_id, action_direction, size, price, now),
+    )
+    return cursor.lastrowid or 0
+
+
+async def get_portfolio(db: aiosqlite.Connection, client_id: str) -> dict:
+    """Portfolio summary: all user actions with outcomes + aggregate stats."""
+    cursor = await db.execute(
+        """SELECT
+               ua.id, ua.market_id, ua.action_direction, ua.size, ua.price, ua.acted_at,
+               w.question, w.category,
+               rm.outcome AS resolved_outcome,
+               rm.final_price AS resolved_final_price,
+               rm.resolved_at
+           FROM user_actions ua
+           LEFT JOIN watchlist w ON w.id = ua.watchlist_id
+           LEFT JOIN resolved_markets rm ON rm.market_id = ua.market_id
+           WHERE ua.client_id = ?
+           ORDER BY ua.acted_at DESC""",
+        (client_id,),
+    )
+    actions_rows = await cursor.fetchall()
+    actions = []
+    total = 0
+    correct = 0
+    pnl_estimate = 0.0
+    resolved_actions = 0
+
+    for r in actions_rows:
+        d = dict(r)
+        if d["resolved_outcome"] is not None:
+            resolved_actions += 1
+            total += 1
+            was_correct = (
+                (d["action_direction"] == "YES" and d["resolved_outcome"] == 1)
+                or (d["action_direction"] == "NO" and d["resolved_outcome"] == 0)
+            )
+            d["action_correct"] = was_correct
+            if was_correct:
+                correct += 1
+                # Profit: paid price, won $1 per share
+                pnl_estimate += (d["size"] or 0) * (1.0 - (d["price"] or 0))
+            else:
+                # Loss: paid price, got $0
+                pnl_estimate -= (d["size"] or 0) * (d["price"] or 0)
+        else:
+            d["action_correct"] = None
+        actions.append(d)
+
+    win_rate = (correct / total * 100) if total > 0 else None
+
+    return {
+        "actions": actions,
+        "stats": {
+            "total_actions": len(actions),
+            "resolved_actions": resolved_actions,
+            "correct": correct,
+            "win_rate_pct": win_rate,
+            "pnl_estimate_usd": round(pnl_estimate, 2),
+        },
+    }
 
 
 async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
