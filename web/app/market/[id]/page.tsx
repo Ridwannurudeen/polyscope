@@ -13,6 +13,7 @@ import {
 import { Disclaimer } from "@/components/disclaimer";
 import { LastUpdated } from "@/components/last-updated";
 import { ScoreBadge } from "@/components/score-badge";
+import { SignalEvidence } from "@/components/signal-evidence";
 import { SkeletonCard } from "@/components/skeleton";
 import { StatCard } from "@/components/stat-card";
 import { usePollingFetch } from "@/lib/hooks";
@@ -145,33 +146,36 @@ export default function MarketPage() {
 
       {/* Divergence Alert */}
       {divergence && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 mb-8">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="text-amber-400 font-semibold text-sm uppercase tracking-wide">
-                Counter-Consensus Signal
-              </h3>
-              <p className="text-white mt-2">
-                Smart money ({divergence.sm_trader_count} top traders) is
-                positioned{" "}
-                <span
-                  className={
-                    divergence.sm_direction === "YES"
-                      ? "text-emerald-400 font-bold"
-                      : "text-red-400 font-bold"
-                  }
-                >
-                  {divergence.sm_direction}
-                </span>{" "}
-                at {(divergence.sm_consensus * 100).toFixed(0)}%, while the
-                market says {(divergence.market_price * 100).toFixed(0)}%.
-              </p>
-              <p className="text-gray-400 text-sm mt-1">
-                Divergence: {(divergence.divergence_pct * 100).toFixed(0)}%
-              </p>
+        <div className="mb-8">
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-amber-400 font-semibold text-sm uppercase tracking-wide">
+                  Counter-Consensus Signal
+                </h3>
+                <p className="text-white mt-2">
+                  PolyScope view ({divergence.sm_trader_count} top traders
+                  positioned){" "}
+                  <span
+                    className={
+                      divergence.sm_direction === "YES"
+                        ? "text-emerald-400 font-bold"
+                        : "text-red-400 font-bold"
+                    }
+                  >
+                    {divergence.sm_direction}
+                  </span>{" "}
+                  at {(divergence.sm_consensus * 100).toFixed(0)}%, while the
+                  market says {(divergence.market_price * 100).toFixed(0)}%.
+                </p>
+                <p className="text-gray-400 text-sm mt-1">
+                  Divergence: {(divergence.divergence_pct * 100).toFixed(0)}%
+                </p>
+              </div>
+              <ScoreBadge score={divergence.score} label="Score" />
             </div>
-            <ScoreBadge score={divergence.score} label="Score" />
           </div>
+          <SignalEvidence marketId={id} />
         </div>
       )}
 

@@ -529,6 +529,120 @@ async def get_trader_accuracy_leaderboard(
     return [dict(r) for r in rows]
 
 
+async def get_signal_evidence(
+    db: aiosqlite.Connection, market_id: str
+) -> dict | None:
+    """Return full evidence trail for the most recent signal on a market.
+
+    Includes:
+    - signal metadata (direction, score, source, freshness)
+    - per-trader contributions (who, rank, direction, size, their accuracy)
+    - category hit rate (historical win rate in this category)
+    - skew-band hit rate (historical win rate at this price skew)
+    """
+    # Latest signal for this market
+    cursor = await db.execute(
+        """SELECT id, market_id, timestamp, market_price, sm_consensus,
+                  divergence_pct, signal_strength, sm_trader_count,
+                  sm_direction, question, category, resolved,
+                  outcome_correct, signal_source
+           FROM divergence_signals
+           WHERE market_id = ?
+           ORDER BY timestamp DESC
+           LIMIT 1""",
+        (market_id,),
+    )
+    signal_row = await cursor.fetchone()
+    if not signal_row:
+        return None
+
+    signal = dict(signal_row)
+    signal_id = signal["id"]
+    market_price = signal["market_price"] or 0.0
+    category = signal.get("category") or ""
+
+    # Per-trader contributions with their own accuracy stats
+    cursor = await db.execute(
+        """SELECT stp.trader_address, stp.trader_rank, stp.position_direction,
+                  stp.position_size, stp.avg_price, stp.weight_in_consensus,
+                  ta.accuracy_pct, ta.total_divergent_signals, ta.correct_predictions
+           FROM signal_trader_positions stp
+           LEFT JOIN trader_accuracy ta ON ta.trader_address = stp.trader_address
+           WHERE stp.signal_id = ?
+           ORDER BY stp.weight_in_consensus DESC""",
+        (signal_id,),
+    )
+    contributors = [dict(r) for r in await cursor.fetchall()]
+
+    # Skew band for this signal
+    if market_price >= 0.9 or market_price <= 0.1:
+        skew = "very_lopsided"
+        skew_label = "Very lopsided (≥90% or ≤10%)"
+    elif market_price >= 0.75 or market_price <= 0.25:
+        skew = "lopsided"
+        skew_label = "Lopsided (75-90% or 10-25%)"
+    elif market_price >= 0.6 or market_price <= 0.4:
+        skew = "moderate"
+        skew_label = "Moderate (60-75% or 25-40%)"
+    else:
+        skew = "tight"
+        skew_label = "Tight (40-60%)"
+
+    # Historical hit rate at this skew band
+    cursor = await db.execute(
+        """SELECT COUNT(*) AS total,
+                  SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) AS correct
+           FROM divergence_signals
+           WHERE resolved = 1
+             AND CASE
+                 WHEN market_price >= 0.9 OR market_price <= 0.1 THEN 'very_lopsided'
+                 WHEN market_price >= 0.75 OR market_price <= 0.25 THEN 'lopsided'
+                 WHEN market_price >= 0.6 OR market_price <= 0.4 THEN 'moderate'
+                 ELSE 'tight'
+             END = ?""",
+        (skew,),
+    )
+    skew_row = await cursor.fetchone()
+    skew_total = skew_row[0] or 0
+    skew_correct = skew_row[1] or 0
+    skew_hit_rate = (skew_correct / skew_total * 100) if skew_total > 0 else None
+
+    # Historical hit rate for this category
+    cat_hit_rate = None
+    cat_total = 0
+    cat_correct = 0
+    if category:
+        cursor = await db.execute(
+            """SELECT COUNT(*) AS total,
+                      SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) AS correct
+               FROM divergence_signals
+               WHERE resolved = 1 AND category = ?""",
+            (category,),
+        )
+        cat_row = await cursor.fetchone()
+        cat_total = cat_row[0] or 0
+        cat_correct = cat_row[1] or 0
+        cat_hit_rate = (cat_correct / cat_total * 100) if cat_total > 0 else None
+
+    return {
+        "signal": signal,
+        "contributors": contributors,
+        "skew": {
+            "band": skew,
+            "label": skew_label,
+            "total_resolved": skew_total,
+            "correct": skew_correct,
+            "hit_rate_pct": skew_hit_rate,
+        },
+        "category": {
+            "name": category,
+            "total_resolved": cat_total,
+            "correct": cat_correct,
+            "hit_rate_pct": cat_hit_rate,
+        },
+    }
+
+
 async def get_trader_profile(
     db: aiosqlite.Connection, trader_address: str
 ) -> dict | None:

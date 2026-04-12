@@ -19,6 +19,7 @@ from .database import (
     get_pending_whale_alerts,
     get_resolved_markets,
     get_signal_accuracy,
+    get_signal_evidence,
     get_signal_pnl_simulation,
     get_signal_history_for_market,
     get_trader_accuracy_leaderboard,
@@ -330,6 +331,26 @@ async def traders_accuracy_leaderboard(
         "order": order,
         "min_signals": min_signals,
     }
+
+
+@app.get("/api/signals/evidence/{market_id}")
+async def signal_evidence(market_id: str):
+    """Full evidence trail for the latest signal on a market.
+
+    Returns signal metadata, per-trader contributors with their own
+    predictive accuracy, historical hit rate at this market skew band,
+    and historical hit rate for this category.
+    """
+    db = await get_db()
+    try:
+        evidence = await get_signal_evidence(db, market_id)
+    finally:
+        await db.close()
+
+    if not evidence:
+        return {"error": "no signal found for this market"}
+
+    return evidence
 
 
 @app.get("/api/traders/{trader_address}")

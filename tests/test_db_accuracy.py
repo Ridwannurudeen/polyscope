@@ -8,6 +8,7 @@ from api.database import (
     expire_converged_signals,
     get_expired_signal_count,
     get_signal_accuracy,
+    get_signal_evidence,
     get_trader_accuracy_leaderboard,
     get_trader_profile,
     init_db,
@@ -539,3 +540,64 @@ async def test_trader_leaderboard_respects_min_signals(db):
 async def test_rebuild_returns_zero_without_data(db):
     updated = await rebuild_trader_accuracy(db)
     assert updated == 0
+
+
+@pytest.mark.anyio
+async def test_get_signal_evidence_returns_none_for_missing_market(db):
+    result = await get_signal_evidence(db, "nonexistent")
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_get_signal_evidence_full_trail(db):
+    # Seed a signal with traders + resolved market
+    signal_id = await _seed_signal_with_traders(
+        db, "mev1", 0.65, "crypto",
+        [("0xaaa", "YES"), ("0xbbb", "NO")],
+    )
+    await save_resolved_market(db, {
+        "market_id": "mev1", "question": "Test?", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    # Seed a sibling category signal so we have category stats
+    signal2_id = await _seed_signal_with_traders(
+        db, "mev2", 0.7, "crypto", [("0xaaa", "YES")],
+    )
+    await save_resolved_market(db, {
+        "market_id": "mev2", "question": "Test?", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    # Score the resolved signals' outcomes
+    await db.execute(
+        "UPDATE divergence_signals SET outcome_correct = 1 WHERE id IN (?, ?)",
+        (signal_id, signal2_id),
+    )
+    await db.commit()
+
+    evidence = await get_signal_evidence(db, "mev1")
+    assert evidence is not None
+    assert evidence["signal"]["market_id"] == "mev1"
+    assert len(evidence["contributors"]) == 2
+    # skew: 0.65 falls into moderate (0.6-0.75)
+    assert evidence["skew"]["band"] == "moderate"
+    assert evidence["category"]["name"] == "crypto"
+
+
+@pytest.mark.anyio
+async def test_get_signal_evidence_contributors_ordered_by_weight(db):
+    signal_id = await _seed_signal_with_traders(
+        db, "mev3", 0.65, "crypto",
+        [("0xlow", "YES"), ("0xhigh", "NO")],
+    )
+    # Manually override weights to have clear ordering
+    await db.execute(
+        "UPDATE signal_trader_positions SET weight_in_consensus = 0.1 WHERE trader_address = '0xlow'",
+    )
+    await db.execute(
+        "UPDATE signal_trader_positions SET weight_in_consensus = 5.0 WHERE trader_address = '0xhigh'",
+    )
+    await db.commit()
+
+    evidence = await get_signal_evidence(db, "mev3")
+    assert evidence["contributors"][0]["trader_address"] == "0xhigh"
+    assert evidence["contributors"][1]["trader_address"] == "0xlow"

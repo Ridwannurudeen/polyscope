@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { LastUpdated } from "@/components/last-updated";
 import { ScoreBadge } from "@/components/score-badge";
+import { SignalEvidence } from "@/components/signal-evidence";
 import { TableSkeleton } from "@/components/skeleton";
 import { WhaleFlow } from "@/components/whale-flow";
 import { usePollingFetch } from "@/lib/hooks";
@@ -34,6 +36,8 @@ interface HistoryResponse {
 }
 
 export default function SmartMoneyPage() {
+  const [expandedMarket, setExpandedMarket] = useState<string | null>(null);
+
   const {
     data: lbData,
     loading: lbLoading,
@@ -105,34 +109,48 @@ export default function SmartMoneyPage() {
             Active Divergences
           </h2>
           <div className="space-y-3">
-            {divergences.map((d, i) => (
-              <div
-                key={d.market_id + i}
-                className="bg-gray-900 border border-gray-800 rounded-xl p-4"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-white font-medium">{d.question}</p>
-                    <div className="flex gap-4 mt-2 text-sm">
-                      <span className="text-gray-400">
-                        Crowd: {(d.market_price * 100).toFixed(0)}% YES
-                      </span>
-                      <span
-                        className={
-                          d.sm_direction === "YES"
-                            ? "text-emerald-400"
-                            : "text-red-400"
+            {divergences.map((d, i) => {
+              const isExpanded = expandedMarket === d.market_id;
+              return (
+                <div
+                  key={d.market_id + i}
+                  className="bg-gray-900 border border-gray-800 rounded-xl p-4"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="text-white font-medium">{d.question}</p>
+                      <div className="flex gap-4 mt-2 text-sm">
+                        <span className="text-gray-400">
+                          Crowd: {(d.market_price * 100).toFixed(0)}% YES
+                        </span>
+                        <span
+                          className={
+                            d.sm_direction === "YES"
+                              ? "text-emerald-400"
+                              : "text-red-400"
+                          }
+                        >
+                          PolyScope: {(d.sm_consensus * 100).toFixed(0)}% (favors{" "}
+                          {d.sm_direction})
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <ScoreBadge score={d.score} label="Score" />
+                      <button
+                        onClick={() =>
+                          setExpandedMarket(isExpanded ? null : d.market_id)
                         }
+                        className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg whitespace-nowrap"
                       >
-                        SM: {(d.sm_consensus * 100).toFixed(0)}% (favors{" "}
-                        {d.sm_direction})
-                      </span>
+                        {isExpanded ? "Hide" : "Evidence"}
+                      </button>
                     </div>
                   </div>
-                  <ScoreBadge score={d.score} label="Score" />
+                  {isExpanded && <SignalEvidence marketId={d.market_id} />}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
