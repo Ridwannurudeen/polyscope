@@ -133,6 +133,46 @@ def compute_divergence(
     )
 
 
+def compute_trader_contributions(
+    sm_positions: list[Position],
+    traders: dict[str, Trader],
+    category: str = "",
+    category_weights: dict[str, dict[str, float]] | None = None,
+) -> list[dict]:
+    """Produce per-trader attribution records matching the consensus weighting.
+
+    Returns one record per ranked trader position with the exact weight
+    that would be applied in _weighted_consensus. Enables per-trader
+    accuracy scoring by persisting each trader's direction at signal time.
+    """
+    records: list[dict] = []
+    for pos in sm_positions:
+        trader = traders.get(pos.trader_address)
+        if not trader or trader.rank <= 0:
+            continue
+
+        weight = 1.0 / trader.rank
+        alpha_ratio = trader.profit / max(trader.volume, 1)
+        weight *= 1.0 + alpha_ratio * 100
+        if pos.size > 0:
+            weight *= 1.0 + math.log10(max(pos.size, 1))
+        if category_weights and category:
+            cat_w = category_weights.get(pos.trader_address, {}).get(category, 1.0)
+            weight *= cat_w
+
+        records.append(
+            {
+                "trader_address": pos.trader_address,
+                "trader_rank": trader.rank,
+                "position_direction": pos.side,
+                "position_size": pos.size,
+                "avg_price": pos.avg_price,
+                "weight_in_consensus": weight,
+            }
+        )
+    return records
+
+
 def _weighted_consensus(
     positions: list[Position],
     traders: dict[str, Trader],

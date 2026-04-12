@@ -7,7 +7,11 @@ import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from polyscope.divergence import DivergenceConfig, compute_divergence
+from polyscope.divergence import (
+    DivergenceConfig,
+    compute_divergence,
+    compute_trader_contributions,
+)
 from polyscope.models import Trader
 from polyscope.polymarket import PolymarketClient
 
@@ -19,6 +23,7 @@ from .database import (
     rebuild_trader_category_stats,
     save_divergence_signal,
     save_resolved_market,
+    save_signal_trader_positions,
     save_sm_trades,
     save_snapshot,
     save_whale_alert,
@@ -148,7 +153,25 @@ async def compute_divergences_job():
                 divergences_map[market.condition_id] = signal.divergence_pct
                 signals.append(signal)
                 signal_dict = asdict(signal)
-                await save_divergence_signal(db, signal_dict)
+                signal_id = await save_divergence_signal(db, signal_dict)
+
+                # Persist per-trader attribution for accuracy scoring
+                if signal_id and positions:
+                    contributions = compute_trader_contributions(
+                        positions, _traders,
+                        category=market.category,
+                        category_weights=_category_weights,
+                    )
+                    records = [
+                        {
+                            "signal_id": signal_id,
+                            "market_id": market.condition_id,
+                            "timestamp": now,
+                            **c,
+                        }
+                        for c in contributions
+                    ]
+                    await save_signal_trader_positions(db, records)
 
                 # Mark as candidate for trade-based refinement
                 if signal.divergence_pct > 0.05 or market.volume_24h > 100000:
@@ -206,15 +229,37 @@ async def compute_divergences_job():
                             (s for s in signals if s.market_id == market.condition_id),
                             None,
                         )
+                        trade_signal_id = 0
                         if existing:
                             if trade_signal.score > existing.score:
                                 signals.remove(existing)
                                 signals.append(trade_signal)
-                                await save_divergence_signal(db, asdict(trade_signal))
+                                trade_signal_id = await save_divergence_signal(
+                                    db, asdict(trade_signal)
+                                )
                         else:
                             signals.append(trade_signal)
-                            await save_divergence_signal(db, asdict(trade_signal))
+                            trade_signal_id = await save_divergence_signal(
+                                db, asdict(trade_signal)
+                            )
                             divergences_map[market.condition_id] = trade_signal.divergence_pct
+
+                        if trade_signal_id and positions:
+                            contributions = compute_trader_contributions(
+                                positions, _traders,
+                                category=market.category,
+                                category_weights=_category_weights,
+                            )
+                            stp_records = [
+                                {
+                                    "signal_id": trade_signal_id,
+                                    "market_id": market.condition_id,
+                                    "timestamp": now,
+                                    **c,
+                                }
+                                for c in contributions
+                            ]
+                            await save_signal_trader_positions(db, stp_records)
 
                 await asyncio.sleep(0.2)
             except Exception:

@@ -11,6 +11,7 @@ from api.database import (
     init_db,
     save_divergence_signal,
     save_resolved_market,
+    save_signal_trader_positions,
     update_signal_outcomes,
     DB_PATH,
     SCHEMA,
@@ -311,3 +312,86 @@ async def test_get_expired_signal_count(db):
 
     count = await get_expired_signal_count(db)
     assert count == 2
+
+
+@pytest.mark.anyio
+async def test_save_divergence_signal_returns_id(db):
+    signal = {
+        "market_id": "m1",
+        "timestamp": "2026-04-12T00:00:00+00:00",
+        "market_price": 0.6,
+        "sm_consensus": 0.8,
+        "divergence_pct": 0.2,
+        "score": 75.0,
+        "sm_trader_count": 3,
+        "sm_direction": "NO",
+        "question": "Test?",
+        "category": "crypto",
+        "signal_source": "positions",
+    }
+    signal_id = await save_divergence_signal(db, signal)
+    await db.commit()
+    assert signal_id > 0
+
+
+@pytest.mark.anyio
+async def test_save_signal_trader_positions_roundtrip(db):
+    signal = {
+        "market_id": "m1",
+        "timestamp": "2026-04-12T00:00:00+00:00",
+        "market_price": 0.6,
+        "sm_consensus": 0.8,
+        "divergence_pct": 0.2,
+        "score": 75.0,
+        "sm_trader_count": 2,
+        "sm_direction": "NO",
+        "question": "Test?",
+        "category": "crypto",
+        "signal_source": "positions",
+    }
+    signal_id = await save_divergence_signal(db, signal)
+    records = [
+        {
+            "signal_id": signal_id,
+            "market_id": "m1",
+            "trader_address": "0xaaa",
+            "trader_rank": 1,
+            "position_direction": "YES",
+            "position_size": 5000.0,
+            "avg_price": 0.7,
+            "weight_in_consensus": 1.5,
+            "timestamp": "2026-04-12T00:00:00+00:00",
+        },
+        {
+            "signal_id": signal_id,
+            "market_id": "m1",
+            "trader_address": "0xbbb",
+            "trader_rank": 5,
+            "position_direction": "NO",
+            "position_size": 2000.0,
+            "avg_price": 0.3,
+            "weight_in_consensus": 0.4,
+            "timestamp": "2026-04-12T00:00:00+00:00",
+        },
+    ]
+    await save_signal_trader_positions(db, records)
+    await db.commit()
+
+    cursor = await db.execute(
+        "SELECT trader_address, position_direction, position_size FROM signal_trader_positions WHERE signal_id = ?",
+        (signal_id,),
+    )
+    rows = await cursor.fetchall()
+    assert len(rows) == 2
+    by_addr = {r[0]: r for r in rows}
+    assert by_addr["0xaaa"][1] == "YES"
+    assert by_addr["0xaaa"][2] == 5000.0
+    assert by_addr["0xbbb"][1] == "NO"
+
+
+@pytest.mark.anyio
+async def test_save_signal_trader_positions_empty_is_noop(db):
+    await save_signal_trader_positions(db, [])
+    cursor = await db.execute("SELECT COUNT(*) FROM signal_trader_positions")
+    row = await cursor.fetchone()
+    assert row[0] == 0

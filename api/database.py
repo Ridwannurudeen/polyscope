@@ -104,6 +104,31 @@ CREATE TABLE IF NOT EXISTS trader_category_stats (
     PRIMARY KEY (trader_address, category)
 );
 
+CREATE TABLE IF NOT EXISTS signal_trader_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER NOT NULL,
+    market_id TEXT NOT NULL,
+    trader_address TEXT NOT NULL,
+    trader_rank INTEGER,
+    position_direction TEXT,
+    position_size REAL,
+    avg_price REAL,
+    weight_in_consensus REAL,
+    timestamp TEXT,
+    FOREIGN KEY (signal_id) REFERENCES divergence_signals(id)
+);
+
+CREATE TABLE IF NOT EXISTS trader_accuracy (
+    trader_address TEXT PRIMARY KEY,
+    total_divergent_signals INTEGER DEFAULT 0,
+    correct_predictions INTEGER DEFAULT 0,
+    wrong_predictions INTEGER DEFAULT 0,
+    accuracy_pct REAL,
+    accuracy_by_skew TEXT,
+    accuracy_by_category TEXT,
+    last_updated TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_snapshots_market_ts ON market_snapshots(market_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON market_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_ts ON divergence_signals(timestamp);
@@ -113,6 +138,10 @@ CREATE INDEX IF NOT EXISTS idx_sm_trader ON sm_positions(trader_address);
 CREATE INDEX IF NOT EXISTS idx_sm_trades_market ON sm_trades(market_id);
 CREATE INDEX IF NOT EXISTS idx_whale_alerts_detected ON whale_alerts(detected_at);
 CREATE INDEX IF NOT EXISTS idx_whale_alerts_notified ON whale_alerts(notified);
+CREATE INDEX IF NOT EXISTS idx_stp_signal ON signal_trader_positions(signal_id);
+CREATE INDEX IF NOT EXISTS idx_stp_trader ON signal_trader_positions(trader_address);
+CREATE INDEX IF NOT EXISTS idx_stp_market ON signal_trader_positions(market_id);
+CREATE INDEX IF NOT EXISTS idx_trader_accuracy_pct ON trader_accuracy(accuracy_pct);
 """
 
 
@@ -175,8 +204,8 @@ async def save_snapshot(db: aiosqlite.Connection, snapshot: dict):
     )
 
 
-async def save_divergence_signal(db: aiosqlite.Connection, signal: dict):
-    await db.execute(
+async def save_divergence_signal(db: aiosqlite.Connection, signal: dict) -> int:
+    cursor = await db.execute(
         """INSERT INTO divergence_signals
            (market_id, timestamp, market_price, sm_consensus, divergence_pct,
             signal_strength, sm_trader_count, sm_direction, question, category,
@@ -195,6 +224,36 @@ async def save_divergence_signal(db: aiosqlite.Connection, signal: dict):
             signal.get("category"),
             signal.get("signal_source", "positions"),
         ),
+    )
+    return cursor.lastrowid or 0
+
+
+async def save_signal_trader_positions(
+    db: aiosqlite.Connection, records: list[dict]
+):
+    """Persist per-trader position records for a signal."""
+    if not records:
+        return
+    await db.executemany(
+        """INSERT INTO signal_trader_positions
+           (signal_id, market_id, trader_address, trader_rank,
+            position_direction, position_size, avg_price,
+            weight_in_consensus, timestamp)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                r["signal_id"],
+                r["market_id"],
+                r["trader_address"],
+                r.get("trader_rank"),
+                r.get("position_direction"),
+                r.get("position_size"),
+                r.get("avg_price"),
+                r.get("weight_in_consensus"),
+                r.get("timestamp"),
+            )
+            for r in records
+        ],
     )
 
 

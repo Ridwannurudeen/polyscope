@@ -9,6 +9,7 @@ from polyscope.divergence import (
     _trade_weighted_consensus,
     _weighted_consensus,
     compute_divergence,
+    compute_trader_contributions,
 )
 from polyscope.models import Market, Position, Trade, Trader
 
@@ -329,3 +330,54 @@ class TestComputeDivergence:
         signal = compute_divergence(market, positions, traders, config, trades=trades)
         assert signal is not None
         assert signal.signal_source == "positions"
+
+
+class TestComputeTraderContributions:
+    def test_returns_record_per_ranked_trader(self):
+        traders = {f"0x{i}": _make_trader(f"0x{i}", i + 1) for i in range(5)}
+        positions = [
+            _make_position(f"0x{i}", "0xabc123", "YES", size=1000, avg_price=0.6)
+            for i in range(5)
+        ]
+        records = compute_trader_contributions(positions, traders)
+        assert len(records) == 5
+        for r in records:
+            assert r["position_direction"] == "YES"
+            assert r["trader_rank"] >= 1
+            assert r["weight_in_consensus"] > 0
+
+    def test_skips_unknown_traders(self):
+        traders = {"0x0": _make_trader("0x0", 1)}
+        positions = [
+            _make_position("0x0", "m", "YES", size=1000),
+            _make_position("0xdeadbeef", "m", "NO", size=1000),
+        ]
+        records = compute_trader_contributions(positions, traders)
+        assert len(records) == 1
+        assert records[0]["trader_address"] == "0x0"
+
+    def test_weight_decreases_with_rank(self):
+        traders = {
+            "0x0": _make_trader("0x0", 1, profit=0, volume=100000),
+            "0x1": _make_trader("0x1", 10, profit=0, volume=100000),
+        }
+        positions = [
+            _make_position("0x0", "m", "YES", size=1000, avg_price=0.5),
+            _make_position("0x1", "m", "YES", size=1000, avg_price=0.5),
+        ]
+        records = compute_trader_contributions(positions, traders)
+        by_addr = {r["trader_address"]: r for r in records}
+        assert by_addr["0x0"]["weight_in_consensus"] > by_addr["0x1"]["weight_in_consensus"]
+
+    def test_captures_position_direction(self):
+        traders = {"0x0": _make_trader("0x0", 1), "0x1": _make_trader("0x1", 2)}
+        positions = [
+            _make_position("0x0", "m", "YES", size=1000, avg_price=0.7),
+            _make_position("0x1", "m", "NO", size=2000, avg_price=0.3),
+        ]
+        records = compute_trader_contributions(positions, traders)
+        by_addr = {r["trader_address"]: r for r in records}
+        assert by_addr["0x0"]["position_direction"] == "YES"
+        assert by_addr["0x1"]["position_direction"] == "NO"
+        assert by_addr["0x0"]["avg_price"] == 0.7
+        assert by_addr["0x1"]["position_size"] == 2000
