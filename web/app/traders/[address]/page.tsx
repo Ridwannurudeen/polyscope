@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
+import { useParams } from "next/navigation";
 import { Disclaimer } from "@/components/disclaimer";
 import { LastUpdated } from "@/components/last-updated";
 import { TableSkeleton } from "@/components/skeleton";
@@ -32,12 +32,9 @@ function accuracyColor(pct: number) {
   return "text-red-400";
 }
 
-export default function TraderProfilePage({
-  params,
-}: {
-  params: Promise<{ address: string }>;
-}) {
-  const { address } = use(params);
+export default function TraderProfilePage() {
+  const params = useParams();
+  const address = params.address as string;
 
   const { data, loading, error, lastUpdated, retry } =
     usePollingFetch<TraderProfile>(`/api/traders/${address}`, 60_000);
