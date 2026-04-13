@@ -16,22 +16,22 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "PolyScope — Counter-Consensus Intelligence",
+  title: "PolyScope — Intelligence terminal for Polymarket",
   description:
-    "See what smart money sees, before the crowd catches up. Prediction market intelligence powered by divergence detection.",
+    "Divergence scanner, trader accuracy leaderboard, and evidence-backed decision cards for Polymarket. We measure who's actually predictive, not just profitable.",
   openGraph: {
-    title: "PolyScope — Counter-Consensus Intelligence",
+    title: "PolyScope — Intelligence terminal for Polymarket",
     description:
-      "See what smart money sees, before the crowd catches up. Prediction market intelligence powered by divergence detection.",
+      "Divergence scanner, trader accuracy leaderboard, and evidence-backed decision cards for Polymarket.",
     url: "https://polyscope.gudman.xyz",
     siteName: "PolyScope",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "PolyScope — Counter-Consensus Intelligence",
+    title: "PolyScope — Intelligence terminal for Polymarket",
     description:
-      "Counter-consensus intelligence for Polymarket. Divergence detection powered by smart money tracking.",
+      "We measure which Polymarket traders are actually predictive, not just profitable.",
   },
 };
 

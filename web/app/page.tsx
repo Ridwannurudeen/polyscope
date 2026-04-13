@@ -24,11 +24,35 @@ interface EventsResponse {
   total: number;
 }
 
+interface TraderLeaderboardEntry {
+  trader_address: string;
+  accuracy_pct: number;
+  correct_predictions: number;
+  total_divergent_signals: number;
+}
+
+interface TradersLeaderboardResponse {
+  traders: TraderLeaderboardEntry[];
+  count: number;
+}
+
+function shortAddr(addr: string) {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
 export default function Dashboard() {
   const { data, loading, error, lastUpdated, retry } =
     usePollingFetch<ScanResult>("/api/scan/latest", 60_000);
   const { data: eventsData } = usePollingFetch<EventsResponse>(
     "/api/events?limit=5",
+    120_000
+  );
+  const { data: predictiveData } = usePollingFetch<TradersLeaderboardResponse>(
+    "/api/traders/leaderboard?order=predictive&min_signals=5&limit=5",
+    120_000
+  );
+  const { data: fadeData } = usePollingFetch<TradersLeaderboardResponse>(
+    "/api/traders/leaderboard?order=anti-predictive&min_signals=5&limit=5",
     120_000
   );
 
@@ -52,30 +76,87 @@ export default function Dashboard() {
 
   const divergences = data?.divergences || [];
   const movers = data?.movers_24h || [];
+  const predictive = predictiveData?.traders || [];
+  const fade = fadeData?.traders || [];
 
   return (
     <div>
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white">
-            Counter-Consensus Intelligence
+            Intelligence terminal for Polymarket dislocations
           </h1>
-          <p className="text-gray-400 mt-1">
-            See what smart money sees, before the crowd catches up.
+          <p className="text-gray-400 mt-1 max-w-2xl">
+            We track where top Polymarket traders diverge from the crowd, score
+            each trader individually against resolved outcomes, and surface the
+            evidence behind every signal.
           </p>
         </div>
         <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
       </div>
 
+      {/* Feature nav strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+        <Link
+          href="/smart-money"
+          className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-emerald-500/40 transition-colors"
+        >
+          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
+            Signals
+          </p>
+          <p className="text-white text-sm font-medium">
+            Live divergence feed
+          </p>
+          <p className="text-gray-500 text-xs mt-1">
+            Decision cards with thesis, contributors, invalidators
+          </p>
+        </Link>
+        <Link
+          href="/traders"
+          className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-emerald-500/40 transition-colors"
+        >
+          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
+            Traders
+          </p>
+          <p className="text-white text-sm font-medium">
+            Accuracy leaderboard
+          </p>
+          <p className="text-gray-500 text-xs mt-1">
+            Predictive vs anti-predictive — not P&amp;L-ranked
+          </p>
+        </Link>
+        <Link
+          href="/methodology"
+          className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-emerald-500/40 transition-colors"
+        >
+          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
+            Methodology
+          </p>
+          <p className="text-white text-sm font-medium">How signals work</p>
+          <p className="text-gray-500 text-xs mt-1">
+            Honest breakdown — the findings and the caveats
+          </p>
+        </Link>
+        <Link
+          href="/portfolio"
+          className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-emerald-500/40 transition-colors"
+        >
+          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
+            Portfolio
+          </p>
+          <p className="text-white text-sm font-medium">Your trades</p>
+          <p className="text-gray-500 text-xs mt-1">
+            Watch signals, log trades, auto-score on resolution
+          </p>
+        </Link>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <StatCard
-          title="Active Markets"
-          value={data?.total_markets || 0}
-        />
+        <StatCard title="Active Markets" value={data?.total_markets || 0} />
         <StatCard
           title="Divergence Signals"
           value={data?.total_divergences || 0}
-          subtitle="Markets where SM disagrees"
+          subtitle="Markets where top traders disagree"
         />
         <StatCard
           title="Strongest Signal"
@@ -101,25 +182,25 @@ export default function Dashboard() {
       <section className="mb-10">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-white">
-            Counter-Consensus Signals
+            Active Divergences
           </h2>
           <Link
             href="/smart-money"
             className="text-sm text-emerald-400 hover:text-emerald-300"
           >
-            View all
+            View full decision cards →
           </Link>
         </div>
 
         {divergences.length === 0 ? (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
             <p className="text-gray-400">
-              No divergence signals right now. Markets and smart money are aligned.
+              No divergence signals right now. Markets and top traders are aligned.
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {divergences.map((d: DivergenceSignal, i: number) => (
+            {divergences.slice(0, 8).map((d: DivergenceSignal, i: number) => (
               <Link
                 key={d.market_id + i}
                 href={`/market/${d.market_id}`}
@@ -132,13 +213,13 @@ export default function Dashboard() {
                     </p>
                     <div className="flex items-center gap-4 mt-2 text-sm">
                       <span className="text-gray-400">
-                        Market:{" "}
+                        Crowd:{" "}
                         <span className="text-white">
                           {(d.market_price * 100).toFixed(0)}% YES
                         </span>
                       </span>
                       <span className="text-gray-400">
-                        Smart Money:{" "}
+                        PolyScope:{" "}
                         <span
                           className={
                             d.sm_direction === "YES"
@@ -146,8 +227,7 @@ export default function Dashboard() {
                               : "text-red-400"
                           }
                         >
-                          {(d.sm_consensus * 100).toFixed(0)}% (
-                          {d.sm_direction})
+                          {d.sm_direction} ({(d.sm_consensus * 100).toFixed(0)}%)
                         </span>
                       </span>
                       <span className="text-gray-500">
@@ -155,7 +235,7 @@ export default function Dashboard() {
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <span className="text-lg font-bold text-amber-400">
                       {(d.divergence_pct * 100).toFixed(0)}%
                     </span>
@@ -167,6 +247,113 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      {/* Trader leaderboards preview */}
+      {(predictive.length > 0 || fade.length > 0) && (
+        <section className="mb-10 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-white">
+                Top Predictive Traders
+              </h2>
+              <Link
+                href="/traders"
+                className="text-xs text-emerald-400 hover:text-emerald-300"
+              >
+                Full leaderboard →
+              </Link>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              Ranked by individual accuracy when diverging from market price
+            </p>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              {predictive.length === 0 ? (
+                <p className="p-4 text-sm text-gray-500">
+                  Building leaderboard — need more resolved signals per trader.
+                </p>
+              ) : (
+                <table className="w-full text-sm">
+                  <tbody>
+                    {predictive.map((t, i) => (
+                      <tr
+                        key={t.trader_address}
+                        className="border-b border-gray-800/50 last:border-0"
+                      >
+                        <td className="p-3 text-gray-500 w-6">{i + 1}</td>
+                        <td className="p-3">
+                          <Link
+                            href={`/traders/${t.trader_address}`}
+                            className="text-white font-mono text-xs hover:text-emerald-400"
+                          >
+                            {shortAddr(t.trader_address)}
+                          </Link>
+                        </td>
+                        <td className="p-3 text-right text-emerald-400 font-semibold">
+                          {t.accuracy_pct.toFixed(0)}%
+                        </td>
+                        <td className="p-3 text-right text-xs text-gray-500 w-20">
+                          {t.correct_predictions}/{t.total_divergent_signals}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-white">
+                Traders to Fade
+              </h2>
+              <Link
+                href="/traders"
+                className="text-xs text-emerald-400 hover:text-emerald-300"
+              >
+                Full leaderboard →
+              </Link>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              Systematically wrong when they diverge from market price
+            </p>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              {fade.length === 0 ? (
+                <p className="p-4 text-sm text-gray-500">
+                  Building leaderboard — need more resolved signals per trader.
+                </p>
+              ) : (
+                <table className="w-full text-sm">
+                  <tbody>
+                    {fade.map((t, i) => (
+                      <tr
+                        key={t.trader_address}
+                        className="border-b border-gray-800/50 last:border-0"
+                      >
+                        <td className="p-3 text-gray-500 w-6">{i + 1}</td>
+                        <td className="p-3">
+                          <Link
+                            href={`/traders/${t.trader_address}`}
+                            className="text-white font-mono text-xs hover:text-red-400"
+                          >
+                            {shortAddr(t.trader_address)}
+                          </Link>
+                        </td>
+                        <td className="p-3 text-right text-red-400 font-semibold">
+                          {t.accuracy_pct.toFixed(0)}%
+                        </td>
+                        <td className="p-3 text-right text-xs text-gray-500 w-20">
+                          {t.correct_predictions}/{t.total_divergent_signals}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Whale Flow */}
       <WhaleFlow />
