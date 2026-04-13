@@ -13,6 +13,9 @@ export async function generateMetadata({
   let description =
     "Counter-consensus signal with full evidence trail on PolyScope.";
 
+  // Note: title and description are intentionally `let` because they
+  // get conditionally reassigned below from the fetched signal.
+
   try {
     const r = await fetch(`${API_BASE}/api/signals/evidence/${params.id}`, {
       cache: "no-store",

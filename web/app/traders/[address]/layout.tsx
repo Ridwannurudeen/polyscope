@@ -13,7 +13,7 @@ export async function generateMetadata({
 }: {
   params: { address: string };
 }): Promise<Metadata> {
-  let title = `${shortAddr(params.address)} — PolyScope trader profile`;
+  const title = `${shortAddr(params.address)} — PolyScope trader profile`;
   let description = "Predictive accuracy for this Polymarket trader.";
 
   try {
