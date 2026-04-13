@@ -66,8 +66,9 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/movers — Biggest probability shifts \\(24h\\)\n"
         "/market <query> — Search market details\n"
         "/whales — Recent whale trades\n"
-        "/subscribe — Subscribe to whale alerts\n"
-        "/unsubscribe — Stop whale alerts\n"
+        "/digest — Weekly\\-style summary now\n"
+        "/subscribe — Whale alerts \\+ weekly digest\n"
+        "/unsubscribe — Stop alerts and digest\n"
         "/threshold <amount> — Set min trade size filter\n"
         "/calibration — Polymarket accuracy summary\n"
         "/accuracy — Signal track record\n"
@@ -327,6 +328,79 @@ async def accuracy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines) + DISCLAIMER, parse_mode="MarkdownV2")
 
 
+async def _build_digest() -> str:
+    """Compose the weekly digest message body."""
+    divs = await _api_get("/api/divergences")
+    predictive = await _api_get("/api/traders/leaderboard?order=predictive&min_signals=5&limit=3")
+    fade = await _api_get("/api/traders/leaderboard?order=anti-predictive&min_signals=5&limit=3")
+    meth = await _api_get("/api/methodology/stats")
+
+    lines: list[str] = ["*PolyScope Weekly Digest*\n"]
+
+    # Top signals
+    lines.append("*Top Active Signals*")
+    if divs and divs.get("signals"):
+        for s in divs["signals"][:5]:
+            arrow = "↑" if s["sm_direction"] == "YES" else "↓"
+            q = _esc(s["question"][:55])
+            mp = _esc(f"{s['market_price']:.0%}")
+            sc = _esc(f"{s['sm_consensus']:.0%}")
+            score = _esc(f"{s['score']:.0f}")
+            lines.append(
+                f"{arrow} *{q}*\n"
+                f"  Crowd {mp} \\| PolyScope {s['sm_direction']} \\({sc}\\) \\| Score {score}"
+            )
+    else:
+        lines.append("_No active signals right now\\._")
+
+    # Predictive traders
+    lines.append("\n*Top Predictive Traders*")
+    if predictive and predictive.get("traders"):
+        for t in predictive["traders"]:
+            addr = _esc(t["trader_address"][:6] + "…" + t["trader_address"][-4:])
+            acc = _esc(f"{t['accuracy_pct']:.0f}%")
+            ratio = _esc(f"{t['correct_predictions']}/{t['total_divergent_signals']}")
+            lines.append(f"  `{addr}` — {acc} \\({ratio}\\)")
+    else:
+        lines.append("_Building leaderboard\\._")
+
+    # Fade traders
+    lines.append("\n*Top Traders to Fade*")
+    if fade and fade.get("traders"):
+        for t in fade["traders"]:
+            addr = _esc(t["trader_address"][:6] + "…" + t["trader_address"][-4:])
+            acc = _esc(f"{t['accuracy_pct']:.0f}%")
+            ratio = _esc(f"{t['correct_predictions']}/{t['total_divergent_signals']}")
+            lines.append(f"  `{addr}` — {acc} \\({ratio}\\)")
+    else:
+        lines.append("_Building leaderboard\\._")
+
+    # Dataset stats
+    if meth and meth.get("signals"):
+        s = meth["signals"]
+        total = _esc(f"{s.get('total', 0):,}")
+        resolved = _esc(f"{s.get('resolved', 0):,}")
+        lines.append(
+            f"\n*Dataset:* {total} signals tracked, {resolved} resolved\\."
+        )
+
+    lines.append(
+        "\n[See live signals →](https://polyscope.gudman.xyz/smart-money) "
+        "\\| [Trader leaderboard →](https://polyscope.gudman.xyz/traders) "
+        "\\| [Methodology →](https://polyscope.gudman.xyz/methodology)"
+    )
+
+    return "\n".join(lines) + DISCLAIMER
+
+
+async def digest_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """On-demand weekly-style digest."""
+    msg = await _build_digest()
+    await update.message.reply_text(
+        msg, parse_mode="MarkdownV2", disable_web_page_preview=True
+    )
+
+
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "*PolyScope Commands*\n\n"
@@ -334,8 +408,9 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/movers — Biggest probability shifts\n"
         "/market <query> — Search markets\n"
         "/whales — Recent whale trades\n"
-        "/subscribe — Subscribe to whale alerts\n"
-        "/unsubscribe — Stop whale alerts\n"
+        "/digest — Weekly\\-style summary now\n"
+        "/subscribe — Whale alerts \\+ weekly digest\n"
+        "/unsubscribe — Stop alerts and digest\n"
         "/threshold <amount> — Min trade size filter\n"
         "/calibration — Accuracy dashboard\n"
         "/accuracy — Signal track record\n"
@@ -343,6 +418,43 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         + DISCLAIMER,
         parse_mode="MarkdownV2",
     )
+
+
+async def digest_loop(app: Application):
+    """Background task: push weekly digest to subscribers every 168h."""
+    # Wait briefly so the bot is fully up before the first push window check
+    await asyncio.sleep(60)
+    week_seconds = 7 * 24 * 60 * 60
+
+    while True:
+        try:
+            from api.database import get_active_subscriptions, get_db
+
+            db = await get_db()
+            try:
+                subs = await get_active_subscriptions(db)
+            finally:
+                await db.close()
+
+            if subs:
+                msg = await _build_digest()
+                for sub in subs:
+                    try:
+                        await app.bot.send_message(
+                            chat_id=sub["chat_id"],
+                            text=msg,
+                            parse_mode="MarkdownV2",
+                            disable_web_page_preview=True,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to send digest to chat %s", sub["chat_id"]
+                        )
+                logger.info("Weekly digest sent to %d subscribers", len(subs))
+        except Exception:
+            logger.exception("digest_loop error")
+
+        await asyncio.sleep(week_seconds)
 
 
 async def alert_loop(app: Application):
@@ -408,11 +520,13 @@ def main():
     app.add_handler(CommandHandler("threshold", threshold_cmd))
     app.add_handler(CommandHandler("calibration", calibration))
     app.add_handler(CommandHandler("accuracy", accuracy))
+    app.add_handler(CommandHandler("digest", digest_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
 
-    # Start alert loop as post_init
+    # Start background loops as post_init
     async def post_init(application: Application):
         asyncio.create_task(alert_loop(application))
+        asyncio.create_task(digest_loop(application))
 
     app.post_init = post_init
 
