@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { trackEvent } from "@/lib/analytics";
 import { getClientId } from "@/lib/client-id";
 
 export function LogTrade({
@@ -51,6 +52,12 @@ export function LogTrade({
         setError("Failed to save");
         return;
       }
+      trackEvent("trade_logged", {
+        market_id: marketId,
+        direction,
+        size: sizeNum,
+        price: priceNum,
+      });
       setSaved(true);
       setTimeout(() => {
         setSaved(false);

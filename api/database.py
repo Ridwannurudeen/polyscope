@@ -156,6 +156,16 @@ CREATE TABLE IF NOT EXISTS user_actions (
     FOREIGN KEY (watchlist_id) REFERENCES watchlist(id)
 );
 
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id TEXT,
+    event_type TEXT NOT NULL,
+    properties TEXT,
+    path TEXT,
+    referrer TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_snapshots_market_ts ON market_snapshots(market_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON market_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_ts ON divergence_signals(timestamp);
@@ -173,6 +183,9 @@ CREATE INDEX IF NOT EXISTS idx_watchlist_client ON watchlist(client_id);
 CREATE INDEX IF NOT EXISTS idx_watchlist_market ON watchlist(market_id);
 CREATE INDEX IF NOT EXISTS idx_user_actions_client ON user_actions(client_id);
 CREATE INDEX IF NOT EXISTS idx_user_actions_market ON user_actions(market_id);
+CREATE INDEX IF NOT EXISTS idx_events_client ON events(client_id);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 """
 
 
@@ -558,6 +571,123 @@ async def get_trader_accuracy_leaderboard(
     )
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+async def record_event(
+    db: aiosqlite.Connection,
+    event_type: str,
+    client_id: str | None = None,
+    properties: dict | None = None,
+    path: str | None = None,
+    referrer: str | None = None,
+) -> None:
+    """Record a lightweight product event. No PII, no IP, no user agent."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    props_json = _json.dumps(properties) if properties else None
+    await db.execute(
+        """INSERT INTO events (client_id, event_type, properties, path, referrer, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (client_id, event_type, props_json, path, referrer, now),
+    )
+
+
+async def get_metrics_summary(
+    db: aiosqlite.Connection, days: int = 7
+) -> dict:
+    """Aggregate product metrics for admin dashboard.
+
+    Returns DAU/WAU/MAU-ish counts, top events, top routes, conversion
+    rates — all computed from the events table + portfolio tables.
+    """
+    # Active client counts by window
+    cursor = await db.execute(
+        """SELECT
+               COUNT(DISTINCT CASE WHEN created_at >= datetime('now', '-1 day')  THEN client_id END) AS d1,
+               COUNT(DISTINCT CASE WHEN created_at >= datetime('now', '-7 days') THEN client_id END) AS d7,
+               COUNT(DISTINCT CASE WHEN created_at >= datetime('now', '-30 days') THEN client_id END) AS d30,
+               COUNT(DISTINCT client_id) AS all_time,
+               COUNT(*) AS total_events
+           FROM events
+           WHERE client_id IS NOT NULL AND client_id != ''"""
+    )
+    row = await cursor.fetchone()
+    actives = dict(row) if row else {}
+
+    # Top event types over requested window
+    cursor = await db.execute(
+        """SELECT event_type, COUNT(*) AS n
+           FROM events
+           WHERE created_at >= datetime('now', ?)
+           GROUP BY event_type
+           ORDER BY n DESC
+           LIMIT 20""",
+        (f"-{days} days",),
+    )
+    top_events = [dict(r) for r in await cursor.fetchall()]
+
+    # Top pages
+    cursor = await db.execute(
+        """SELECT path, COUNT(*) AS n
+           FROM events
+           WHERE event_type = 'page_view'
+             AND created_at >= datetime('now', ?)
+             AND path IS NOT NULL
+           GROUP BY path
+           ORDER BY n DESC
+           LIMIT 20""",
+        (f"-{days} days",),
+    )
+    top_pages = [dict(r) for r in await cursor.fetchall()]
+
+    # Daily event counts (last N days)
+    cursor = await db.execute(
+        """SELECT DATE(created_at) AS day, COUNT(*) AS events,
+                  COUNT(DISTINCT client_id) AS clients
+           FROM events
+           WHERE created_at >= datetime('now', ?)
+             AND client_id IS NOT NULL AND client_id != ''
+           GROUP BY day
+           ORDER BY day DESC""",
+        (f"-{days} days",),
+    )
+    daily = [dict(r) for r in await cursor.fetchall()]
+
+    # Portfolio funnel counts
+    cursor = await db.execute("SELECT COUNT(*) FROM watchlist")
+    watchlist_total = (await cursor.fetchone())[0] or 0
+    cursor = await db.execute(
+        "SELECT COUNT(DISTINCT client_id) FROM watchlist"
+    )
+    watchlist_clients = (await cursor.fetchone())[0] or 0
+    cursor = await db.execute("SELECT COUNT(*) FROM user_actions")
+    actions_total = (await cursor.fetchone())[0] or 0
+    cursor = await db.execute(
+        "SELECT COUNT(DISTINCT client_id) FROM user_actions"
+    )
+    actions_clients = (await cursor.fetchone())[0] or 0
+
+    return {
+        "window_days": days,
+        "actives": {
+            "dau": actives.get("d1") or 0,
+            "wau": actives.get("d7") or 0,
+            "mau": actives.get("d30") or 0,
+            "all_time": actives.get("all_time") or 0,
+            "total_events": actives.get("total_events") or 0,
+        },
+        "top_events": top_events,
+        "top_pages": top_pages,
+        "daily": daily,
+        "portfolio": {
+            "watchlist_total": watchlist_total,
+            "watchlist_clients": watchlist_clients,
+            "actions_total": actions_total,
+            "actions_clients": actions_clients,
+        },
+    }
 
 
 async def add_to_watchlist(

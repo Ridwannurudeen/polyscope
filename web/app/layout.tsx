@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import Link from "next/link";
+import { Suspense } from "react";
 import "./globals.css";
 import { MobileNav } from "@/components/mobile-nav";
+import { PageViewTracker } from "@/components/page-view-tracker";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -56,6 +58,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950 text-gray-100 min-h-screen`}
       >
+        <Suspense fallback={null}>
+          <PageViewTracker />
+        </Suspense>
         <nav className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">

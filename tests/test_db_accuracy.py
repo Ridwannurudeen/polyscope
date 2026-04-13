@@ -8,6 +8,7 @@ from api.database import (
     add_to_watchlist,
     expire_converged_signals,
     get_expired_signal_count,
+    get_metrics_summary,
     get_portfolio,
     get_signal_accuracy,
     get_signal_evidence,
@@ -16,6 +17,7 @@ from api.database import (
     get_watchlist,
     init_db,
     rebuild_trader_accuracy,
+    record_event,
     record_user_action,
     remove_from_watchlist,
     save_divergence_signal,
@@ -691,6 +693,75 @@ async def test_portfolio_scores_resolved_actions(db):
     assert port["stats"]["win_rate_pct"] == 100.0
     # $100 @ $0.5 → win $0.5/share → $50 profit
     assert port["stats"]["pnl_estimate_usd"] == 50.0
+
+
+@pytest.mark.anyio
+async def test_record_event_roundtrip(db):
+    await record_event(
+        db,
+        event_type="page_view",
+        client_id="c1",
+        properties={"section": "home"},
+        path="/",
+        referrer=None,
+    )
+    await db.commit()
+
+    cursor = await db.execute(
+        "SELECT client_id, event_type, path, properties FROM events"
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    assert row[0] == "c1"
+    assert row[1] == "page_view"
+    assert row[2] == "/"
+    assert "home" in (row[3] or "")
+
+
+@pytest.mark.anyio
+async def test_record_event_accepts_anonymous(db):
+    await record_event(db, event_type="page_view", path="/methodology")
+    await db.commit()
+    cursor = await db.execute("SELECT COUNT(*) FROM events")
+    assert (await cursor.fetchone())[0] == 1
+
+
+@pytest.mark.anyio
+async def test_metrics_summary_aggregates_events(db):
+    for i in range(3):
+        await record_event(
+            db, event_type="page_view", client_id=f"c{i}", path="/"
+        )
+        await record_event(
+            db, event_type="evidence_opened", client_id=f"c{i}",
+            properties={"market_id": f"m{i}"},
+        )
+    await db.commit()
+
+    summary = await get_metrics_summary(db, days=7)
+    assert summary["actives"]["all_time"] == 3
+    assert summary["actives"]["total_events"] == 6
+    # Top events should surface our two types
+    types = {e["event_type"] for e in summary["top_events"]}
+    assert "page_view" in types
+    assert "evidence_opened" in types
+
+
+@pytest.mark.anyio
+async def test_metrics_portfolio_counts(db):
+    await _seed_signal_with_traders(
+        db, "ms1", 0.6, "crypto", [("0xaaa", "YES")]
+    )
+    await db.commit()
+    await add_to_watchlist(db, "alice", "ms1")
+    await record_user_action(db, "alice", "ms1", "YES", size=10, price=0.5)
+    await db.commit()
+
+    summary = await get_metrics_summary(db, days=7)
+    assert summary["portfolio"]["watchlist_total"] == 1
+    assert summary["portfolio"]["watchlist_clients"] == 1
+    assert summary["portfolio"]["actions_total"] == 1
+    assert summary["portfolio"]["actions_clients"] == 1
 
 
 @pytest.mark.anyio

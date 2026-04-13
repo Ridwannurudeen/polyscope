@@ -5,6 +5,7 @@ import { LogTrade } from "@/components/log-trade";
 import { ScoreBadge } from "@/components/score-badge";
 import { SignalEvidence } from "@/components/signal-evidence";
 import { WatchlistButton } from "@/components/watchlist-button";
+import { trackEvent } from "@/lib/analytics";
 import type { DivergenceSignal } from "@/lib/api";
 
 function tierFromScore(score: number): {
@@ -147,7 +148,13 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
       {/* Evidence toggle */}
       <div className="border-t border-gray-800">
         <button
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => {
+            const next = !expanded;
+            setExpanded(next);
+            if (next) {
+              trackEvent("evidence_opened", { market_id: signal.market_id });
+            }
+          }}
           className="w-full px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800/50 flex items-center justify-between"
         >
           <span>{expanded ? "Hide evidence" : "Show evidence"}</span>

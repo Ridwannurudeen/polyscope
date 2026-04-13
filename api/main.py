@@ -18,6 +18,7 @@ from .database import (
     get_divergence_history,
     get_divergence_signals,
     get_expired_signal_count,
+    get_metrics_summary,
     get_pending_whale_alerts,
     get_portfolio,
     get_resolved_markets,
@@ -32,6 +33,7 @@ from .database import (
     get_whale_alerts,
     init_db,
     mark_alerts_notified,
+    record_event,
     record_user_action,
     remove_from_watchlist,
 )
@@ -639,5 +641,52 @@ async def portfolio(client_id: str = Query(..., min_length=8)):
     db = await get_db()
     try:
         return await get_portfolio(db, client_id)
+    finally:
+        await db.close()
+
+
+# ── Instrumentation ────────────────────────────────────────
+
+import os
+
+
+class EventRequest(BaseModel):
+    event_type: str = Field(min_length=1, max_length=64)
+    client_id: str | None = Field(default=None, max_length=64)
+    properties: dict | None = None
+    path: str | None = Field(default=None, max_length=256)
+    referrer: str | None = Field(default=None, max_length=512)
+
+
+@app.post("/api/events")
+async def events_ingest(body: EventRequest):
+    db = await get_db()
+    try:
+        await record_event(
+            db,
+            event_type=body.event_type,
+            client_id=body.client_id,
+            properties=body.properties,
+            path=body.path,
+            referrer=body.referrer,
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"ok": True}
+
+
+@app.get("/api/admin/metrics")
+async def admin_metrics(
+    token: str = Query(...),
+    days: int = Query(7, ge=1, le=90),
+):
+    """Admin metrics dashboard. Requires POLYSCOPE_ADMIN_TOKEN env match."""
+    expected = os.environ.get("POLYSCOPE_ADMIN_TOKEN", "")
+    if not expected or token != expected:
+        raise HTTPException(status_code=401, detail="invalid token")
+    db = await get_db()
+    try:
+        return await get_metrics_summary(db, days=days)
     finally:
         await db.close()

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { trackEvent } from "@/lib/analytics";
 import { getClientId } from "@/lib/client-id";
 
 interface WatchlistItem {
@@ -41,6 +42,7 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
       if (r.ok) {
         const d = await r.json();
         setWatchedId(d.id);
+        trackEvent("watchlist_added", { market_id: marketId });
       }
     } finally {
       setLoading(false);
@@ -55,7 +57,10 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
         `/api/watchlist/${watchedId}?client_id=${encodeURIComponent(getClientId())}`,
         { method: "DELETE" }
       );
-      if (r.ok) setWatchedId(null);
+      if (r.ok) {
+        setWatchedId(null);
+        trackEvent("watchlist_removed", { market_id: marketId });
+      }
     } finally {
       setLoading(false);
     }
