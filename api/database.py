@@ -868,6 +868,47 @@ async def get_portfolio(db: aiosqlite.Connection, client_id: str) -> dict:
     }
 
 
+async def search_universal(
+    db: aiosqlite.Connection, query: str, limit: int = 8
+) -> dict:
+    """Search markets (by question) and traders (by address prefix).
+
+    Returns up to `limit` of each. Case-insensitive substring match
+    on question; case-insensitive prefix match on trader_address.
+    """
+    q = query.strip()
+    if not q:
+        return {"markets": [], "traders": []}
+
+    # Markets — pick the latest signal row per matching market
+    cursor = await db.execute(
+        """SELECT market_id, question, category, sm_direction,
+                  market_price, sm_consensus, divergence_pct, signal_strength,
+                  MAX(timestamp) AS latest_ts
+           FROM divergence_signals
+           WHERE question LIKE ? COLLATE NOCASE
+           GROUP BY market_id
+           ORDER BY latest_ts DESC
+           LIMIT ?""",
+        (f"%{q}%", limit),
+    )
+    markets = [dict(r) for r in await cursor.fetchall()]
+
+    # Traders — prefix match on address
+    cursor = await db.execute(
+        """SELECT trader_address, accuracy_pct, total_divergent_signals,
+                  correct_predictions
+           FROM trader_accuracy
+           WHERE trader_address LIKE ? COLLATE NOCASE
+           ORDER BY accuracy_pct DESC, total_divergent_signals DESC
+           LIMIT ?""",
+        (f"{q.lower()}%", limit),
+    )
+    traders = [dict(r) for r in await cursor.fetchall()]
+
+    return {"markets": markets, "traders": traders}
+
+
 async def get_leaderboard_comparison(
     db: aiosqlite.Connection, limit: int = 25, min_signals: int = 5
 ) -> dict:

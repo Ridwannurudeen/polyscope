@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from "recharts";
 
 interface EventCount {
   event_type: string;
@@ -245,6 +255,43 @@ export default function AdminMetricsPage() {
               <h2 className="text-sm text-gray-500 uppercase tracking-wide mb-3">
                 Daily ({data.window_days}d)
               </h2>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-3">
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart
+                    data={[...data.daily].reverse()}
+                    margin={{ top: 8, right: 12, bottom: 0, left: -10 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                    <XAxis dataKey="day" stroke="#6b7280" fontSize={11} />
+                    <YAxis stroke="#6b7280" fontSize={11} />
+                    <Tooltip
+                      contentStyle={{
+                        background: "#030712",
+                        border: "1px solid #1f2937",
+                        borderRadius: 8,
+                      }}
+                      labelStyle={{ color: "#9ca3af" }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Line
+                      type="monotone"
+                      dataKey="events"
+                      name="Events"
+                      stroke="#34d399"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="clients"
+                      name="Clients"
+                      stroke="#fbbf24"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
                 <table className="w-full">
                   <thead>

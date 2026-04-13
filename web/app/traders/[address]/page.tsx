@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEffect } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { LastUpdated } from "@/components/last-updated";
 import { TableSkeleton } from "@/components/skeleton";
+import { trackEvent } from "@/lib/analytics";
 import { usePollingFetch } from "@/lib/hooks";
 
 interface TraderProfile {
@@ -35,6 +37,12 @@ function accuracyColor(pct: number) {
 export default function TraderProfilePage() {
   const params = useParams();
   const address = params.address as string;
+
+  useEffect(() => {
+    if (address) {
+      trackEvent("trader_profile_viewed", { trader_address: address });
+    }
+  }, [address]);
 
   const { data, loading, error, lastUpdated, retry } =
     usePollingFetch<TraderProfile>(`/api/traders/${address}`, 60_000);

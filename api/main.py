@@ -37,6 +37,7 @@ from .database import (
     record_event,
     record_user_action,
     remove_from_watchlist,
+    search_universal,
 )
 from .scheduler import (
     cleanup_job,
@@ -349,6 +350,16 @@ async def methodology_stats():
     db = await get_db()
     try:
         return await get_methodology_stats(db)
+    finally:
+        await db.close()
+
+
+@app.get("/api/search")
+async def search(q: str = Query(..., min_length=1, max_length=128)):
+    """Universal search across markets (by question) and traders (by address)."""
+    db = await get_db()
+    try:
+        return await search_universal(db, q, limit=8)
     finally:
         await db.close()
 

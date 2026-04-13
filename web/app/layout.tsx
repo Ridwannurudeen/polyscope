@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import "./globals.css";
 import { MobileNav } from "@/components/mobile-nav";
 import { PageViewTracker } from "@/components/page-view-tracker";
+import { SearchBar } from "@/components/search-bar";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -71,7 +72,7 @@ export default function RootLayout({
                   BETA
                 </span>
               </Link>
-              <div className="hidden md:flex items-center gap-1">
+              <div className="hidden md:flex items-center gap-1 flex-1 justify-center">
                 {NAV_ITEMS.map((item) =>
                   item.external ? (
                     <a
@@ -79,7 +80,7 @@ export default function RootLayout({
                       href={item.href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+                      className="px-2 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
                     >
                       {item.label}
                     </a>
@@ -87,12 +88,15 @@ export default function RootLayout({
                     <Link
                       key={item.href}
                       href={item.href}
-                      className="px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+                      className="px-2 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
                     >
                       {item.label}
                     </Link>
                   )
                 )}
+              </div>
+              <div className="hidden md:block">
+                <SearchBar />
               </div>
               <MobileNav items={NAV_ITEMS} />
             </div>
