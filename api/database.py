@@ -868,6 +868,45 @@ async def get_portfolio(db: aiosqlite.Connection, client_id: str) -> dict:
     }
 
 
+async def get_leaderboard_comparison(
+    db: aiosqlite.Connection, limit: int = 25, min_signals: int = 5
+) -> dict:
+    """Return PolyScope-accuracy ranking with overlap classification.
+
+    The Polymarket P&L leaderboard is fetched live via the cache layer,
+    not from this DB, so the API endpoint composes the two. This helper
+    just returns the accuracy-side data needed by that composition.
+    """
+    cursor = await db.execute(
+        """SELECT trader_address, accuracy_pct, correct_predictions,
+                  total_divergent_signals
+           FROM trader_accuracy
+           WHERE total_divergent_signals >= ?
+           ORDER BY accuracy_pct DESC, total_divergent_signals DESC
+           LIMIT ?""",
+        (min_signals, limit),
+    )
+    accurate = [dict(r) for r in await cursor.fetchall()]
+
+    cursor = await db.execute(
+        """SELECT trader_address, accuracy_pct, correct_predictions,
+                  total_divergent_signals
+           FROM trader_accuracy
+           WHERE total_divergent_signals >= ?
+           ORDER BY accuracy_pct ASC, total_divergent_signals DESC
+           LIMIT ?""",
+        (min_signals, limit),
+    )
+    fade = [dict(r) for r in await cursor.fetchall()]
+
+    return {
+        "accuracy_top": accurate,
+        "accuracy_fade": fade,
+        "min_signals": min_signals,
+        "limit": limit,
+    }
+
+
 async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
     """Live dataset stats for the public methodology page."""
     # Signal counts and time range

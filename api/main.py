@@ -23,6 +23,7 @@ from .database import (
     get_portfolio,
     get_resolved_markets,
     get_signal_accuracy,
+    get_leaderboard_comparison,
     get_methodology_stats,
     get_signal_evidence,
     get_signal_pnl_simulation,
@@ -350,6 +351,80 @@ async def methodology_stats():
         return await get_methodology_stats(db)
     finally:
         await db.close()
+
+
+@app.get("/api/leaderboards/compare")
+async def leaderboards_compare(
+    limit: int = Query(25, ge=5, le=100),
+    min_signals: int = Query(5, ge=1),
+):
+    """Side-by-side: Polymarket P&L leaderboard vs PolyScope accuracy leaderboard.
+
+    Returns both rankings plus the overlap analysis: which P&L-top
+    addresses also appear in the accuracy-top, and which accuracy
+    leaders are missing from the P&L top entirely.
+    """
+    # P&L leaderboard from cache (kept fresh by fetch_leaderboard_job)
+    pl_traders = cache.get("leaderboard") or []
+    pl_top = [
+        {
+            "rank": t.rank,
+            "address": t.address,
+            "name": getattr(t, "name", None),
+            "profit": t.profit,
+            "volume": t.volume,
+            "alpha_ratio": getattr(t, "alpha_ratio", None),
+        }
+        for t in pl_traders[:limit]
+    ]
+    pl_top_addresses = {t["address"].lower() for t in pl_top}
+
+    db = await get_db()
+    try:
+        comp = await get_leaderboard_comparison(
+            db, limit=limit, min_signals=min_signals
+        )
+    finally:
+        await db.close()
+
+    accuracy_top = comp["accuracy_top"]
+    accuracy_top_addresses = {
+        t["trader_address"].lower() for t in accuracy_top
+    }
+
+    # Overlap analysis
+    overlap_addresses = pl_top_addresses & accuracy_top_addresses
+    overlap_pct = (
+        len(overlap_addresses) / len(accuracy_top_addresses) * 100
+        if accuracy_top_addresses
+        else None
+    )
+
+    # Which P&L leaders are anti-predictive (in fade list)?
+    fade_addresses = {t["trader_address"].lower() for t in comp["accuracy_fade"]}
+    pl_in_fade = [
+        t for t in pl_top if t["address"].lower() in fade_addresses
+    ]
+
+    # Which accuracy leaders aren't on P&L top?
+    accuracy_missing_from_pl = [
+        t for t in accuracy_top if t["trader_address"].lower() not in pl_top_addresses
+    ]
+
+    return {
+        "pl_leaderboard": pl_top,
+        "accuracy_top": accuracy_top,
+        "accuracy_fade": comp["accuracy_fade"],
+        "overlap": {
+            "addresses": sorted(overlap_addresses),
+            "count": len(overlap_addresses),
+            "overlap_pct_of_accuracy_top": overlap_pct,
+        },
+        "pl_top_in_fade_list": pl_in_fade,
+        "accuracy_top_missing_from_pl": accuracy_missing_from_pl,
+        "min_signals": min_signals,
+        "limit": limit,
+    }
 
 
 @app.get("/api/signals/evidence/{market_id}")

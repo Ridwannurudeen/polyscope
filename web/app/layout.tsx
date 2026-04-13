@@ -42,6 +42,7 @@ const NAV_ITEMS = [
   { href: "/markets", label: "Markets" },
   { href: "/smart-money", label: "Smart Money" },
   { href: "/traders", label: "Traders" },
+  { href: "/compare", label: "Compare" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/calibration", label: "Calibration" },
   { href: "/methodology", label: "Methodology" },
