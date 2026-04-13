@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { LogTrade } from "@/components/log-trade";
 import { ScoreBadge } from "@/components/score-badge";
+import { ShareButton } from "@/components/share-button";
 import { SignalEvidence } from "@/components/signal-evidence";
 import { WatchlistButton } from "@/components/watchlist-button";
 import { trackEvent } from "@/lib/analytics";
@@ -89,6 +90,12 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
               ? signal.market_price
               : 1 - signal.market_price
           }
+        />
+        <ShareButton
+          marketId={signal.market_id}
+          question={signal.question}
+          direction={signal.sm_direction}
+          divergencePct={signal.divergence_pct}
         />
       </div>
 
