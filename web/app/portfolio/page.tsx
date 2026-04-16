@@ -8,6 +8,12 @@ import { TableSkeleton } from "@/components/skeleton";
 import { getClientId } from "@/lib/client-id";
 import { shortAddress, useIdentity } from "@/lib/identity";
 
+interface Invalidation {
+  reason: "converged" | "direction_flipped" | "resolved_right" | "resolved_wrong" | "expired";
+  label: string;
+  severity: "info" | "warn";
+}
+
 interface WatchlistItem {
   id: number;
   market_id: string;
@@ -20,9 +26,13 @@ interface WatchlistItem {
   added_at: string;
   current_market_price: number | null;
   current_sm_direction: string | null;
+  current_sm_consensus: number | null;
+  current_divergence_pct: number | null;
+  latest_expired: number | null;
   resolved_outcome: number | null;
   resolved_final_price: number | null;
   outcome_matched_direction: boolean | null;
+  invalidation: Invalidation | null;
 }
 
 interface PortfolioAction {
@@ -467,70 +477,126 @@ export default function PortfolioPage() {
             </section>
           )}
 
-          {/* Watchlist */}
-          {watchlist.length > 0 && (
-            <section className="mb-10">
-              <h2 className="text-xl font-semibold text-white mb-4">Watchlist</h2>
-              <div className="space-y-2">
-                {watchlist.map((w) => (
-                  <div
-                    key={w.id}
-                    className="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-start justify-between gap-3"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <Link
-                        href={`/market/${w.market_id}`}
-                        className="text-white text-sm font-medium hover:text-emerald-400 line-clamp-1"
-                      >
-                        {w.question || w.market_id.slice(0, 20)}
-                      </Link>
-                      <div className="flex gap-4 mt-1 text-xs">
-                        <span className="text-gray-500">
-                          At add: crowd{" "}
-                          <span className="text-gray-300">
-                            {w.market_price_at_add !== null
-                              ? `${(w.market_price_at_add * 100).toFixed(0)}%`
-                              : "—"}
-                          </span>{" "}
-                          · view{" "}
-                          <span className={directionColor(w.sm_direction_at_add)}>
-                            {w.sm_direction_at_add || "—"}
-                          </span>
-                        </span>
-                        {w.current_market_price !== null && (
-                          <span className="text-gray-500">
-                            Now:{" "}
-                            <span className="text-gray-300">
-                              {(w.current_market_price * 100).toFixed(0)}%
-                            </span>
-                          </span>
-                        )}
-                        {w.resolved_outcome !== null && (
-                          <span
-                            className={
-                              w.outcome_matched_direction
-                                ? "text-emerald-400"
-                                : "text-red-400"
-                            }
-                          >
-                            Resolved {w.resolved_outcome === 1 ? "YES" : "NO"} —{" "}
-                            {w.outcome_matched_direction ? "called it" : "wrong"}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => removeFromWatchlist(w.id)}
-                      className="text-xs text-gray-500 hover:text-red-400 shrink-0"
-                      aria-label="Remove"
+          {/* Watchlist — split by invalidation state */}
+          {watchlist.length > 0 &&
+            (() => {
+              const active = watchlist.filter((w) => w.invalidation === null);
+              const invalidated = watchlist.filter(
+                (w) => w.invalidation !== null
+              );
+              const renderItem = (w: WatchlistItem) => (
+                <div
+                  key={w.id}
+                  className={`bg-gray-900 border rounded-xl p-3 flex items-start justify-between gap-3 ${
+                    w.invalidation?.severity === "warn"
+                      ? "border-amber-500/30"
+                      : "border-gray-800"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <Link
+                      href={`/market/${w.market_id}`}
+                      className="text-white text-sm font-medium hover:text-emerald-400 line-clamp-1"
                     >
-                      ✕
-                    </button>
+                      {w.question || w.market_id.slice(0, 20)}
+                    </Link>
+                    {w.invalidation && (
+                      <p
+                        className={`text-xs mt-1 ${
+                          w.invalidation.severity === "warn"
+                            ? "text-amber-300"
+                            : "text-emerald-300"
+                        }`}
+                      >
+                        ⚠ {w.invalidation.label}
+                      </p>
+                    )}
+                    <div className="flex gap-4 mt-1 text-xs flex-wrap">
+                      <span className="text-gray-500">
+                        At add: crowd{" "}
+                        <span className="text-gray-300">
+                          {w.market_price_at_add !== null
+                            ? `${(w.market_price_at_add * 100).toFixed(0)}%`
+                            : "—"}
+                        </span>{" "}
+                        · view{" "}
+                        <span className={directionColor(w.sm_direction_at_add)}>
+                          {w.sm_direction_at_add || "—"}
+                        </span>
+                      </span>
+                      {w.current_market_price !== null && (
+                        <span className="text-gray-500">
+                          Now:{" "}
+                          <span className="text-gray-300">
+                            {(w.current_market_price * 100).toFixed(0)}%
+                          </span>
+                          {w.current_sm_direction &&
+                            w.current_sm_direction !==
+                              w.sm_direction_at_add && (
+                              <>
+                                {" · SM now "}
+                                <span
+                                  className={directionColor(
+                                    w.current_sm_direction
+                                  )}
+                                >
+                                  {w.current_sm_direction}
+                                </span>
+                              </>
+                            )}
+                        </span>
+                      )}
+                      {w.resolved_outcome !== null && (
+                        <span
+                          className={
+                            w.outcome_matched_direction
+                              ? "text-emerald-400"
+                              : "text-red-400"
+                          }
+                        >
+                          Resolved {w.resolved_outcome === 1 ? "YES" : "NO"} —{" "}
+                          {w.outcome_matched_direction ? "called it" : "wrong"}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                ))}
-              </div>
-            </section>
-          )}
+                  <button
+                    onClick={() => removeFromWatchlist(w.id)}
+                    className="text-xs text-gray-500 hover:text-red-400 shrink-0"
+                    aria-label="Remove"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+
+              return (
+                <>
+                  {active.length > 0 && (
+                    <section className="mb-10">
+                      <h2 className="text-xl font-semibold text-white mb-4">
+                        Watchlist — active ({active.length})
+                      </h2>
+                      <div className="space-y-2">{active.map(renderItem)}</div>
+                    </section>
+                  )}
+                  {invalidated.length > 0 && (
+                    <section className="mb-10">
+                      <h2 className="text-xl font-semibold text-white mb-1">
+                        Thesis invalidated ({invalidated.length})
+                      </h2>
+                      <p className="text-xs text-gray-500 mb-4">
+                        Watched signals that have converged, flipped side, or
+                        resolved. Review and act, or remove.
+                      </p>
+                      <div className="space-y-2">
+                        {invalidated.map(renderItem)}
+                      </div>
+                    </section>
+                  )}
+                </>
+              );
+            })()}
         </>
       )}
 

@@ -892,6 +892,15 @@ async def get_watchlist(
                (SELECT sm_direction FROM divergence_signals
                   WHERE market_id = w.market_id
                   ORDER BY timestamp DESC LIMIT 1) AS current_sm_direction,
+               (SELECT sm_consensus FROM divergence_signals
+                  WHERE market_id = w.market_id
+                  ORDER BY timestamp DESC LIMIT 1) AS current_sm_consensus,
+               (SELECT divergence_pct FROM divergence_signals
+                  WHERE market_id = w.market_id
+                  ORDER BY timestamp DESC LIMIT 1) AS current_divergence_pct,
+               (SELECT expired FROM divergence_signals
+                  WHERE market_id = w.market_id
+                  ORDER BY timestamp DESC LIMIT 1) AS latest_expired,
                rm.outcome AS resolved_outcome,
                rm.final_price AS resolved_final_price
            FROM watchlist w
@@ -904,15 +913,70 @@ async def get_watchlist(
     result = []
     for r in rows:
         d = dict(r)
-        if d["resolved_outcome"] is not None and d["sm_direction_at_add"]:
-            d["outcome_matched_direction"] = (
-                (d["sm_direction_at_add"] == "YES" and d["resolved_outcome"] == 1)
-                or (d["sm_direction_at_add"] == "NO" and d["resolved_outcome"] == 0)
-            )
-        else:
-            d["outcome_matched_direction"] = None
+        d["outcome_matched_direction"] = _outcome_matched(d)
+        d["invalidation"] = _invalidation_state(d)
         result.append(d)
     return result
+
+
+def _outcome_matched(d: dict) -> bool | None:
+    """Did the at-add direction match the resolved outcome?"""
+    if d.get("resolved_outcome") is None or not d.get("sm_direction_at_add"):
+        return None
+    direction = d["sm_direction_at_add"]
+    outcome = d["resolved_outcome"]
+    return (direction == "YES" and outcome == 1) or (
+        direction == "NO" and outcome == 0
+    )
+
+
+def _invalidation_state(d: dict) -> dict | None:
+    """Compute thesis-invalidation reason for a watched signal.
+
+    Rules (priority order):
+      resolved_wrong   — market resolved and at-add direction lost
+      resolved_right   — market resolved and at-add direction won
+      direction_flipped — top-trader consensus side changed vs at-add
+      converged        — divergence_pct < 5% (thesis faded back)
+      expired          — scheduler marked latest signal expired
+      None             — still active, thesis intact
+    """
+    if d.get("resolved_outcome") is not None and d.get("sm_direction_at_add"):
+        return {
+            "reason": "resolved_right"
+            if _outcome_matched(d)
+            else "resolved_wrong",
+            "label": "Resolved — called it"
+            if _outcome_matched(d)
+            else "Resolved — wrong direction",
+            "severity": "info" if _outcome_matched(d) else "warn",
+        }
+
+    original_dir = d.get("sm_direction_at_add")
+    current_dir = d.get("current_sm_direction")
+    if original_dir and current_dir and original_dir != current_dir:
+        return {
+            "reason": "direction_flipped",
+            "label": f"Direction flipped: {original_dir} → {current_dir}",
+            "severity": "warn",
+        }
+
+    current_div = d.get("current_divergence_pct")
+    if current_div is not None and current_div < 0.05:
+        return {
+            "reason": "converged",
+            "label": "Divergence converged below 5% — thesis faded",
+            "severity": "warn",
+        }
+
+    if d.get("latest_expired") == 1:
+        return {
+            "reason": "expired",
+            "label": "Signal expired — scheduler marked it inactive",
+            "severity": "warn",
+        }
+
+    return None
 
 
 async def link_wallet_to_client(

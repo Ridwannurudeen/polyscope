@@ -882,6 +882,84 @@ async def test_metrics_portfolio_counts(db):
     assert summary["portfolio"]["actions_clients"] == 1
 
 
+async def _insert_signal(
+    db, market_id, market_price, sm_consensus, divergence_pct,
+    sm_direction, *, offset_seconds=0, resolved=0, expired=0,
+):
+    """Insert a raw divergence_signals row with exact control over fields."""
+    await db.execute(
+        """INSERT INTO divergence_signals
+           (market_id, timestamp, market_price, sm_consensus, divergence_pct,
+            signal_strength, sm_trader_count, sm_direction, question, category,
+            resolved, expired, signal_source)
+           VALUES (?, datetime('now', ?), ?, ?, ?, 60, 3, ?, 'Test?', 'crypto',
+                   ?, ?, 'positions')""",
+        (market_id, f"+{offset_seconds} seconds", market_price, sm_consensus,
+         divergence_pct, sm_direction, resolved, expired),
+    )
+
+
+@pytest.mark.anyio
+async def test_invalidation_converged(db):
+    """Divergence fading below 5% (same direction) marks as converged."""
+    await _insert_signal(db, "mv1", 0.60, 0.80, 0.20, "YES")
+    await db.commit()
+    await add_to_watchlist(db, "c1", "mv1")
+    await _insert_signal(
+        db, "mv1", 0.60, 0.62, 0.02, "YES", offset_seconds=3600
+    )
+    await db.commit()
+
+    items = await get_watchlist(db, "c1")
+    assert len(items) == 1
+    assert items[0]["invalidation"] is not None
+    assert items[0]["invalidation"]["reason"] == "converged"
+
+
+@pytest.mark.anyio
+async def test_invalidation_direction_flipped(db):
+    """When latest sm_direction differs from at-add direction, flag flipped."""
+    await _insert_signal(db, "mf1", 0.55, 0.80, 0.25, "YES")
+    await db.commit()
+    await add_to_watchlist(db, "c2", "mf1")
+    await _insert_signal(
+        db, "mf1", 0.55, 0.20, 0.35, "NO", offset_seconds=7200
+    )
+    await db.commit()
+
+    items = await get_watchlist(db, "c2")
+    assert items[0]["invalidation"]["reason"] == "direction_flipped"
+
+
+@pytest.mark.anyio
+async def test_invalidation_resolved_wrong(db):
+    """Resolved markets where at-add direction lost flag as resolved_wrong."""
+    await _insert_signal(db, "mr1", 0.40, 0.70, 0.30, "YES")
+    await db.commit()
+    await add_to_watchlist(db, "c3", "mr1")
+    await save_resolved_market(db, {
+        "market_id": "mr1", "question": "", "category": "crypto",
+        "final_price": 0.02, "outcome": 0, "resolved_at": "", "brier_score": 0,
+    })
+    await db.commit()
+
+    items = await get_watchlist(db, "c3")
+    assert items[0]["invalidation"]["reason"] == "resolved_wrong"
+    assert items[0]["outcome_matched_direction"] is False
+
+
+@pytest.mark.anyio
+async def test_invalidation_none_when_healthy(db):
+    """Fresh unresolved signal with active divergence returns no invalidation."""
+    await _insert_signal(db, "mh1", 0.55, 0.80, 0.25, "YES")
+    await db.commit()
+    await add_to_watchlist(db, "c4", "mh1")
+    await db.commit()
+
+    items = await get_watchlist(db, "c4")
+    assert items[0]["invalidation"] is None
+
+
 @pytest.mark.anyio
 async def test_follow_unfollow_roundtrip(db):
     trader = "0x" + "c" * 40
