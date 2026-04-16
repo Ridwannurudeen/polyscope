@@ -690,15 +690,13 @@ class LinkWalletRequest(BaseModel):
 
 @app.post("/api/watchlist/add")
 async def watchlist_add(body: WatchlistAddRequest):
-    db = await get_db()
     wallet = body.wallet_address.lower() if body.wallet_address else None
-    try:
-        result = await add_to_watchlist(
+    result = await _retry_on_locked(
+        "watchlist_add",
+        lambda db: add_to_watchlist(
             db, body.client_id, body.market_id, wallet_address=wallet
-        )
-        await db.commit()
-    finally:
-        await db.close()
+        ),
+    )
     if not result:
         raise HTTPException(status_code=404, detail="no signal for this market")
     return result
@@ -706,13 +704,13 @@ async def watchlist_add(body: WatchlistAddRequest):
 
 @app.delete("/api/watchlist/{watchlist_id}")
 async def watchlist_remove(watchlist_id: int, client_id: str = Query(..., min_length=8)):
-    db = await get_db()
-    try:
-        removed = await remove_from_watchlist(db, client_id, watchlist_id)
-        await db.commit()
-    finally:
-        await db.close()
-    if not removed:
+    async def _op(db):
+        return {
+            "removed": await remove_from_watchlist(db, client_id, watchlist_id)
+        }
+
+    result = await _retry_on_locked("watchlist_remove", _op)
+    if not result["removed"]:
         raise HTTPException(status_code=404, detail="not found or not yours")
     return {"removed": True}
 
@@ -733,9 +731,9 @@ async def watchlist_list(
 
 @app.post("/api/portfolio/act")
 async def portfolio_act(body: UserActionRequest):
-    db = await get_db()
     wallet = body.wallet_address.lower() if body.wallet_address else None
-    try:
+
+    async def _op(db):
         action_id = await record_user_action(
             db,
             client_id=body.client_id,
@@ -746,10 +744,9 @@ async def portfolio_act(body: UserActionRequest):
             watchlist_id=body.watchlist_id,
             wallet_address=wallet,
         )
-        await db.commit()
-    finally:
-        await db.close()
-    return {"id": action_id}
+        return {"id": action_id}
+
+    return await _retry_on_locked("portfolio_act", _op)
 
 
 @app.get("/api/portfolio")
@@ -765,42 +762,54 @@ async def portfolio(
         await db.close()
 
 
-@app.post("/api/wallet/link")
-async def wallet_link(body: LinkWalletRequest):
-    """Link an anonymous client_id to a wallet + migrate prior history.
+import asyncio as _asyncio
+import sqlite3 as _sqlite3
 
-    Called once on first wallet connect. Idempotent — subsequent calls
-    update last_seen and migrate any rows still tagged with the raw
-    client_id (e.g., actions taken from a second device before linking).
 
-    Retries on transient "database is locked" errors — the scheduler
-    does heavy writes that can block the busy_timeout window.
+async def _retry_on_locked(op_name: str, coro_factory):
+    """Run a DB write coroutine with retries on 'database is locked'.
+
+    The scheduler holds sustained write locks during heavy Polymarket
+    position scans. busy_timeout (30s) usually covers it, but under
+    contention we fall back to exponential backoff.
+
+    `coro_factory` is a callable returning a fresh coroutine that takes
+    an open db connection and returns a result. We re-open the db each
+    attempt because aiosqlite doesn't recover from a failed commit.
     """
-    import asyncio
-    import sqlite3
-
     last_err: Exception | None = None
     for attempt in range(4):
         db = await get_db()
         try:
-            result = await link_wallet_to_client(
-                db, body.client_id, body.wallet_address.lower()
-            )
+            result = await coro_factory(db)
             await db.commit()
             return result
-        except sqlite3.OperationalError as e:
+        except _sqlite3.OperationalError as e:
             last_err = e
             if "locked" not in str(e).lower():
                 raise
-            # exponential backoff: 0.5s, 1s, 2s, 4s
-            await asyncio.sleep(0.5 * (2 ** attempt))
+            await _asyncio.sleep(0.5 * (2 ** attempt))
         finally:
             await db.close()
-
-    logger.warning("wallet_link failed after retries: %s", last_err)
+    logger.warning("%s failed after retries: %s", op_name, last_err)
     raise HTTPException(
         status_code=503,
         detail="Database busy — please retry in a few seconds",
+    )
+
+
+@app.post("/api/wallet/link")
+async def wallet_link(body: LinkWalletRequest):
+    """Link an anonymous client_id to a wallet + migrate prior history.
+
+    Idempotent — subsequent calls update last_seen and migrate any rows
+    still tagged with the raw client_id.
+    """
+    return await _retry_on_locked(
+        "wallet_link",
+        lambda db: link_wallet_to_client(
+            db, body.client_id, body.wallet_address.lower()
+        ),
     )
 
 
@@ -816,15 +825,12 @@ class FollowRequest(BaseModel):
 @app.post("/api/follow/trader")
 async def follow(body: FollowRequest):
     wallet = body.wallet_address.lower() if body.wallet_address else None
-    db = await get_db()
-    try:
-        result = await follow_trader(
+    return await _retry_on_locked(
+        "follow",
+        lambda db: follow_trader(
             db, body.trader_address, body.client_id, wallet_address=wallet
-        )
-        await db.commit()
-    finally:
-        await db.close()
-    return result
+        ),
+    )
 
 
 @app.delete("/api/follow/trader/{trader_address}")
@@ -836,15 +842,15 @@ async def unfollow(
     if not _EVM_ADDR_RE_COMPILED.match(trader_address):
         raise HTTPException(status_code=400, detail="invalid trader address")
     wallet = wallet_address.lower() if wallet_address else None
-    db = await get_db()
-    try:
-        removed = await unfollow_trader(
-            db, trader_address, client_id, wallet_address=wallet
-        )
-        await db.commit()
-    finally:
-        await db.close()
-    return {"removed": removed}
+
+    async def _op(db):
+        return {
+            "removed": await unfollow_trader(
+                db, trader_address, client_id, wallet_address=wallet
+            )
+        }
+
+    return await _retry_on_locked("unfollow", _op)
 
 
 @app.get("/api/follow/list")
@@ -905,13 +911,12 @@ async def follow_alerts_mark_seen(
     wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
 ):
     wallet = wallet_address.lower() if wallet_address else None
-    db = await get_db()
-    try:
+
+    async def _op(db):
         updated = await mark_alerts_seen(db, client_id, wallet_address=wallet)
-        await db.commit()
-    finally:
-        await db.close()
-    return {"marked_seen": updated}
+        return {"marked_seen": updated}
+
+    return await _retry_on_locked("mark_alerts_seen", _op)
 
 
 # ── Polymarket builder-attribution signing ─────────────────
