@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import Link from "next/link";
 import { Suspense } from "react";
 import "./globals.css";
+import { ConnectWallet } from "@/components/connect-wallet";
 import { MobileNav } from "@/components/mobile-nav";
 import { PageViewTracker } from "@/components/page-view-tracker";
 import { SearchBar } from "@/components/search-bar";
@@ -95,8 +96,9 @@ export default function RootLayout({
                   )
                 )}
               </div>
-              <div className="hidden md:block">
+              <div className="hidden md:flex items-center gap-2">
                 <SearchBar />
+                <ConnectWallet />
               </div>
               <MobileNav items={NAV_ITEMS} />
             </div>

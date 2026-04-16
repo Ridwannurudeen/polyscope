@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trackEvent } from "@/lib/analytics";
 import { getClientId } from "@/lib/client-id";
+import { useIdentity } from "@/lib/identity";
 
 export function LogTrade({
   marketId,
@@ -13,6 +14,7 @@ export function LogTrade({
   defaultDirection?: string;
   defaultPrice?: number;
 }) {
+  const { walletAddress } = useIdentity();
   const [open, setOpen] = useState(false);
   const [direction, setDirection] = useState<string>(defaultDirection || "YES");
   const [size, setSize] = useState<string>("100");
@@ -46,6 +48,7 @@ export function LogTrade({
           action_direction: direction,
           size: sizeNum,
           price: priceNum,
+          ...(walletAddress ? { wallet_address: walletAddress } : {}),
         }),
       });
       if (!r.ok) {

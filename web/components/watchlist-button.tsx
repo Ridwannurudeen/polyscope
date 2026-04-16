@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { trackEvent } from "@/lib/analytics";
 import { getClientId } from "@/lib/client-id";
+import { useIdentity } from "@/lib/identity";
 
 interface WatchlistItem {
   id: number;
@@ -15,6 +16,7 @@ interface WatchlistResponse {
 }
 
 export function WatchlistButton({ marketId }: { marketId: string }) {
+  const { walletAddress } = useIdentity();
   const [watchedId, setWatchedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -22,14 +24,16 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
   useEffect(() => {
     const clientId = getClientId();
     if (!clientId) return;
-    fetch(`/api/watchlist?client_id=${encodeURIComponent(clientId)}`)
+    const qs = new URLSearchParams({ client_id: clientId });
+    if (walletAddress) qs.set("wallet_address", walletAddress);
+    fetch(`/api/watchlist?${qs.toString()}`)
       .then((r) => r.json())
       .then((d: WatchlistResponse) => {
         const hit = d.items?.find((x) => x.market_id === marketId);
         setWatchedId(hit?.id ?? null);
       })
       .catch(() => {});
-  }, [marketId]);
+  }, [marketId, walletAddress]);
 
   const add = async () => {
     setLoading(true);
@@ -37,7 +41,11 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
       const r = await fetch("/api/watchlist/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: getClientId(), market_id: marketId }),
+        body: JSON.stringify({
+          client_id: getClientId(),
+          market_id: marketId,
+          ...(walletAddress ? { wallet_address: walletAddress } : {}),
+        }),
       });
       if (r.ok) {
         const d = await r.json();

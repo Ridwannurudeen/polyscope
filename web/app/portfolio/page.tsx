@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { TableSkeleton } from "@/components/skeleton";
 import { getClientId } from "@/lib/client-id";
+import { shortAddress, useIdentity } from "@/lib/identity";
 
 interface WatchlistItem {
   id: number;
@@ -62,6 +63,7 @@ function directionColor(dir: string | null) {
 }
 
 export default function PortfolioPage() {
+  const { walletAddress } = useIdentity();
   const [clientId, setClientId] = useState<string>("");
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
@@ -72,16 +74,19 @@ export default function PortfolioPage() {
     setClientId(cid);
     if (!cid) return;
 
+    const qs = new URLSearchParams({ client_id: cid });
+    if (walletAddress) qs.set("wallet_address", walletAddress);
+
     Promise.all([
-      fetch(`/api/watchlist?client_id=${encodeURIComponent(cid)}`).then((r) => r.json()),
-      fetch(`/api/portfolio?client_id=${encodeURIComponent(cid)}`).then((r) => r.json()),
+      fetch(`/api/watchlist?${qs.toString()}`).then((r) => r.json()),
+      fetch(`/api/portfolio?${qs.toString()}`).then((r) => r.json()),
     ])
       .then(([w, p]) => {
         setWatchlist(w.items || []);
         setPortfolio(p);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [walletAddress]);
 
   if (loading) {
     return (
@@ -109,8 +114,20 @@ export default function PortfolioPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white mb-2">Portfolio</h1>
         <p className="text-gray-400">
-          Your watched signals and logged trades. Scored once markets resolve.
-          Stored anonymously on this browser only.
+          Your watched signals and logged trades. Scored once markets resolve.{" "}
+          {walletAddress ? (
+            <span className="text-emerald-400">
+              Linked to wallet {shortAddress(walletAddress)} — follows you
+              across devices.
+            </span>
+          ) : (
+            <>
+              <span>Stored anonymously on this browser.</span>{" "}
+              <span className="text-gray-500">
+                Link a wallet (top-right) to sync across devices.
+              </span>
+            </>
+          )}
         </p>
       </div>
 
