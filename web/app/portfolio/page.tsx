@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
+import { FollowButton } from "@/components/follow-button";
 import { TableSkeleton } from "@/components/skeleton";
 import { getClientId } from "@/lib/client-id";
 import { shortAddress, useIdentity } from "@/lib/identity";
@@ -50,6 +51,40 @@ interface PortfolioResponse {
   };
 }
 
+interface FollowedTrader {
+  trader_address: string;
+  followed_at: string;
+  total_divergent_signals: number | null;
+  correct_predictions: number | null;
+  accuracy_pct: number | null;
+  ci?: {
+    pct: number;
+    lo: number;
+    hi: number;
+    total: number;
+    correct: number;
+    sufficient: boolean;
+  };
+}
+
+interface FollowAlert {
+  id: number;
+  trader_address: string;
+  signal_id: number;
+  market_id: string;
+  position_direction: string | null;
+  created_at: string;
+  seen_at: string | null;
+  question: string | null;
+  market_price: number | null;
+  sm_consensus: number | null;
+  divergence_pct: number | null;
+  signal_strength: number | null;
+  sm_direction: string | null;
+  accuracy_pct: number | null;
+  total_divergent_signals: number | null;
+}
+
 function colorForWinRate(pct: number | null) {
   if (pct === null) return "text-gray-500";
   if (pct >= 60) return "text-emerald-400";
@@ -67,6 +102,8 @@ export default function PortfolioPage() {
   const [clientId, setClientId] = useState<string>("");
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
+  const [followed, setFollowed] = useState<FollowedTrader[]>([]);
+  const [alerts, setAlerts] = useState<FollowAlert[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -80,13 +117,27 @@ export default function PortfolioPage() {
     Promise.all([
       fetch(`/api/watchlist?${qs.toString()}`).then((r) => r.json()),
       fetch(`/api/portfolio?${qs.toString()}`).then((r) => r.json()),
+      fetch(`/api/follow/list?${qs.toString()}`).then((r) => r.json()),
+      fetch(`/api/follow/alerts?${qs.toString()}&limit=20`).then((r) => r.json()),
     ])
-      .then(([w, p]) => {
+      .then(([w, p, f, a]) => {
         setWatchlist(w.items || []);
         setPortfolio(p);
+        setFollowed(f.items || []);
+        setAlerts(a.items || []);
       })
       .finally(() => setLoading(false));
   }, [walletAddress]);
+
+  const markAlertsSeen = async () => {
+    const cid = getClientId();
+    const qs = new URLSearchParams({ client_id: cid });
+    if (walletAddress) qs.set("wallet_address", walletAddress);
+    await fetch(`/api/follow/alerts/mark-seen?${qs.toString()}`, {
+      method: "POST",
+    });
+    setAlerts((prev) => prev.map((a) => ({ ...a, seen_at: a.seen_at || new Date().toISOString() })));
+  };
 
   if (loading) {
     return (
@@ -107,7 +158,12 @@ export default function PortfolioPage() {
     }
   };
 
-  const noData = watchlist.length === 0 && (portfolio?.actions.length ?? 0) === 0;
+  const unseenCount = alerts.filter((a) => !a.seen_at).length;
+  const noData =
+    watchlist.length === 0 &&
+    (portfolio?.actions.length ?? 0) === 0 &&
+    followed.length === 0 &&
+    alerts.length === 0;
 
   return (
     <div>
@@ -144,6 +200,165 @@ export default function PortfolioPage() {
         </div>
       ) : (
         <>
+          {/* New positions from followed traders */}
+          {alerts.length > 0 && (
+            <section className="mb-10">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-white">
+                    New positions from followed traders
+                  </h2>
+                  {unseenCount > 0 && (
+                    <p className="text-xs text-emerald-400 mt-0.5">
+                      {unseenCount} new alert{unseenCount === 1 ? "" : "s"}
+                    </p>
+                  )}
+                </div>
+                {unseenCount > 0 && (
+                  <button
+                    onClick={markAlertsSeen}
+                    className="text-xs text-gray-400 hover:text-white"
+                  >
+                    Mark all read
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {alerts.slice(0, 10).map((a) => (
+                  <Link
+                    key={a.id}
+                    href={`/market/${a.market_id}`}
+                    className={`block bg-gray-900 border rounded-xl p-3 hover:border-gray-700 transition-colors ${
+                      a.seen_at ? "border-gray-800" : "border-emerald-500/30 ring-1 ring-emerald-500/10"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-medium truncate">
+                          {a.question || a.market_id.slice(0, 20)}
+                        </p>
+                        <div className="flex items-center gap-3 mt-1 text-xs">
+                          <span className="font-mono text-gray-500">
+                            {shortAddress(a.trader_address)}
+                          </span>
+                          {a.accuracy_pct !== null &&
+                            a.total_divergent_signals !== null && (
+                              <span className="text-gray-500">
+                                {a.accuracy_pct.toFixed(0)}% on{" "}
+                                {a.total_divergent_signals} markets
+                              </span>
+                            )}
+                          <span
+                            className={
+                              a.position_direction === "YES"
+                                ? "text-emerald-400 font-medium"
+                                : "text-red-400 font-medium"
+                            }
+                          >
+                            → {a.position_direction}
+                          </span>
+                          {a.market_price !== null && (
+                            <span className="text-gray-500">
+                              Market: {(a.market_price * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-500 shrink-0">
+                        {new Date(a.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Traders you follow */}
+          {followed.length > 0 && (
+            <section className="mb-10">
+              <h2 className="text-xl font-semibold text-white mb-4">
+                Traders you follow
+              </h2>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
+                      <th className="text-left p-3">Trader</th>
+                      <th className="text-right p-3">Accuracy</th>
+                      <th className="text-right p-3">Signals</th>
+                      <th className="text-right p-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {followed.map((f) => {
+                      const hasData =
+                        f.accuracy_pct !== null &&
+                        f.total_divergent_signals !== null &&
+                        f.total_divergent_signals > 0;
+                      return (
+                        <tr
+                          key={f.trader_address}
+                          className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                        >
+                          <td className="p-3">
+                            <Link
+                              href={`/traders/${f.trader_address}`}
+                              className="text-white font-mono text-xs hover:text-emerald-400"
+                            >
+                              {shortAddress(f.trader_address)}
+                            </Link>
+                          </td>
+                          <td className="p-3 text-right">
+                            {hasData ? (
+                              <>
+                                <div
+                                  className={`text-sm font-semibold ${
+                                    (f.accuracy_pct ?? 0) >= 60
+                                      ? "text-emerald-400"
+                                      : (f.accuracy_pct ?? 0) >= 50
+                                        ? "text-amber-400"
+                                        : "text-red-400"
+                                  }`}
+                                >
+                                  {(f.accuracy_pct ?? 0).toFixed(0)}%
+                                </div>
+                                {f.ci && (
+                                  <div className="text-[10px] text-gray-500">
+                                    [{f.ci.lo.toFixed(0)}–{f.ci.hi.toFixed(0)}%]
+                                    {!f.ci.sufficient && (
+                                      <span
+                                        className="ml-1 text-amber-500/70"
+                                        title="Small sample (<30)"
+                                      >
+                                        ⚠
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-xs text-gray-500">—</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right text-xs text-gray-400">
+                            {f.total_divergent_signals || 0}
+                          </td>
+                          <td className="p-3 text-right">
+                            <FollowButton
+                              traderAddress={f.trader_address}
+                              size="sm"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           {/* Stats summary */}
           {portfolio && portfolio.stats.total_actions > 0 && (
             <section className="mb-10">

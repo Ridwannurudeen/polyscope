@@ -6,8 +6,12 @@ import aiosqlite
 
 from api.database import (
     add_to_watchlist,
+    emit_follow_alerts_for_signal,
     expire_converged_signals,
+    follow_trader,
     get_expired_signal_count,
+    get_follow_alerts,
+    get_followed_traders,
     get_metrics_summary,
     get_portfolio,
     get_signal_accuracy,
@@ -16,7 +20,9 @@ from api.database import (
     get_trader_profile,
     get_watchlist,
     init_db,
+    is_following,
     link_wallet_to_client,
+    mark_alerts_seen,
     rebuild_trader_accuracy,
     record_event,
     record_user_action,
@@ -24,6 +30,7 @@ from api.database import (
     save_divergence_signal,
     save_resolved_market,
     save_signal_trader_positions,
+    unfollow_trader,
     update_signal_outcomes,
     DB_PATH,
     SCHEMA,
@@ -873,6 +880,121 @@ async def test_metrics_portfolio_counts(db):
     assert summary["portfolio"]["watchlist_clients"] == 1
     assert summary["portfolio"]["actions_total"] == 1
     assert summary["portfolio"]["actions_clients"] == 1
+
+
+@pytest.mark.anyio
+async def test_follow_unfollow_roundtrip(db):
+    trader = "0x" + "c" * 40
+    client = "client-follower"
+
+    assert await is_following(db, trader, client) is False
+
+    await follow_trader(db, trader, client)
+    await db.commit()
+
+    assert await is_following(db, trader, client) is True
+
+    # Idempotent — calling follow again shouldn't duplicate
+    await follow_trader(db, trader, client)
+    await db.commit()
+
+    items = await get_followed_traders(db, client)
+    assert len(items) == 1
+    assert items[0]["trader_address"] == trader
+
+    # Unfollow
+    removed = await unfollow_trader(db, trader, client)
+    await db.commit()
+    assert removed is True
+    assert await is_following(db, trader, client) is False
+
+
+@pytest.mark.anyio
+async def test_follow_survives_wallet_link(db):
+    """Follows created under client_id should remain attached after linking."""
+    trader = "0x" + "d" * 40
+    wallet = "0x" + "e" * 40
+
+    await follow_trader(db, trader, "client-early")
+    await db.commit()
+
+    # Link wallet → should backfill the follow row
+    result = await link_wallet_to_client(db, "client-early", wallet)
+    await db.commit()
+    assert result["follows_migrated"] == 1
+
+    # Verify follow still resolves via wallet on a new client_id
+    assert (
+        await is_following(db, trader, "client-new", wallet_address=wallet)
+        is True
+    )
+
+
+@pytest.mark.anyio
+async def test_follow_alerts_fan_out_and_dedup(db):
+    trader = "0x" + "f" * 40
+    client = "client-alert-watch"
+
+    await follow_trader(db, trader, client)
+    await db.commit()
+
+    # Seed a signal with that trader as a contributor
+    signal_id = await _seed_signal_with_traders(
+        db, "fm1", 0.6, "crypto", [(trader, "YES"), ("0xother", "NO")]
+    )
+    await db.commit()
+
+    # Emit alerts — should create one alert for the follower on (fm1, trader)
+    contributions = [
+        {"trader_address": trader, "position_direction": "YES"},
+        {"trader_address": "0xother", "position_direction": "NO"},
+    ]
+    created = await emit_follow_alerts_for_signal(
+        db, signal_id, "fm1", contributions
+    )
+    await db.commit()
+    assert created == 1
+
+    # Re-emit for same market — dedup by (follower, market, trader)
+    signal_id_2 = await _seed_signal_with_traders(
+        db, "fm1", 0.6, "crypto", [(trader, "YES")]
+    )
+    await db.commit()
+    created = await emit_follow_alerts_for_signal(
+        db, signal_id_2, "fm1", [{"trader_address": trader, "position_direction": "YES"}]
+    )
+    await db.commit()
+    assert created == 0
+
+    items = await get_follow_alerts(db, client)
+    assert len(items) == 1
+    assert items[0]["trader_address"] == trader
+    assert items[0]["market_id"] == "fm1"
+    assert items[0]["seen_at"] is None
+
+
+@pytest.mark.anyio
+async def test_follow_alerts_mark_seen(db):
+    trader = "0x" + "1" * 40
+    client = "client-seen"
+    await follow_trader(db, trader, client)
+    signal_id = await _seed_signal_with_traders(
+        db, "sn1", 0.55, "crypto", [(trader, "YES")]
+    )
+    await emit_follow_alerts_for_signal(
+        db, signal_id, "sn1", [{"trader_address": trader, "position_direction": "YES"}]
+    )
+    await db.commit()
+
+    unseen = await get_follow_alerts(db, client, unseen_only=True)
+    assert len(unseen) == 1
+
+    marked = await mark_alerts_seen(db, client)
+    await db.commit()
+    assert marked == 1
+
+    unseen_after = await get_follow_alerts(db, client, unseen_only=True)
+    assert len(unseen_after) == 0
 
 
 @pytest.mark.anyio

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect } from "react";
 import { Disclaimer } from "@/components/disclaimer";
+import { FollowButton } from "@/components/follow-button";
 import { LastUpdated } from "@/components/last-updated";
 import { TableSkeleton } from "@/components/skeleton";
 import { trackEvent } from "@/lib/analytics";
@@ -110,12 +111,15 @@ export default function TraderProfilePage() {
         </Link>
       </div>
 
-      <div className="flex items-start justify-between mb-6">
-        <div>
+      <div className="flex items-start justify-between mb-6 gap-4">
+        <div className="min-w-0">
           <h1 className="text-2xl font-mono text-white mb-1 break-all">
             {data.trader_address}
           </h1>
           <p className="text-gray-400 text-sm">Trader predictive accuracy profile</p>
+          <div className="mt-3">
+            <FollowButton traderAddress={data.trader_address} />
+          </div>
         </div>
         <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
       </div>

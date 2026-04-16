@@ -165,6 +165,34 @@ CREATE TABLE IF NOT EXISTS wallets (
     last_seen_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS trader_follows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    follower_wallet TEXT,
+    follower_client_id TEXT,
+    trader_address TEXT NOT NULL,
+    followed_at TEXT NOT NULL,
+    UNIQUE(follower_wallet, trader_address),
+    UNIQUE(follower_client_id, trader_address)
+);
+
+-- Notifications sent to followers when their followed trader enters a
+-- new divergent position. Deduped by (follower, trader, market) so the
+-- scheduler's ~50× re-signals of the same position don't spam alerts.
+-- seen_at marks whether the follower has acknowledged it.
+CREATE TABLE IF NOT EXISTS follow_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    follower_wallet TEXT,
+    follower_client_id TEXT,
+    trader_address TEXT NOT NULL,
+    signal_id INTEGER NOT NULL,
+    market_id TEXT NOT NULL,
+    position_direction TEXT,
+    created_at TEXT NOT NULL,
+    seen_at TEXT,
+    UNIQUE(follower_wallet, market_id, trader_address),
+    UNIQUE(follower_client_id, market_id, trader_address)
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id TEXT,
@@ -260,6 +288,43 @@ async def migrate_db(db: aiosqlite.Connection):
     )
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_wallets_client ON wallets(client_id)"
+    )
+
+    # Follow-trader tables (created if missing on pre-existing DBs).
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS trader_follows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            follower_wallet TEXT,
+            follower_client_id TEXT,
+            trader_address TEXT NOT NULL,
+            followed_at TEXT NOT NULL,
+            UNIQUE(follower_wallet, trader_address),
+            UNIQUE(follower_client_id, trader_address)
+        )"""
+    )
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS follow_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            follower_wallet TEXT,
+            follower_client_id TEXT,
+            trader_address TEXT NOT NULL,
+            signal_id INTEGER NOT NULL,
+            market_id TEXT NOT NULL,
+            position_direction TEXT,
+            created_at TEXT NOT NULL,
+            seen_at TEXT,
+            UNIQUE(follower_wallet, market_id, trader_address),
+            UNIQUE(follower_client_id, market_id, trader_address)
+        )"""
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_follows_follower ON trader_follows(follower_wallet, follower_client_id)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_follows_trader ON trader_follows(trader_address)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_follow_alerts_follower ON follow_alerts(follower_wallet, follower_client_id, seen_at)"
     )
 
     await db.commit()
@@ -888,11 +953,232 @@ async def link_wallet_to_client(
     )
     ua_migrated = cursor.rowcount or 0
 
+    # Also migrate any anonymous follows to this wallet.
+    cursor = await db.execute(
+        """UPDATE trader_follows SET follower_wallet = ?
+           WHERE follower_client_id = ?
+             AND (follower_wallet IS NULL OR follower_wallet = '')""",
+        (wallet, client_id),
+    )
+    follows_migrated = cursor.rowcount or 0
+
     return {
         "wallet_address": wallet,
         "watchlist_migrated": w_migrated,
         "user_actions_migrated": ua_migrated,
+        "follows_migrated": follows_migrated,
     }
+
+
+# ── Follow-trader ──────────────────────────────────────────
+
+
+async def follow_trader(
+    db: aiosqlite.Connection,
+    trader_address: str,
+    client_id: str,
+    wallet_address: str | None = None,
+) -> dict:
+    """Subscribe a follower to a trader. Idempotent per (follower, trader).
+
+    Identity rule: if wallet is known, store both wallet + client_id;
+    otherwise client_id only. link_wallet_to_client backfills wallet
+    onto existing rows so the user's follows survive wallet linking.
+    """
+    from datetime import datetime, timezone
+
+    trader = trader_address.lower()
+    wallet = wallet_address.lower() if wallet_address else None
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.execute(
+        """INSERT INTO trader_follows
+           (follower_wallet, follower_client_id, trader_address, followed_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT DO NOTHING""",
+        (wallet, client_id, trader, now),
+    )
+    return {
+        "trader_address": trader,
+        "follower_wallet": wallet,
+        "follower_client_id": client_id,
+        "followed_at": now,
+    }
+
+
+async def unfollow_trader(
+    db: aiosqlite.Connection,
+    trader_address: str,
+    client_id: str,
+    wallet_address: str | None = None,
+) -> bool:
+    """Remove a follow. Matches rows owned by either identity."""
+    trader = trader_address.lower()
+    wallet = wallet_address.lower() if wallet_address else None
+    cursor = await db.execute(
+        """DELETE FROM trader_follows
+           WHERE trader_address = ?
+             AND (follower_client_id = ?
+                  OR (? IS NOT NULL AND follower_wallet = ?))""",
+        (trader, client_id, wallet, wallet),
+    )
+    return (cursor.rowcount or 0) > 0
+
+
+async def get_followed_traders(
+    db: aiosqlite.Connection,
+    client_id: str,
+    wallet_address: str | None = None,
+) -> list[dict]:
+    """Return traders this follower subscribes to, joined with their
+    current accuracy + CI.
+    """
+    from polyscope.stats import accuracy_bounds
+
+    wallet = wallet_address.lower() if wallet_address else None
+    cursor = await db.execute(
+        """SELECT DISTINCT tf.trader_address, tf.followed_at,
+                  ta.total_divergent_signals, ta.correct_predictions,
+                  ta.accuracy_pct
+           FROM trader_follows tf
+           LEFT JOIN trader_accuracy ta
+             ON ta.trader_address = tf.trader_address
+           WHERE tf.follower_client_id = ?
+              OR (? IS NOT NULL AND tf.follower_wallet = ?)
+           ORDER BY tf.followed_at DESC""",
+        (client_id, wallet, wallet),
+    )
+    rows = await cursor.fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        total = d.get("total_divergent_signals") or 0
+        correct = d.get("correct_predictions") or 0
+        d["ci"] = accuracy_bounds(correct, total)
+        out.append(d)
+    return out
+
+
+async def is_following(
+    db: aiosqlite.Connection,
+    trader_address: str,
+    client_id: str,
+    wallet_address: str | None = None,
+) -> bool:
+    trader = trader_address.lower()
+    wallet = wallet_address.lower() if wallet_address else None
+    cursor = await db.execute(
+        """SELECT 1 FROM trader_follows
+           WHERE trader_address = ?
+             AND (follower_client_id = ?
+                  OR (? IS NOT NULL AND follower_wallet = ?))
+           LIMIT 1""",
+        (trader, client_id, wallet, wallet),
+    )
+    return await cursor.fetchone() is not None
+
+
+async def emit_follow_alerts_for_signal(
+    db: aiosqlite.Connection,
+    signal_id: int,
+    market_id: str,
+    contributors: list[dict],
+) -> int:
+    """After a new divergence signal + contributors are saved, create a
+    follow_alert for every follower subscribed to any of the contributor
+    addresses. Idempotent per (follower, signal, trader).
+
+    Returns the number of alert rows created.
+    """
+    from datetime import datetime, timezone
+
+    if not contributors:
+        return 0
+
+    now = datetime.now(timezone.utc).isoformat()
+    created = 0
+    for c in contributors:
+        trader = (c.get("trader_address") or "").lower()
+        direction = c.get("position_direction")
+        if not trader:
+            continue
+        cursor = await db.execute(
+            "SELECT follower_wallet, follower_client_id FROM trader_follows WHERE trader_address = ?",
+            (trader,),
+        )
+        followers = await cursor.fetchall()
+        for f in followers:
+            try:
+                await db.execute(
+                    """INSERT INTO follow_alerts
+                       (follower_wallet, follower_client_id, trader_address,
+                        signal_id, market_id, position_direction, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        f["follower_wallet"],
+                        f["follower_client_id"],
+                        trader,
+                        signal_id,
+                        market_id,
+                        direction,
+                        now,
+                    ),
+                )
+                created += 1
+            except Exception:
+                # UNIQUE constraint — already alerted
+                pass
+    return created
+
+
+async def get_follow_alerts(
+    db: aiosqlite.Connection,
+    client_id: str,
+    wallet_address: str | None = None,
+    unseen_only: bool = False,
+    limit: int = 50,
+) -> list[dict]:
+    """Fetch recent follow_alerts for a follower, joined with market +
+    signal metadata."""
+    wallet = wallet_address.lower() if wallet_address else None
+    sql = """
+        SELECT fa.id, fa.trader_address, fa.signal_id, fa.market_id,
+               fa.position_direction, fa.created_at, fa.seen_at,
+               ds.question, ds.market_price, ds.sm_consensus,
+               ds.divergence_pct, ds.signal_strength, ds.sm_direction,
+               ta.accuracy_pct, ta.total_divergent_signals
+        FROM follow_alerts fa
+        LEFT JOIN divergence_signals ds ON ds.id = fa.signal_id
+        LEFT JOIN trader_accuracy ta ON ta.trader_address = fa.trader_address
+        WHERE (fa.follower_client_id = ?
+               OR (? IS NOT NULL AND fa.follower_wallet = ?))
+    """
+    if unseen_only:
+        sql += " AND fa.seen_at IS NULL"
+    sql += " ORDER BY fa.created_at DESC LIMIT ?"
+
+    cursor = await db.execute(sql, (client_id, wallet, wallet, limit))
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def mark_alerts_seen(
+    db: aiosqlite.Connection,
+    client_id: str,
+    wallet_address: str | None = None,
+) -> int:
+    """Mark all unseen follow_alerts as seen for this follower."""
+    from datetime import datetime, timezone
+
+    wallet = wallet_address.lower() if wallet_address else None
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = await db.execute(
+        """UPDATE follow_alerts SET seen_at = ?
+           WHERE seen_at IS NULL
+             AND (follower_client_id = ?
+                  OR (? IS NOT NULL AND follower_wallet = ?))""",
+        (now, client_id, wallet, wallet),
+    )
+    return cursor.rowcount or 0
 
 
 async def record_user_action(

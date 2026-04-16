@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
+import { FollowButton } from "@/components/follow-button";
 import { LastUpdated } from "@/components/last-updated";
 import { TableSkeleton } from "@/components/skeleton";
 import { usePollingFetch } from "@/lib/hooks";
@@ -146,6 +147,7 @@ export default function TradersPage() {
                     <th className="text-left p-3">Trader</th>
                     <th className="text-right p-3">Accuracy (95% CI)</th>
                     <th className="text-right p-3">Signals</th>
+                    <th className="text-right p-3"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -185,6 +187,12 @@ export default function TradersPage() {
                       </td>
                       <td className="p-3 text-right text-sm text-gray-400">
                         {t.correct_predictions}/{t.total_divergent_signals}
+                      </td>
+                      <td className="p-3 text-right">
+                        <FollowButton
+                          traderAddress={t.trader_address}
+                          size="sm"
+                        />
                       </td>
                     </tr>
                   ))}

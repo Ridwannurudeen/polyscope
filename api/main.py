@@ -14,10 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from .cache import cache
 from .database import (
     add_to_watchlist,
+    follow_trader,
     get_db,
     get_divergence_history,
     get_divergence_signals,
     get_expired_signal_count,
+    get_follow_alerts,
+    get_followed_traders,
     get_metrics_summary,
     get_pending_whale_alerts,
     get_portfolio,
@@ -33,12 +36,15 @@ from .database import (
     get_watchlist,
     get_whale_alerts,
     init_db,
+    is_following,
     link_wallet_to_client,
     mark_alerts_notified,
+    mark_alerts_seen,
     record_event,
     record_user_action,
     remove_from_watchlist,
     search_universal,
+    unfollow_trader,
 )
 from .scheduler import (
     cleanup_job,
@@ -654,8 +660,11 @@ async def whale_flow_pending():
 # convenience layer, not an identity system.
 
 
+import re as _re
+
 # EVM address: 0x + 40 hex chars. Case-insensitive; we lower() on write.
 _EVM_ADDR_RE = r"^0x[a-fA-F0-9]{40}$"
+_EVM_ADDR_RE_COMPILED = _re.compile(_EVM_ADDR_RE)
 
 
 class WatchlistAddRequest(BaseModel):
@@ -793,6 +802,116 @@ async def wallet_link(body: LinkWalletRequest):
         status_code=503,
         detail="Database busy — please retry in a few seconds",
     )
+
+
+# ── Follow-trader ──────────────────────────────────────────
+
+
+class FollowRequest(BaseModel):
+    client_id: str = Field(min_length=8, max_length=64)
+    trader_address: str = Field(pattern=_EVM_ADDR_RE)
+    wallet_address: str | None = Field(default=None, pattern=_EVM_ADDR_RE)
+
+
+@app.post("/api/follow/trader")
+async def follow(body: FollowRequest):
+    wallet = body.wallet_address.lower() if body.wallet_address else None
+    db = await get_db()
+    try:
+        result = await follow_trader(
+            db, body.trader_address, body.client_id, wallet_address=wallet
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return result
+
+
+@app.delete("/api/follow/trader/{trader_address}")
+async def unfollow(
+    trader_address: str,
+    client_id: str = Query(..., min_length=8),
+    wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
+):
+    if not _EVM_ADDR_RE_COMPILED.match(trader_address):
+        raise HTTPException(status_code=400, detail="invalid trader address")
+    wallet = wallet_address.lower() if wallet_address else None
+    db = await get_db()
+    try:
+        removed = await unfollow_trader(
+            db, trader_address, client_id, wallet_address=wallet
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"removed": removed}
+
+
+@app.get("/api/follow/list")
+async def follow_list(
+    client_id: str = Query(..., min_length=8),
+    wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
+):
+    wallet = wallet_address.lower() if wallet_address else None
+    db = await get_db()
+    try:
+        items = await get_followed_traders(db, client_id, wallet_address=wallet)
+    finally:
+        await db.close()
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/follow/is-following/{trader_address}")
+async def follow_status(
+    trader_address: str,
+    client_id: str = Query(..., min_length=8),
+    wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
+):
+    if not _EVM_ADDR_RE_COMPILED.match(trader_address):
+        raise HTTPException(status_code=400, detail="invalid trader address")
+    wallet = wallet_address.lower() if wallet_address else None
+    db = await get_db()
+    try:
+        following = await is_following(
+            db, trader_address, client_id, wallet_address=wallet
+        )
+    finally:
+        await db.close()
+    return {"following": following}
+
+
+@app.get("/api/follow/alerts")
+async def follow_alerts(
+    client_id: str = Query(..., min_length=8),
+    wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
+    unseen_only: bool = Query(default=False),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    wallet = wallet_address.lower() if wallet_address else None
+    db = await get_db()
+    try:
+        items = await get_follow_alerts(
+            db, client_id, wallet_address=wallet,
+            unseen_only=unseen_only, limit=limit,
+        )
+    finally:
+        await db.close()
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/follow/alerts/mark-seen")
+async def follow_alerts_mark_seen(
+    client_id: str = Query(..., min_length=8),
+    wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
+):
+    wallet = wallet_address.lower() if wallet_address else None
+    db = await get_db()
+    try:
+        updated = await mark_alerts_seen(db, client_id, wallet_address=wallet)
+        await db.commit()
+    finally:
+        await db.close()
+    return {"marked_seen": updated}
 
 
 # ── Polymarket builder-attribution signing ─────────────────

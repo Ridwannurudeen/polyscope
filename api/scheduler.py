@@ -21,6 +21,7 @@ from .database import (
     get_category_weights,
     get_db,
     rebuild_trader_accuracy,
+    emit_follow_alerts_for_signal,
     rebuild_trader_category_stats,
     save_divergence_signal,
     save_resolved_market,
@@ -173,6 +174,10 @@ async def compute_divergences_job():
                         for c in contributions
                     ]
                     await save_signal_trader_positions(db, records)
+                    # Fan out follow_alerts to subscribers of these traders
+                    await emit_follow_alerts_for_signal(
+                        db, signal_id, market.condition_id, contributions
+                    )
 
                 # Mark as candidate for trade-based refinement
                 if signal.divergence_pct > 0.05 or market.volume_24h > 100000:
@@ -261,6 +266,10 @@ async def compute_divergences_job():
                                 for c in contributions
                             ]
                             await save_signal_trader_positions(db, stp_records)
+                            await emit_follow_alerts_for_signal(
+                                db, trade_signal_id, market.condition_id,
+                                contributions,
+                            )
 
                 await asyncio.sleep(0.2)
             except Exception:
