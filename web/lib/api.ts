@@ -116,6 +116,12 @@ export interface SignalAccuracy {
     medium: SignalAccuracyTier;
     low: SignalAccuracyTier;
   };
+  by_skew: {
+    very_lopsided: SignalAccuracyTier;
+    lopsided: SignalAccuracyTier;
+    moderate: SignalAccuracyTier;
+    tight: SignalAccuracyTier;
+  };
   rolling_30d: SignalAccuracyTier;
   simulation?: PnlSimulation;
 }

@@ -29,6 +29,14 @@ interface TraderLeaderboardEntry {
   accuracy_pct: number;
   correct_predictions: number;
   total_divergent_signals: number;
+  ci?: {
+    pct: number;
+    lo: number;
+    hi: number;
+    total: number;
+    correct: number;
+    sufficient: boolean;
+  };
 }
 
 interface TradersLeaderboardResponse {
@@ -84,12 +92,13 @@ export default function Dashboard() {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white">
-            Intelligence terminal for Polymarket dislocations
+            Trust-and-decision layer for Polymarket traders
           </h1>
           <p className="text-gray-400 mt-1 max-w-2xl">
-            We track where top Polymarket traders diverge from the crowd, score
-            each trader individually against resolved outcomes, and surface the
-            evidence behind every signal.
+            Every trader on Polymarket&apos;s profit leaderboard, scored
+            individually against resolved outcomes — not by P&amp;L. We
+            publish the evidence trail behind every signal and lead with the
+            tight-market hit rate, not inflated composite numbers.
           </p>
         </div>
         <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
@@ -288,8 +297,18 @@ export default function Dashboard() {
                             {shortAddr(t.trader_address)}
                           </Link>
                         </td>
-                        <td className="p-3 text-right text-emerald-400 font-semibold">
-                          {t.accuracy_pct.toFixed(0)}%
+                        <td className="p-3 text-right">
+                          <div className="text-emerald-400 font-semibold">
+                            {t.accuracy_pct.toFixed(0)}%
+                            {t.ci && !t.ci.sufficient && (
+                              <span
+                                className="ml-1 text-amber-500/70 text-xs"
+                                title="Small sample (<30)"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-3 text-right text-xs text-gray-500 w-20">
                           {t.correct_predictions}/{t.total_divergent_signals}
@@ -339,8 +358,18 @@ export default function Dashboard() {
                             {shortAddr(t.trader_address)}
                           </Link>
                         </td>
-                        <td className="p-3 text-right text-red-400 font-semibold">
-                          {t.accuracy_pct.toFixed(0)}%
+                        <td className="p-3 text-right">
+                          <div className="text-red-400 font-semibold">
+                            {t.accuracy_pct.toFixed(0)}%
+                            {t.ci && !t.ci.sufficient && (
+                              <span
+                                className="ml-1 text-amber-500/70 text-xs"
+                                title="Small sample (<30)"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-3 text-right text-xs text-gray-500 w-20">
                           {t.correct_predictions}/{t.total_divergent_signals}

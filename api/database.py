@@ -424,94 +424,86 @@ async def rebuild_trader_accuracy(db: aiosqlite.Connection) -> int:
     (YES/NO), NOT the aggregate consensus. A trader is "correct" when
     their position direction matches the market outcome.
 
+    Each (trader, market) pair counts once — the earliest attributed
+    signal. Re-signals of the same divergent position across scan
+    cycles are not independent observations.
+
     Returns the number of trader rows updated.
     """
     import json as _json
     from datetime import datetime, timezone
 
-    # Pull per-trader hit/miss aggregated against resolved outcomes.
-    # We join signal_trader_positions to divergence_signals to the
-    # resolved_markets outcome so each trader's individual direction
-    # is compared to the market's final outcome.
+    # Dedup: one row per (trader_address, market_id), picking the earliest
+    # signal_trader_positions row (MIN(id)). Same trader holding the same
+    # divergent position across many scan cycles is one prediction, not N.
     cursor = await db.execute(
         """
-        SELECT
-            stp.trader_address,
-            COUNT(*) AS total,
-            SUM(CASE
-                WHEN (stp.position_direction = 'YES' AND rm.outcome = 1) THEN 1
-                WHEN (stp.position_direction = 'NO'  AND rm.outcome = 0) THEN 1
-                ELSE 0
-            END) AS correct_count
-        FROM signal_trader_positions stp
+        WITH first_position AS (
+            SELECT MIN(stp.id) AS stp_id
+            FROM signal_trader_positions stp
+            JOIN divergence_signals ds ON ds.id = stp.signal_id
+            WHERE ds.resolved = 1
+            GROUP BY stp.trader_address, stp.market_id
+        )
+        SELECT stp.trader_address,
+               stp.position_direction,
+               ds.market_price,
+               COALESCE(ds.category, '') AS category,
+               rm.outcome
+        FROM first_position fp
+        JOIN signal_trader_positions stp ON stp.id = fp.stp_id
         JOIN divergence_signals ds ON ds.id = stp.signal_id
-        JOIN resolved_markets rm ON rm.market_id = ds.market_id
-        WHERE ds.resolved = 1 AND rm.outcome IN (0, 1)
-        GROUP BY stp.trader_address
+        JOIN resolved_markets rm ON rm.market_id = stp.market_id
+        WHERE rm.outcome IN (0, 1)
         """
     )
-    overall_rows = await cursor.fetchall()
+    rows = await cursor.fetchall()
 
-    if not overall_rows:
+    if not rows:
         return 0
 
-    # Per-trader skew breakdown
-    cursor = await db.execute(
-        """
-        SELECT
-            stp.trader_address,
-            CASE
-                WHEN ds.market_price >= 0.9 OR ds.market_price <= 0.1 THEN 'very_lopsided'
-                WHEN ds.market_price >= 0.75 OR ds.market_price <= 0.25 THEN 'lopsided'
-                WHEN ds.market_price >= 0.6  OR ds.market_price <= 0.4  THEN 'moderate'
-                ELSE 'tight'
-            END AS skew,
-            COUNT(*) AS total,
-            SUM(CASE
-                WHEN (stp.position_direction = 'YES' AND rm.outcome = 1) THEN 1
-                WHEN (stp.position_direction = 'NO'  AND rm.outcome = 0) THEN 1
-                ELSE 0
-            END) AS correct_count
-        FROM signal_trader_positions stp
-        JOIN divergence_signals ds ON ds.id = stp.signal_id
-        JOIN resolved_markets rm ON rm.market_id = ds.market_id
-        WHERE ds.resolved = 1 AND rm.outcome IN (0, 1)
-        GROUP BY stp.trader_address, skew
-        """
-    )
-    skew_rows = await cursor.fetchall()
+    overall: dict[str, dict[str, int]] = {}
     skew_map: dict[str, dict[str, dict[str, int]]] = {}
-    for r in skew_rows:
-        skew_map.setdefault(r[0], {})[r[1]] = {"total": r[2], "correct": r[3]}
-
-    # Per-trader category breakdown
-    cursor = await db.execute(
-        """
-        SELECT
-            stp.trader_address,
-            COALESCE(ds.category, '') AS sig_category,
-            COUNT(*) AS total,
-            SUM(CASE
-                WHEN (stp.position_direction = 'YES' AND rm.outcome = 1) THEN 1
-                WHEN (stp.position_direction = 'NO'  AND rm.outcome = 0) THEN 1
-                ELSE 0
-            END) AS correct_count
-        FROM signal_trader_positions stp
-        JOIN divergence_signals ds ON ds.id = stp.signal_id
-        JOIN resolved_markets rm ON rm.market_id = ds.market_id
-        WHERE ds.resolved = 1 AND rm.outcome IN (0, 1)
-        GROUP BY stp.trader_address, sig_category
-        """
-    )
-    cat_rows = await cursor.fetchall()
     cat_map: dict[str, dict[str, dict[str, int]]] = {}
-    for r in cat_rows:
-        cat_map.setdefault(r[0], {})[r[1]] = {"total": r[2], "correct": r[3]}
+
+    for r in rows:
+        trader, direction, price, category, outcome = r[0], r[1], r[2], r[3], r[4]
+        correct = (
+            1
+            if (direction == "YES" and outcome == 1)
+            or (direction == "NO" and outcome == 0)
+            else 0
+        )
+
+        o = overall.setdefault(trader, {"total": 0, "correct": 0})
+        o["total"] += 1
+        o["correct"] += correct
+
+        if price >= 0.9 or price <= 0.1:
+            band = "very_lopsided"
+        elif price >= 0.75 or price <= 0.25:
+            band = "lopsided"
+        elif price >= 0.6 or price <= 0.4:
+            band = "moderate"
+        else:
+            band = "tight"
+        s = skew_map.setdefault(trader, {}).setdefault(
+            band, {"total": 0, "correct": 0}
+        )
+        s["total"] += 1
+        s["correct"] += correct
+
+        c = cat_map.setdefault(trader, {}).setdefault(
+            category, {"total": 0, "correct": 0}
+        )
+        c["total"] += 1
+        c["correct"] += correct
 
     now = datetime.now(timezone.utc).isoformat()
     updated = 0
-    for row in overall_rows:
-        trader_address, total, correct = row[0], row[1], row[2] or 0
+    for trader_address, stats in overall.items():
+        total = stats["total"]
+        correct = stats["correct"]
         wrong = total - correct
         accuracy_pct = (correct / total * 100) if total > 0 else 0.0
         accuracy_by_skew = _json.dumps(skew_map.get(trader_address, {}))
@@ -553,11 +545,13 @@ async def get_trader_accuracy_leaderboard(
     limit: int = 100,
     min_signals: int = 10,
 ) -> list[dict]:
-    """Return top traders by predictive accuracy.
+    """Return top traders by predictive accuracy with Wilson 95% CI.
 
     order='predictive': highest accuracy first
     order='anti-predictive': lowest accuracy first (fade list)
     """
+    from polyscope.stats import accuracy_bounds
+
     direction = "DESC" if order == "predictive" else "ASC"
     cursor = await db.execute(
         f"""SELECT trader_address, total_divergent_signals, correct_predictions,
@@ -570,7 +564,14 @@ async def get_trader_accuracy_leaderboard(
         (min_signals, limit),
     )
     rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["ci"] = accuracy_bounds(
+            d["correct_predictions"], d["total_divergent_signals"]
+        )
+        result.append(d)
+    return result
 
 
 async def record_event(
@@ -1145,6 +1146,8 @@ async def get_signal_evidence(
 async def get_trader_profile(
     db: aiosqlite.Connection, trader_address: str
 ) -> dict | None:
+    from polyscope.stats import accuracy_bounds
+
     cursor = await db.execute(
         """SELECT trader_address, total_divergent_signals, correct_predictions,
                   wrong_predictions, accuracy_pct, accuracy_by_skew,
@@ -1154,7 +1157,22 @@ async def get_trader_profile(
         (trader_address,),
     )
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    d["ci"] = accuracy_bounds(d["correct_predictions"], d["total_divergent_signals"])
+    # Per-skew-band CIs (parse stored JSON, enrich each band)
+    import json as _json
+
+    try:
+        skew = _json.loads(d.get("accuracy_by_skew") or "{}")
+    except (ValueError, TypeError):
+        skew = {}
+    d["skew_ci"] = {
+        band: accuracy_bounds(stats.get("correct", 0), stats.get("total", 0))
+        for band, stats in skew.items()
+    }
+    return d
 
 
 # ── Signal Expiration ──────────────────────────────────────
@@ -1197,6 +1215,7 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
                    MAX(signal_strength) AS signal_strength,
                    outcome_correct,
                    sm_direction,
+                   market_price,
                    timestamp
             FROM divergence_signals
             WHERE resolved = 1 AND outcome_correct IS NOT NULL
@@ -1268,7 +1287,44 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
         "win_rate": round(c30 / t30, 4) if t30 > 0 else 0.0,
     }
 
-    return {"overall": overall, "by_tier": by_tier, "rolling_30d": rolling_30d}
+    # By skew band — the honest breakdown. Composite win rate hides
+    # composition effect (lopsided markets dominate). Tight-band accuracy
+    # is the real test of edge.
+    cursor = await db.execute(
+        _BEST_PER_MARKET +
+        """SELECT
+               CASE
+                   WHEN market_price >= 0.9 OR market_price <= 0.1 THEN 'very_lopsided'
+                   WHEN market_price >= 0.75 OR market_price <= 0.25 THEN 'lopsided'
+                   WHEN market_price >= 0.6 OR market_price <= 0.4  THEN 'moderate'
+                   ELSE 'tight'
+               END AS band,
+               COUNT(*) AS total,
+               SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) AS correct
+           FROM best
+           GROUP BY band"""
+    )
+    skew_rows = await cursor.fetchall()
+    by_skew: dict[str, dict[str, float | int]] = {
+        "very_lopsided": {"total": 0, "correct": 0, "win_rate": 0.0},
+        "lopsided": {"total": 0, "correct": 0, "win_rate": 0.0},
+        "moderate": {"total": 0, "correct": 0, "win_rate": 0.0},
+        "tight": {"total": 0, "correct": 0, "win_rate": 0.0},
+    }
+    for r in skew_rows:
+        band, t, c = r[0], r[1] or 0, r[2] or 0
+        by_skew[band] = {
+            "total": t,
+            "correct": c,
+            "win_rate": round(c / t, 4) if t > 0 else 0.0,
+        }
+
+    return {
+        "overall": overall,
+        "by_tier": by_tier,
+        "by_skew": by_skew,
+        "rolling_30d": rolling_30d,
+    }
 
 
 async def get_signal_pnl_simulation(db: aiosqlite.Connection) -> dict:

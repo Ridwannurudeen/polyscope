@@ -48,9 +48,65 @@ function directionColor(direction: string): string {
   return direction === "YES" ? "text-emerald-400" : "text-red-400";
 }
 
+function skewFromPrice(price: number): {
+  band: "tight" | "moderate" | "lopsided" | "very_lopsided";
+  label: string;
+  edgeNote: string;
+  edgeColor: string;
+} {
+  if (price >= 0.9 || price <= 0.1) {
+    return {
+      band: "very_lopsided",
+      label: "Very lopsided",
+      edgeNote:
+        "Fading a very-lopsided market is mostly composition effect — weak signal of genuine alpha",
+      edgeColor: "text-gray-400",
+    };
+  }
+  if (price >= 0.75 || price <= 0.25) {
+    return {
+      band: "lopsided",
+      label: "Lopsided",
+      edgeNote: "Lopsided market — expect modest edge, favored side often right",
+      edgeColor: "text-gray-300",
+    };
+  }
+  if (price >= 0.6 || price <= 0.4) {
+    return {
+      band: "moderate",
+      label: "Moderate",
+      edgeNote: "Moderate price skew — real uncertainty, contributors matter",
+      edgeColor: "text-amber-300",
+    };
+  }
+  return {
+    band: "tight",
+    label: "Tight",
+    edgeNote: "Tight market — genuine edge territory if contributors are calibrated",
+    edgeColor: "text-emerald-300",
+  };
+}
+
+function freshness(timestamp: string): { label: string; stale: boolean } {
+  const ts = Date.parse(timestamp);
+  if (Number.isNaN(ts)) return { label: "—", stale: false };
+  const diffMs = Date.now() - ts;
+  const mins = Math.floor(diffMs / 60_000);
+  const hrs = Math.floor(mins / 60);
+  const days = Math.floor(hrs / 24);
+  let label: string;
+  if (mins < 1) label = "just now";
+  else if (mins < 60) label = `${mins}m ago`;
+  else if (hrs < 24) label = `${hrs}h ago`;
+  else label = `${days}d ago`;
+  return { label, stale: hrs > 12 };
+}
+
 export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
   const [expanded, setExpanded] = useState(false);
   const tier = tierFromScore(signal.score);
+  const skew = skewFromPrice(signal.market_price);
+  const fresh = freshness(signal.timestamp);
   const crowdPct = (signal.market_price * 100).toFixed(0);
   const smPct = (signal.sm_consensus * 100).toFixed(0);
   const divPct = (signal.divergence_pct * 100).toFixed(0);
@@ -60,14 +116,34 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
       {/* Header row */}
       <div className="p-4 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1.5">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             <span
               className={`text-xs px-2 py-0.5 rounded border font-medium ${tier.tierBg} ${tier.tierColor}`}
             >
               {tier.tier}
             </span>
+            <span
+              className={`text-xs px-2 py-0.5 rounded border bg-gray-950 ${
+                skew.band === "tight"
+                  ? "border-emerald-500/30 text-emerald-400"
+                  : skew.band === "very_lopsided"
+                    ? "border-gray-700 text-gray-400"
+                    : "border-gray-700 text-gray-300"
+              }`}
+            >
+              {skew.label}
+            </span>
+            <span
+              className={`text-xs ${fresh.stale ? "text-amber-400" : "text-gray-500"}`}
+              title={`Signal timestamp: ${signal.timestamp}`}
+            >
+              {fresh.label}
+              {fresh.stale && " · stale"}
+            </span>
             <span className="text-xs text-gray-500 uppercase">
-              {signal.signal_source === "trades" ? "Trade-weighted" : "Position-based"}
+              {signal.signal_source === "trades"
+                ? "Trade-weighted"
+                : "Position-based"}
             </span>
           </div>
           <p className="text-white font-medium leading-snug">
@@ -107,15 +183,18 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
             Market prices this at{" "}
             <span className="text-white font-semibold">{crowdPct}% YES</span>.{" "}
             PolyScope view:{" "}
-            <span className={`font-semibold ${directionColor(signal.sm_direction)}`}>
+            <span
+              className={`font-semibold ${directionColor(signal.sm_direction)}`}
+            >
               {signal.sm_direction}
             </span>{" "}
             (fading a{" "}
-            <span className="text-white font-semibold">{smPct}%</span> smart-money
-            consensus that diverges by{" "}
+            <span className="text-white font-semibold">{smPct}%</span>{" "}
+            smart-money consensus that diverges by{" "}
             <span className="text-white font-semibold">{divPct}%</span> from the
             market).
           </p>
+          <p className={`text-xs mt-2 ${skew.edgeColor}`}>{skew.edgeNote}</p>
         </div>
       </div>
 
@@ -126,6 +205,9 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
           <p className="text-gray-200">
             {signal.sm_trader_count} top-100 traders
           </p>
+          <p className="text-gray-500 text-[11px] mt-0.5">
+            Expand evidence for per-trader accuracy
+          </p>
         </div>
         <div>
           <p className="text-gray-500 uppercase mb-1">Confidence</p>
@@ -133,23 +215,29 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
         </div>
       </div>
 
-      {/* Invalidators */}
+      {/* Invalidator chips */}
       <div className="px-4 pb-3">
-        <p className="text-xs text-gray-500 uppercase mb-1">Invalidators</p>
-        <ul className="text-xs text-gray-400 space-y-0.5 list-disc list-inside">
-          <li>
-            Signal expires if market/SM divergence converges below 5% — fresh
-            positions may realign
-          </li>
-          <li>
-            High-accuracy contributors flipping direction weakens the fade
-            thesis (check evidence)
-          </li>
-          <li>
-            Lopsided markets (≥90% or ≤10%) — signal is mostly a confirmation
-            of the favored side, not alpha
-          </li>
-        </ul>
+        <p className="text-xs text-gray-500 uppercase mb-1.5">
+          Thesis invalidators
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          <span className="text-[11px] px-2 py-1 rounded-md bg-gray-950 border border-gray-800 text-gray-300">
+            ⏱ Divergence converges below 5% → auto-expire
+          </span>
+          <span className="text-[11px] px-2 py-1 rounded-md bg-gray-950 border border-gray-800 text-gray-300">
+            🔁 High-accuracy contributor flips side
+          </span>
+          {skew.band === "very_lopsided" && (
+            <span className="text-[11px] px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300">
+              ⚠ Lopsided market — composition effect, not alpha
+            </span>
+          )}
+          {fresh.stale && (
+            <span className="text-[11px] px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300">
+              ⚠ Signal is stale — recheck before acting
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Evidence toggle */}

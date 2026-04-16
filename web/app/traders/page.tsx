@@ -7,6 +7,15 @@ import { LastUpdated } from "@/components/last-updated";
 import { TableSkeleton } from "@/components/skeleton";
 import { usePollingFetch } from "@/lib/hooks";
 
+interface AccuracyCI {
+  pct: number;
+  lo: number;
+  hi: number;
+  total: number;
+  correct: number;
+  sufficient: boolean;
+}
+
 interface TraderAccuracy {
   trader_address: string;
   total_divergent_signals: number;
@@ -16,6 +25,7 @@ interface TraderAccuracy {
   accuracy_by_skew: Record<string, { total: number; correct: number }>;
   accuracy_by_category: Record<string, { total: number; correct: number }>;
   last_updated: string;
+  ci?: AccuracyCI;
 }
 
 interface LeaderboardResponse {
@@ -134,7 +144,7 @@ export default function TradersPage() {
                   <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
                     <th className="text-left p-3">#</th>
                     <th className="text-left p-3">Trader</th>
-                    <th className="text-right p-3">Accuracy</th>
+                    <th className="text-right p-3">Accuracy (95% CI)</th>
                     <th className="text-right p-3">Signals</th>
                   </tr>
                 </thead>
@@ -153,10 +163,25 @@ export default function TradersPage() {
                           {formatAddress(t.trader_address)}
                         </Link>
                       </td>
-                      <td
-                        className={`p-3 text-right text-sm font-semibold ${accuracyColor(t.accuracy_pct)}`}
-                      >
-                        {t.accuracy_pct.toFixed(1)}%
+                      <td className="p-3 text-right">
+                        <div
+                          className={`text-sm font-semibold ${accuracyColor(t.accuracy_pct)}`}
+                        >
+                          {t.accuracy_pct.toFixed(1)}%
+                        </div>
+                        {t.ci && (
+                          <div className="text-xs text-gray-500">
+                            [{t.ci.lo.toFixed(0)}–{t.ci.hi.toFixed(0)}%]
+                            {!t.ci.sufficient && (
+                              <span
+                                className="ml-1 text-amber-500/70"
+                                title="Sample size below 30 — treat as noisy"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="p-3 text-right text-sm text-gray-400">
                         {t.correct_predictions}/{t.total_divergent_signals}
@@ -182,7 +207,7 @@ export default function TradersPage() {
                   <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
                     <th className="text-left p-3">#</th>
                     <th className="text-left p-3">Trader</th>
-                    <th className="text-right p-3">Accuracy</th>
+                    <th className="text-right p-3">Accuracy (95% CI)</th>
                     <th className="text-right p-3">Signals</th>
                   </tr>
                 </thead>
@@ -201,10 +226,25 @@ export default function TradersPage() {
                           {formatAddress(t.trader_address)}
                         </Link>
                       </td>
-                      <td
-                        className={`p-3 text-right text-sm font-semibold ${accuracyColor(t.accuracy_pct)}`}
-                      >
-                        {t.accuracy_pct.toFixed(1)}%
+                      <td className="p-3 text-right">
+                        <div
+                          className={`text-sm font-semibold ${accuracyColor(t.accuracy_pct)}`}
+                        >
+                          {t.accuracy_pct.toFixed(1)}%
+                        </div>
+                        {t.ci && (
+                          <div className="text-xs text-gray-500">
+                            [{t.ci.lo.toFixed(0)}–{t.ci.hi.toFixed(0)}%]
+                            {!t.ci.sufficient && (
+                              <span
+                                className="ml-1 text-amber-500/70"
+                                title="Sample size below 30 — treat as noisy"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="p-3 text-right text-sm text-gray-400">
                         {t.correct_predictions}/{t.total_divergent_signals}

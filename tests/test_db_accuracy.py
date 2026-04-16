@@ -227,6 +227,44 @@ async def test_get_signal_accuracy_populated(db):
     assert stats["by_tier"]["low"]["total"] == 1
     assert stats["by_tier"]["low"]["correct"] == 1
 
+    # All 4 test signals have market_price = 0.5 → tight band
+    assert "by_skew" in stats
+    assert stats["by_skew"]["tight"]["total"] == 4
+    assert stats["by_skew"]["tight"]["correct"] == 2
+    assert stats["by_skew"]["very_lopsided"]["total"] == 0
+
+
+@pytest.mark.anyio
+async def test_get_signal_accuracy_skew_breakdown(db):
+    """Signals across skew bands are bucketed correctly."""
+    cases = [
+        ("s1", 0.05, "YES", 1),  # very_lopsided (YES won, market was 5%)
+        ("s2", 0.95, "YES", 1),  # very_lopsided
+        ("s3", 0.80, "NO", 0),   # lopsided
+        ("s4", 0.65, "YES", 1),  # moderate
+        ("s5", 0.50, "YES", 1),  # tight
+        ("s6", 0.45, "NO", 0),   # tight
+    ]
+    for mid, price, direction, outcome in cases:
+        correct = 1 if (direction == "YES" and outcome == 1) or (direction == "NO" and outcome == 0) else 0
+        await db.execute(
+            """INSERT INTO divergence_signals
+               (market_id, timestamp, market_price, sm_consensus, divergence_pct,
+                signal_strength, sm_trader_count, sm_direction, question, category,
+                resolved, outcome_correct, expired, signal_source)
+               VALUES (?, datetime('now'), ?, 0.8, 0.3, 60, 3, ?, 'Test', 'crypto', 1, ?, 0, 'positions')""",
+            (mid, price, direction, correct),
+        )
+    await db.commit()
+
+    stats = await get_signal_accuracy(db)
+    assert stats["by_skew"]["very_lopsided"]["total"] == 2
+    assert stats["by_skew"]["lopsided"]["total"] == 1
+    assert stats["by_skew"]["moderate"]["total"] == 1
+    assert stats["by_skew"]["tight"]["total"] == 2
+    assert stats["by_skew"]["tight"]["correct"] == 2
+    assert stats["by_skew"]["tight"]["win_rate"] == 1.0
+
 
 @pytest.mark.anyio
 async def test_expire_converged_signals(db):
@@ -485,6 +523,30 @@ async def test_rebuild_trader_accuracy_basic(db):
     assert profile_a["correct_predictions"] == 2
     assert profile_b["accuracy_pct"] == 0.0
     assert profile_b["wrong_predictions"] == 2
+
+
+@pytest.mark.anyio
+async def test_rebuild_trader_accuracy_dedupes_repeat_signals(db):
+    """Same (trader, market) across many scan cycles counts once, not N times."""
+    # One market, one trader, but 5 signals over time (same divergent position).
+    for _ in range(5):
+        await _seed_signal_with_traders(
+            db, "m1", 0.6, "crypto", [("0xrepeat", "YES")],
+        )
+    await save_resolved_market(db, {
+        "market_id": "m1", "question": "", "category": "crypto",
+        "final_price": 0.99, "outcome": 1, "resolved_at": "", "brier_score": 0,
+    })
+    await db.commit()
+
+    await rebuild_trader_accuracy(db)
+    await db.commit()
+
+    profile = await get_trader_profile(db, "0xrepeat")
+    # 5 re-signals of the same divergent position → 1 prediction
+    assert profile["total_divergent_signals"] == 1
+    assert profile["correct_predictions"] == 1
+    assert profile["accuracy_pct"] == 100.0
 
 
 @pytest.mark.anyio

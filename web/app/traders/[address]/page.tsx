@@ -9,6 +9,15 @@ import { TableSkeleton } from "@/components/skeleton";
 import { trackEvent } from "@/lib/analytics";
 import { usePollingFetch } from "@/lib/hooks";
 
+interface AccuracyCI {
+  pct: number;
+  lo: number;
+  hi: number;
+  total: number;
+  correct: number;
+  sufficient: boolean;
+}
+
 interface TraderProfile {
   trader_address: string;
   total_divergent_signals: number;
@@ -18,6 +27,8 @@ interface TraderProfile {
   accuracy_by_skew: Record<string, { total: number; correct: number }>;
   accuracy_by_category: Record<string, { total: number; correct: number }>;
   last_updated: string;
+  ci?: AccuracyCI;
+  skew_ci?: Record<string, AccuracyCI>;
   error?: string;
 }
 
@@ -109,6 +120,18 @@ export default function TraderProfilePage() {
         <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
       </div>
 
+      {/* Sample-size warning */}
+      {data.ci && !data.ci.sufficient && (
+        <div className="mb-6 bg-amber-500/5 border border-amber-500/30 rounded-lg p-4">
+          <p className="text-sm text-amber-200/90">
+            <span className="font-semibold">Small sample.</span> This trader
+            has only {data.total_divergent_signals} resolved predictions.
+            Accuracy is noisy below 30 signals — the 95% CI is wide and any
+            ranking is provisional.
+          </p>
+        </div>
+      )}
+
       {/* Top stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -116,6 +139,11 @@ export default function TraderProfilePage() {
           <p className={`text-2xl font-semibold ${accuracyColor(data.accuracy_pct)}`}>
             {data.accuracy_pct.toFixed(1)}%
           </p>
+          {data.ci && (
+            <p className="text-xs text-gray-500 mt-1">
+              95% CI: {data.ci.lo.toFixed(0)}–{data.ci.hi.toFixed(0)}%
+            </p>
+          )}
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
           <p className="text-xs text-gray-500 uppercase mb-1">Total Signals</p>
@@ -148,7 +176,7 @@ export default function TraderProfilePage() {
               <thead>
                 <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
                   <th className="text-left p-3">Skew Band</th>
-                  <th className="text-right p-3">Accuracy</th>
+                  <th className="text-right p-3">Accuracy (95% CI)</th>
                   <th className="text-right p-3">Correct</th>
                   <th className="text-right p-3">Total</th>
                 </tr>
@@ -157,6 +185,7 @@ export default function TraderProfilePage() {
                 {skewEntries.map(([skew, stats]) => {
                   const pct =
                     stats.total > 0 ? (stats.correct / stats.total) * 100 : 0;
+                  const ci = data.skew_ci?.[skew];
                   return (
                     <tr
                       key={skew}
@@ -165,10 +194,25 @@ export default function TraderProfilePage() {
                       <td className="p-3 text-white text-sm">
                         {SKEW_LABELS[skew] || skew}
                       </td>
-                      <td
-                        className={`p-3 text-right text-sm font-semibold ${accuracyColor(pct)}`}
-                      >
-                        {pct.toFixed(1)}%
+                      <td className="p-3 text-right">
+                        <div
+                          className={`text-sm font-semibold ${accuracyColor(pct)}`}
+                        >
+                          {pct.toFixed(1)}%
+                        </div>
+                        {ci && (
+                          <div className="text-xs text-gray-500">
+                            [{ci.lo.toFixed(0)}–{ci.hi.toFixed(0)}%]
+                            {!ci.sufficient && (
+                              <span
+                                className="ml-1 text-amber-500/70"
+                                title="Sample size below 30"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="p-3 text-right text-sm text-emerald-400">
                         {stats.correct}
