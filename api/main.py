@@ -33,6 +33,7 @@ from .database import (
     get_watchlist,
     get_whale_alerts,
     init_db,
+    link_wallet_to_client,
     mark_alerts_notified,
     record_event,
     record_user_action,
@@ -653,9 +654,14 @@ async def whale_flow_pending():
 # convenience layer, not an identity system.
 
 
+# EVM address: 0x + 40 hex chars. Case-insensitive; we lower() on write.
+_EVM_ADDR_RE = r"^0x[a-fA-F0-9]{40}$"
+
+
 class WatchlistAddRequest(BaseModel):
     client_id: str = Field(min_length=8, max_length=64)
     market_id: str = Field(min_length=1, max_length=128)
+    wallet_address: str | None = Field(default=None, pattern=_EVM_ADDR_RE)
 
 
 class UserActionRequest(BaseModel):
@@ -665,13 +671,22 @@ class UserActionRequest(BaseModel):
     size: float = Field(gt=0)
     price: float = Field(gt=0, lt=1)
     watchlist_id: int | None = None
+    wallet_address: str | None = Field(default=None, pattern=_EVM_ADDR_RE)
+
+
+class LinkWalletRequest(BaseModel):
+    client_id: str = Field(min_length=8, max_length=64)
+    wallet_address: str = Field(pattern=_EVM_ADDR_RE)
 
 
 @app.post("/api/watchlist/add")
 async def watchlist_add(body: WatchlistAddRequest):
     db = await get_db()
+    wallet = body.wallet_address.lower() if body.wallet_address else None
     try:
-        result = await add_to_watchlist(db, body.client_id, body.market_id)
+        result = await add_to_watchlist(
+            db, body.client_id, body.market_id, wallet_address=wallet
+        )
         await db.commit()
     finally:
         await db.close()
@@ -694,10 +709,14 @@ async def watchlist_remove(watchlist_id: int, client_id: str = Query(..., min_le
 
 
 @app.get("/api/watchlist")
-async def watchlist_list(client_id: str = Query(..., min_length=8)):
+async def watchlist_list(
+    client_id: str = Query(..., min_length=8),
+    wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
+):
+    wallet = wallet_address.lower() if wallet_address else None
     db = await get_db()
     try:
-        items = await get_watchlist(db, client_id)
+        items = await get_watchlist(db, client_id, wallet_address=wallet)
     finally:
         await db.close()
     return {"items": items, "count": len(items)}
@@ -706,6 +725,7 @@ async def watchlist_list(client_id: str = Query(..., min_length=8)):
 @app.post("/api/portfolio/act")
 async def portfolio_act(body: UserActionRequest):
     db = await get_db()
+    wallet = body.wallet_address.lower() if body.wallet_address else None
     try:
         action_id = await record_user_action(
             db,
@@ -715,6 +735,7 @@ async def portfolio_act(body: UserActionRequest):
             size=body.size,
             price=body.price,
             watchlist_id=body.watchlist_id,
+            wallet_address=wallet,
         )
         await db.commit()
     finally:
@@ -723,12 +744,71 @@ async def portfolio_act(body: UserActionRequest):
 
 
 @app.get("/api/portfolio")
-async def portfolio(client_id: str = Query(..., min_length=8)):
+async def portfolio(
+    client_id: str = Query(..., min_length=8),
+    wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
+):
+    wallet = wallet_address.lower() if wallet_address else None
     db = await get_db()
     try:
-        return await get_portfolio(db, client_id)
+        return await get_portfolio(db, client_id, wallet_address=wallet)
     finally:
         await db.close()
+
+
+@app.post("/api/wallet/link")
+async def wallet_link(body: LinkWalletRequest):
+    """Link an anonymous client_id to a wallet + migrate prior history.
+
+    Called once on first wallet connect. Idempotent — subsequent calls
+    update last_seen and migrate any rows still tagged with the raw
+    client_id (e.g., actions taken from a second device before linking).
+    """
+    db = await get_db()
+    try:
+        result = await link_wallet_to_client(
+            db, body.client_id, body.wallet_address.lower()
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return result
+
+
+# ── Polymarket builder-attribution signing ─────────────────
+
+from .polymarket_signing import is_configured, sign_request
+
+
+class SignRequest(BaseModel):
+    method: str = Field(pattern="^(GET|POST|DELETE|PUT|PATCH)$")
+    path: str = Field(min_length=1, max_length=256, pattern="^/")
+    body: str = Field(default="", max_length=16384)
+
+
+@app.get("/api/builder/status")
+async def builder_status():
+    """Whether builder attribution secrets are configured on this server."""
+    return {"configured": is_configured()}
+
+
+@app.post("/api/sign")
+async def sign(body: SignRequest):
+    """Produce the four POLY_BUILDER_* attribution headers for a CLOB request.
+
+    The secret never leaves the server — the frontend sends only the
+    request method/path/body it intends to forward, receives the signed
+    headers, and attaches them to its outbound request to Polymarket.
+
+    If builder secrets aren't yet configured on this server, returns
+    `mode: "stub"` so the UI can render a "Coming soon" state without
+    the flow breaking.
+    """
+    signed = sign_request(body.method, body.path, body.body)
+    return {
+        "headers": signed.to_headers(),
+        "mode": signed.mode,
+    }
 
 
 # ── Instrumentation ────────────────────────────────────────

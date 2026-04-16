@@ -16,6 +16,7 @@ from api.database import (
     get_trader_profile,
     get_watchlist,
     init_db,
+    link_wallet_to_client,
     rebuild_trader_accuracy,
     record_event,
     record_user_action,
@@ -708,6 +709,54 @@ async def test_watchlist_scoped_by_client(db):
     bob_items = await get_watchlist(db, "bob")
     assert len(alice_items) == 1
     assert len(bob_items) == 0
+
+
+@pytest.mark.anyio
+async def test_link_wallet_migrates_history(db):
+    """Linking a wallet backfills wallet_address on prior anonymous rows."""
+    wallet = "0x" + "a" * 40
+    # Pre-link actions
+    await _seed_signal_with_traders(
+        db, "lm1", 0.6, "crypto", [("0xfff", "YES")]
+    )
+    await db.commit()
+    await add_to_watchlist(db, "client-xyz", "lm1")
+    await record_user_action(
+        db, "client-xyz", "lm1", "YES", size=50, price=0.6
+    )
+    await db.commit()
+
+    result = await link_wallet_to_client(db, "client-xyz", wallet)
+    await db.commit()
+
+    assert result["wallet_address"] == wallet.lower()
+    assert result["watchlist_migrated"] == 1
+    assert result["user_actions_migrated"] == 1
+
+    # Second link is idempotent — no new migrations
+    result2 = await link_wallet_to_client(db, "client-xyz", wallet)
+    await db.commit()
+    assert result2["watchlist_migrated"] == 0
+    assert result2["user_actions_migrated"] == 0
+
+
+@pytest.mark.anyio
+async def test_get_watchlist_resolves_by_wallet_after_link(db):
+    wallet = "0x" + "b" * 40
+    await _seed_signal_with_traders(
+        db, "lm2", 0.6, "crypto", [("0xfff", "YES")]
+    )
+    await db.commit()
+    await add_to_watchlist(db, "client-old", "lm2")
+    await db.commit()
+    await link_wallet_to_client(db, "client-old", wallet)
+    await db.commit()
+
+    # A new device with a different client_id but the same wallet sees the
+    # migrated history
+    items = await get_watchlist(db, "client-new", wallet_address=wallet)
+    assert len(items) == 1
+    assert items[0]["market_id"] == "lm2"
 
 
 @pytest.mark.anyio

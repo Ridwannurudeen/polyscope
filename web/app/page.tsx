@@ -55,11 +55,22 @@ export default function Dashboard() {
     "/api/events?limit=5",
     120_000
   );
+  // Lead with sufficient-sample leaderboard (n≥30). Fall back to n≥5 if the
+  // strict cut is empty so the page still shows something early in the data
+  // capture window.
   const { data: predictiveData } = usePollingFetch<TradersLeaderboardResponse>(
+    "/api/traders/leaderboard?order=predictive&min_signals=30&limit=5",
+    120_000
+  );
+  const { data: predictiveFallback } = usePollingFetch<TradersLeaderboardResponse>(
     "/api/traders/leaderboard?order=predictive&min_signals=5&limit=5",
     120_000
   );
   const { data: fadeData } = usePollingFetch<TradersLeaderboardResponse>(
+    "/api/traders/leaderboard?order=anti-predictive&min_signals=30&limit=5",
+    120_000
+  );
+  const { data: fadeFallback } = usePollingFetch<TradersLeaderboardResponse>(
     "/api/traders/leaderboard?order=anti-predictive&min_signals=5&limit=5",
     120_000
   );
@@ -84,78 +95,84 @@ export default function Dashboard() {
 
   const divergences = data?.divergences || [];
   const movers = data?.movers_24h || [];
-  const predictive = predictiveData?.traders || [];
-  const fade = fadeData?.traders || [];
+  const predictiveStrict = predictiveData?.traders || [];
+  const fadeStrict = fadeData?.traders || [];
+  const predictive =
+    predictiveStrict.length > 0
+      ? predictiveStrict
+      : predictiveFallback?.traders || [];
+  const fade = fadeStrict.length > 0 ? fadeStrict : fadeFallback?.traders || [];
+  const strictLeaderboardReady = predictiveStrict.length > 0;
 
   return (
     <div>
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white">
-            Trust-and-decision layer for Polymarket traders
+            The Polymarket traders who actually predict — individually scored
           </h1>
           <p className="text-gray-400 mt-1 max-w-2xl">
-            Every trader on Polymarket&apos;s profit leaderboard, scored
-            individually against resolved outcomes — not by P&amp;L. We
-            publish the evidence trail behind every signal and lead with the
-            tight-market hit rate, not inflated composite numbers.
+            Polymarket ranks by P&amp;L. We rank by <em>accuracy</em>: each top
+            trader evaluated on their own divergent positions against resolved
+            outcomes, with Wilson 95% confidence intervals. Find the handful
+            who are actually predictive, see the evidence, follow their moves.
           </p>
         </div>
         <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
       </div>
 
-      {/* Feature nav strip */}
+      {/* Feature nav strip — Traders leads */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+        <Link
+          href="/traders"
+          className="bg-gray-900 border border-emerald-500/40 rounded-xl p-4 hover:border-emerald-500/60 transition-colors ring-1 ring-emerald-500/10"
+        >
+          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
+            Predictive Leaderboard
+          </p>
+          <p className="text-white text-sm font-medium">
+            Traders by accuracy — not P&amp;L
+          </p>
+          <p className="text-gray-500 text-xs mt-1">
+            Individual calibration vs resolved outcomes, with 95% CIs
+          </p>
+        </Link>
         <Link
           href="/smart-money"
           className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-emerald-500/40 transition-colors"
         >
-          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
-            Signals
+          <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+            Supporting Signals
           </p>
           <p className="text-white text-sm font-medium">
-            Live divergence feed
+            Divergence feed
           </p>
           <p className="text-gray-500 text-xs mt-1">
-            Decision cards with thesis, contributors, invalidators
-          </p>
-        </Link>
-        <Link
-          href="/traders"
-          className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-emerald-500/40 transition-colors"
-        >
-          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
-            Traders
-          </p>
-          <p className="text-white text-sm font-medium">
-            Accuracy leaderboard
-          </p>
-          <p className="text-gray-500 text-xs mt-1">
-            Predictive vs anti-predictive — not P&amp;L-ranked
+            Evidence cards — crowd vs. top-trader consensus
           </p>
         </Link>
         <Link
           href="/methodology"
           className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-emerald-500/40 transition-colors"
         >
-          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
+          <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">
             Methodology
           </p>
-          <p className="text-white text-sm font-medium">How signals work</p>
+          <p className="text-white text-sm font-medium">How scoring works</p>
           <p className="text-gray-500 text-xs mt-1">
-            Honest breakdown — the findings and the caveats
+            Dedup logic, Wilson CI, skew-band breakdown
           </p>
         </Link>
         <Link
           href="/portfolio"
           className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-emerald-500/40 transition-colors"
         >
-          <p className="text-xs text-emerald-400 uppercase tracking-wide mb-1">
+          <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">
             Portfolio
           </p>
           <p className="text-white text-sm font-medium">Your trades</p>
           <p className="text-gray-500 text-xs mt-1">
-            Watch signals, log trades, auto-score on resolution
+            Watch, log, auto-score on resolution
           </p>
         </Link>
       </div>
@@ -185,14 +202,141 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* Lead: predictive leaderboard preview */}
+      {(predictive.length > 0 || fade.length > 0) && (
+        <section className="mb-10">
+          <div className="flex items-baseline justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-semibold text-white">
+                Predictive Leaderboard
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {strictLeaderboardReady
+                  ? "Showing traders with n ≥ 30 resolved predictions"
+                  : "Early preview — small samples, accuracy is provisional"}
+              </p>
+            </div>
+            <Link
+              href="/traders"
+              className="text-sm text-emerald-400 hover:text-emerald-300"
+            >
+              Full leaderboard →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <p className="text-xs text-emerald-400 uppercase tracking-wide mb-2">
+                Predictive (follow)
+              </p>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {predictive.map((t, i) => (
+                      <tr
+                        key={t.trader_address}
+                        className="border-b border-gray-800/50 last:border-0"
+                      >
+                        <td className="p-3 text-gray-500 w-6">{i + 1}</td>
+                        <td className="p-3">
+                          <Link
+                            href={`/traders/${t.trader_address}`}
+                            className="text-white font-mono text-xs hover:text-emerald-400"
+                          >
+                            {shortAddr(t.trader_address)}
+                          </Link>
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="text-emerald-400 font-semibold">
+                            {t.accuracy_pct.toFixed(0)}%
+                            {t.ci && !t.ci.sufficient && (
+                              <span
+                                className="ml-1 text-amber-500/70 text-xs"
+                                title="Small sample (<30)"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </div>
+                          {t.ci && (
+                            <div className="text-[10px] text-gray-500">
+                              [{t.ci.lo.toFixed(0)}–{t.ci.hi.toFixed(0)}%]
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 text-right text-xs text-gray-500 w-20">
+                          {t.correct_predictions}/{t.total_divergent_signals}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-red-400 uppercase tracking-wide mb-2">
+                Anti-predictive (fade)
+              </p>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {fade.map((t, i) => (
+                      <tr
+                        key={t.trader_address}
+                        className="border-b border-gray-800/50 last:border-0"
+                      >
+                        <td className="p-3 text-gray-500 w-6">{i + 1}</td>
+                        <td className="p-3">
+                          <Link
+                            href={`/traders/${t.trader_address}`}
+                            className="text-white font-mono text-xs hover:text-red-400"
+                          >
+                            {shortAddr(t.trader_address)}
+                          </Link>
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="text-red-400 font-semibold">
+                            {t.accuracy_pct.toFixed(0)}%
+                            {t.ci && !t.ci.sufficient && (
+                              <span
+                                className="ml-1 text-amber-500/70 text-xs"
+                                title="Small sample (<30)"
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </div>
+                          {t.ci && (
+                            <div className="text-[10px] text-gray-500">
+                              [{t.ci.lo.toFixed(0)}–{t.ci.hi.toFixed(0)}%]
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 text-right text-xs text-gray-500 w-20">
+                          {t.correct_predictions}/{t.total_divergent_signals}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       <SignalTrackRecord />
 
-      {/* Divergence Signals */}
+      {/* Divergence Signals — supporting feed */}
       <section className="mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-white">
-            Active Divergences
-          </h2>
+        <div className="flex items-baseline justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-semibold text-white">
+              Supporting signals: active divergences
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Where top traders (aggregated) currently diverge from market price
+            </p>
+          </div>
           <Link
             href="/smart-money"
             className="text-sm text-emerald-400 hover:text-emerald-300"
@@ -257,132 +401,6 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* Trader leaderboards preview */}
-      {(predictive.length > 0 || fade.length > 0) && (
-        <section className="mb-10 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold text-white">
-                Top Predictive Traders
-              </h2>
-              <Link
-                href="/traders"
-                className="text-xs text-emerald-400 hover:text-emerald-300"
-              >
-                Full leaderboard →
-              </Link>
-            </div>
-            <p className="text-xs text-gray-500 mb-3">
-              Ranked by individual accuracy when diverging from market price
-            </p>
-            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-              {predictive.length === 0 ? (
-                <p className="p-4 text-sm text-gray-500">
-                  Building leaderboard — need more resolved signals per trader.
-                </p>
-              ) : (
-                <table className="w-full text-sm">
-                  <tbody>
-                    {predictive.map((t, i) => (
-                      <tr
-                        key={t.trader_address}
-                        className="border-b border-gray-800/50 last:border-0"
-                      >
-                        <td className="p-3 text-gray-500 w-6">{i + 1}</td>
-                        <td className="p-3">
-                          <Link
-                            href={`/traders/${t.trader_address}`}
-                            className="text-white font-mono text-xs hover:text-emerald-400"
-                          >
-                            {shortAddr(t.trader_address)}
-                          </Link>
-                        </td>
-                        <td className="p-3 text-right">
-                          <div className="text-emerald-400 font-semibold">
-                            {t.accuracy_pct.toFixed(0)}%
-                            {t.ci && !t.ci.sufficient && (
-                              <span
-                                className="ml-1 text-amber-500/70 text-xs"
-                                title="Small sample (<30)"
-                              >
-                                ⚠
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-3 text-right text-xs text-gray-500 w-20">
-                          {t.correct_predictions}/{t.total_divergent_signals}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold text-white">
-                Traders to Fade
-              </h2>
-              <Link
-                href="/traders"
-                className="text-xs text-emerald-400 hover:text-emerald-300"
-              >
-                Full leaderboard →
-              </Link>
-            </div>
-            <p className="text-xs text-gray-500 mb-3">
-              Systematically wrong when they diverge from market price
-            </p>
-            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-              {fade.length === 0 ? (
-                <p className="p-4 text-sm text-gray-500">
-                  Building leaderboard — need more resolved signals per trader.
-                </p>
-              ) : (
-                <table className="w-full text-sm">
-                  <tbody>
-                    {fade.map((t, i) => (
-                      <tr
-                        key={t.trader_address}
-                        className="border-b border-gray-800/50 last:border-0"
-                      >
-                        <td className="p-3 text-gray-500 w-6">{i + 1}</td>
-                        <td className="p-3">
-                          <Link
-                            href={`/traders/${t.trader_address}`}
-                            className="text-white font-mono text-xs hover:text-red-400"
-                          >
-                            {shortAddr(t.trader_address)}
-                          </Link>
-                        </td>
-                        <td className="p-3 text-right">
-                          <div className="text-red-400 font-semibold">
-                            {t.accuracy_pct.toFixed(0)}%
-                            {t.ci && !t.ci.sufficient && (
-                              <span
-                                className="ml-1 text-amber-500/70 text-xs"
-                                title="Small sample (<30)"
-                              >
-                                ⚠
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-3 text-right text-xs text-gray-500 w-20">
-                          {t.correct_predictions}/{t.total_divergent_signals}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
 
       {/* Whale Flow */}
       <WhaleFlow />

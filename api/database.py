@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS watchlist (
     question TEXT,
     category TEXT,
     added_at TEXT,
+    wallet_address TEXT,
     UNIQUE(client_id, market_id)
 );
 
@@ -153,7 +154,15 @@ CREATE TABLE IF NOT EXISTS user_actions (
     size REAL,
     price REAL,
     acted_at TEXT,
+    wallet_address TEXT,
     FOREIGN KEY (watchlist_id) REFERENCES watchlist(id)
+);
+
+CREATE TABLE IF NOT EXISTS wallets (
+    wallet_address TEXT PRIMARY KEY,
+    client_id TEXT,
+    first_seen_at TEXT,
+    last_seen_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -186,6 +195,9 @@ CREATE INDEX IF NOT EXISTS idx_user_actions_market ON user_actions(market_id);
 CREATE INDEX IF NOT EXISTS idx_events_client ON events(client_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_watchlist_wallet ON watchlist(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_user_actions_wallet ON user_actions(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_wallets_client ON wallets(client_id);
 """
 
 
@@ -212,6 +224,40 @@ async def migrate_db(db: aiosqlite.Connection):
         await db.execute("ALTER TABLE divergence_signals ADD COLUMN expired_at TEXT")
     if "signal_source" not in cols:
         await db.execute("ALTER TABLE divergence_signals ADD COLUMN signal_source TEXT DEFAULT 'positions'")
+
+    # Wallet-linked identity — watchlist + user_actions get wallet_address.
+    # client_id stays for anonymous fallback and as the merge key when a
+    # wallet first connects.
+    cursor = await db.execute("PRAGMA table_info(watchlist)")
+    w_cols = {row[1] for row in await cursor.fetchall()}
+    if "wallet_address" not in w_cols:
+        await db.execute("ALTER TABLE watchlist ADD COLUMN wallet_address TEXT")
+
+    cursor = await db.execute("PRAGMA table_info(user_actions)")
+    ua_cols = {row[1] for row in await cursor.fetchall()}
+    if "wallet_address" not in ua_cols:
+        await db.execute("ALTER TABLE user_actions ADD COLUMN wallet_address TEXT")
+
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watchlist_wallet ON watchlist(wallet_address)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_user_actions_wallet ON user_actions(wallet_address)"
+    )
+
+    # Wallet registry — lets us look up the owning wallet by client_id and
+    # vice-versa. One row per wallet; client_id optional (for legacy merge).
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS wallets (
+            wallet_address TEXT PRIMARY KEY,
+            client_id TEXT,
+            first_seen_at TEXT,
+            last_seen_at TEXT
+        )"""
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_wallets_client ON wallets(client_id)"
+    )
 
     await db.commit()
 
@@ -692,12 +738,16 @@ async def get_metrics_summary(
 
 
 async def add_to_watchlist(
-    db: aiosqlite.Connection, client_id: str, market_id: str
+    db: aiosqlite.Connection,
+    client_id: str,
+    market_id: str,
+    wallet_address: str | None = None,
 ) -> dict | None:
     """Add the latest signal for market_id to a client's watchlist.
 
     Returns the new row as dict, or None if no signal exists for the market.
-    Idempotent per (client_id, market_id).
+    Idempotent per (client_id, market_id). wallet_address, if given, is
+    stored alongside for cross-device continuity after wallet link.
     """
     from datetime import datetime, timezone
 
@@ -720,12 +770,13 @@ async def add_to_watchlist(
             """INSERT INTO watchlist
                (client_id, market_id, signal_id_at_add, sm_direction_at_add,
                 market_price_at_add, sm_consensus_at_add, divergence_pct_at_add,
-                question, category, added_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                question, category, added_at, wallet_address)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 client_id, market_id, sig["id"], sig["sm_direction"],
                 sig["market_price"], sig["sm_consensus"],
                 sig["divergence_pct"], sig["question"], sig["category"], now,
+                wallet_address,
             ),
         )
         row_id = cursor.lastrowid
@@ -752,9 +803,16 @@ async def remove_from_watchlist(
 
 
 async def get_watchlist(
-    db: aiosqlite.Connection, client_id: str
+    db: aiosqlite.Connection,
+    client_id: str,
+    wallet_address: str | None = None,
 ) -> list[dict]:
-    """Watchlist items with current signal state and resolved outcome if any."""
+    """Watchlist items with current signal state and resolved outcome if any.
+
+    If wallet_address is provided, matches rows owned by the wallet across
+    any device (including rows still tagged only with the original
+    client_id — those remain accessible via the client_id branch).
+    """
     cursor = await db.execute(
         """SELECT
                w.id, w.market_id, w.sm_direction_at_add,
@@ -770,9 +828,9 @@ async def get_watchlist(
                rm.final_price AS resolved_final_price
            FROM watchlist w
            LEFT JOIN resolved_markets rm ON rm.market_id = w.market_id
-           WHERE w.client_id = ?
+           WHERE w.client_id = ? OR (? IS NOT NULL AND w.wallet_address = ?)
            ORDER BY w.added_at DESC""",
-        (client_id,),
+        (client_id, wallet_address, wallet_address),
     )
     rows = await cursor.fetchall()
     result = []
@@ -789,6 +847,51 @@ async def get_watchlist(
     return result
 
 
+async def link_wallet_to_client(
+    db: aiosqlite.Connection, client_id: str, wallet_address: str
+) -> dict:
+    """Link an anonymous client_id to a wallet address and migrate history.
+
+    On first wallet connect, backfills wallet_address on all existing
+    watchlist + user_action rows owned by client_id. Idempotent.
+
+    Returns counts of migrated rows.
+    """
+    from datetime import datetime, timezone
+
+    wallet = wallet_address.lower()
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.execute(
+        """INSERT INTO wallets (wallet_address, client_id, first_seen_at, last_seen_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(wallet_address) DO UPDATE SET
+               last_seen_at = excluded.last_seen_at,
+               client_id = COALESCE(wallets.client_id, excluded.client_id)""",
+        (wallet, client_id, now, now),
+    )
+
+    cursor = await db.execute(
+        """UPDATE watchlist SET wallet_address = ?
+           WHERE client_id = ? AND (wallet_address IS NULL OR wallet_address = '')""",
+        (wallet, client_id),
+    )
+    w_migrated = cursor.rowcount or 0
+
+    cursor = await db.execute(
+        """UPDATE user_actions SET wallet_address = ?
+           WHERE client_id = ? AND (wallet_address IS NULL OR wallet_address = '')""",
+        (wallet, client_id),
+    )
+    ua_migrated = cursor.rowcount or 0
+
+    return {
+        "wallet_address": wallet,
+        "watchlist_migrated": w_migrated,
+        "user_actions_migrated": ua_migrated,
+    }
+
+
 async def record_user_action(
     db: aiosqlite.Connection,
     client_id: str,
@@ -797,6 +900,7 @@ async def record_user_action(
     size: float,
     price: float,
     watchlist_id: int | None = None,
+    wallet_address: str | None = None,
 ) -> int:
     """Record that a user manually acted on a signal."""
     from datetime import datetime, timezone
@@ -804,15 +908,25 @@ async def record_user_action(
     now = datetime.now(timezone.utc).isoformat()
     cursor = await db.execute(
         """INSERT INTO user_actions
-           (client_id, market_id, watchlist_id, action_direction, size, price, acted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (client_id, market_id, watchlist_id, action_direction, size, price, now),
+           (client_id, market_id, watchlist_id, action_direction, size, price,
+            acted_at, wallet_address)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (client_id, market_id, watchlist_id, action_direction, size, price, now,
+         wallet_address),
     )
     return cursor.lastrowid or 0
 
 
-async def get_portfolio(db: aiosqlite.Connection, client_id: str) -> dict:
-    """Portfolio summary: all user actions with outcomes + aggregate stats."""
+async def get_portfolio(
+    db: aiosqlite.Connection,
+    client_id: str,
+    wallet_address: str | None = None,
+) -> dict:
+    """Portfolio summary: all user actions with outcomes + aggregate stats.
+
+    Matches by client_id OR wallet_address so a user's history follows
+    them across devices after linking a wallet.
+    """
     cursor = await db.execute(
         """SELECT
                ua.id, ua.market_id, ua.action_direction, ua.size, ua.price, ua.acted_at,
@@ -824,8 +938,9 @@ async def get_portfolio(db: aiosqlite.Connection, client_id: str) -> dict:
            LEFT JOIN watchlist w ON w.id = ua.watchlist_id
            LEFT JOIN resolved_markets rm ON rm.market_id = ua.market_id
            WHERE ua.client_id = ?
+              OR (? IS NOT NULL AND ua.wallet_address = ?)
            ORDER BY ua.acted_at DESC""",
-        (client_id,),
+        (client_id, wallet_address, wallet_address),
     )
     actions_rows = await cursor.fetchall()
     actions = []
