@@ -116,6 +116,7 @@ async def compute_divergences_job():
     try:
         # ── Pass 1: Position-based scan ──
         trader_addresses = set(_traders.keys())
+        _markets_since_commit = 0
 
         for market in markets:
             if not market.condition_id or market.price_yes <= 0:
@@ -200,7 +201,18 @@ async def compute_divergences_job():
             }
             await save_snapshot(db, snapshot)
 
+            # Commit every 25 markets so user-facing writes (portfolio,
+            # follow, wallet-link) aren't starved by the 5-minute scan
+            # holding a single transaction open.
+            _markets_since_commit += 1
+            if _markets_since_commit >= 25:
+                await db.commit()
+                _markets_since_commit = 0
+
             await asyncio.sleep(0.1)
+
+        # Flush remaining pass-1 writes before pass-2
+        await db.commit()
 
         # ── Pass 2: Trade-based refinement for candidates (max ~80) ──
         for market, positions in trade_candidates[:80]:
