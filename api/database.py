@@ -205,7 +205,10 @@ async def get_db() -> aiosqlite.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = await aiosqlite.connect(str(DB_PATH))
     await db.execute("PRAGMA journal_mode=WAL")
-    await db.execute("PRAGMA busy_timeout=5000")
+    # Heavy scheduled scans can hold the write lock for several seconds.
+    # 30s gives user-facing endpoints (portfolio, wallet-link, watchlist)
+    # enough room to wait instead of 500-ing on contention.
+    await db.execute("PRAGMA busy_timeout=30000")
     await db.execute("PRAGMA synchronous=NORMAL")
     await db.execute("PRAGMA cache_size=-64000")
     db.row_factory = aiosqlite.Row
