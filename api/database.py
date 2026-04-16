@@ -195,9 +195,9 @@ CREATE INDEX IF NOT EXISTS idx_user_actions_market ON user_actions(market_id);
 CREATE INDEX IF NOT EXISTS idx_events_client ON events(client_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
-CREATE INDEX IF NOT EXISTS idx_watchlist_wallet ON watchlist(wallet_address);
-CREATE INDEX IF NOT EXISTS idx_user_actions_wallet ON user_actions(wallet_address);
-CREATE INDEX IF NOT EXISTS idx_wallets_client ON wallets(client_id);
+-- Wallet-linked indexes created in migrate_db AFTER ALTER TABLE runs on
+-- existing DBs (otherwise SCHEMA fails on prod restarts where the column
+-- hasn't been added yet).
 """
 
 
