@@ -763,16 +763,36 @@ async def wallet_link(body: LinkWalletRequest):
     Called once on first wallet connect. Idempotent — subsequent calls
     update last_seen and migrate any rows still tagged with the raw
     client_id (e.g., actions taken from a second device before linking).
+
+    Retries on transient "database is locked" errors — the scheduler
+    does heavy writes that can block the busy_timeout window.
     """
-    db = await get_db()
-    try:
-        result = await link_wallet_to_client(
-            db, body.client_id, body.wallet_address.lower()
-        )
-        await db.commit()
-    finally:
-        await db.close()
-    return result
+    import asyncio
+    import sqlite3
+
+    last_err: Exception | None = None
+    for attempt in range(4):
+        db = await get_db()
+        try:
+            result = await link_wallet_to_client(
+                db, body.client_id, body.wallet_address.lower()
+            )
+            await db.commit()
+            return result
+        except sqlite3.OperationalError as e:
+            last_err = e
+            if "locked" not in str(e).lower():
+                raise
+            # exponential backoff: 0.5s, 1s, 2s, 4s
+            await asyncio.sleep(0.5 * (2 ** attempt))
+        finally:
+            await db.close()
+
+    logger.warning("wallet_link failed after retries: %s", last_err)
+    raise HTTPException(
+        status_code=503,
+        detail="Database busy — please retry in a few seconds",
+    )
 
 
 # ── Polymarket builder-attribution signing ─────────────────
