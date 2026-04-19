@@ -99,9 +99,19 @@ def compute_divergence(
     if divergence_pct < cfg.min_divergence_pct:
         return None
 
-    # Contrarian signal: fade smart money consensus (SM positions are
-    # anti-correlated with outcomes at 8.3% over 98K resolved signals)
-    sm_direction = "NO" if sm_consensus > market_price else "YES"
+    # Skew-aware direction. Backtest on 1,556 per-market resolved signals:
+    # fading SM loses on tight/moderate/lopsided markets (ROI -100% / -79% /
+    # -15%) but "wins" on very-lopsided via composition effect (99.5% hit,
+    # ~0% ROI). Follow-SM on non-very-lopsided bands gives +3.9% ROI
+    # overall. The genuine edge is that top-100 SM traders *are* predictive
+    # when they take a minority position on anything but very-lopsided
+    # markets.
+    sm_is_yes = sm_consensus > market_price
+    is_very_lopsided = market_price >= 0.9 or market_price <= 0.1
+    if is_very_lopsided:
+        sm_direction = "NO" if sm_is_yes else "YES"  # fade composition
+    else:
+        sm_direction = "YES" if sm_is_yes else "NO"  # follow SM alpha
 
     # Score components
     magnitude_score = _score_magnitude(divergence_pct)
