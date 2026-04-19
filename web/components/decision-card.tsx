@@ -5,9 +5,11 @@ import { LogTrade } from "@/components/log-trade";
 import { ScoreBadge } from "@/components/score-badge";
 import { ShareButton } from "@/components/share-button";
 import { SignalEvidence } from "@/components/signal-evidence";
+import { SizeHint } from "@/components/size-hint";
 import { WatchlistButton } from "@/components/watchlist-button";
 import { trackEvent } from "@/lib/analytics";
 import type { DivergenceSignal } from "@/lib/api";
+import { useBandStats } from "@/lib/hooks";
 
 function tierFromScore(score: number): {
   tier: string;
@@ -53,37 +55,45 @@ function skewFromPrice(price: number): {
   label: string;
   edgeNote: string;
   edgeColor: string;
+  followSm: boolean;
 } {
   if (price >= 0.9 || price <= 0.1) {
     return {
       band: "very_lopsided",
       label: "Very lopsided",
       edgeNote:
-        "Fading a very-lopsided market is mostly composition effect — weak signal of genuine alpha",
+        "Very-lopsided: fade SM. Mostly composition effect — thin edge, not genuine alpha",
       edgeColor: "text-gray-400",
+      followSm: false,
     };
   }
   if (price >= 0.75 || price <= 0.25) {
     return {
       band: "lopsided",
       label: "Lopsided",
-      edgeNote: "Lopsided market — expect modest edge, favored side often right",
+      edgeNote:
+        "Lopsided: follow SM. Low hit rate but high payout — positive EV when SM dissents",
       edgeColor: "text-gray-300",
+      followSm: true,
     };
   }
   if (price >= 0.6 || price <= 0.4) {
     return {
       band: "moderate",
       label: "Moderate",
-      edgeNote: "Moderate price skew — real uncertainty, contributors matter",
+      edgeNote:
+        "Moderate: follow SM. Real uncertainty, SM edge historically ~86% on dissents",
       edgeColor: "text-amber-300",
+      followSm: true,
     };
   }
   return {
     band: "tight",
     label: "Tight",
-    edgeNote: "Tight market — genuine edge territory if contributors are calibrated",
+    edgeNote:
+      "Tight: follow SM. Strongest edge zone — SM has been right 100% on 17 resolved",
     edgeColor: "text-emerald-300",
+    followSm: true,
   };
 }
 
@@ -104,6 +114,7 @@ function freshness(timestamp: string): { label: string; stale: boolean } {
 
 export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
   const [expanded, setExpanded] = useState(false);
+  const bandStats = useBandStats();
   const tier = tierFromScore(signal.score);
   const skew = skewFromPrice(signal.market_price);
   const fresh = freshness(signal.timestamp);
@@ -188,7 +199,7 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
             >
               {signal.sm_direction}
             </span>{" "}
-            (fading a{" "}
+            ({skew.followSm ? "following" : "fading"} a{" "}
             <span className="text-white font-semibold">{smPct}%</span>{" "}
             smart-money consensus that diverges by{" "}
             <span className="text-white font-semibold">{divPct}%</span> from the
@@ -196,6 +207,15 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
           </p>
           <p className={`text-xs mt-2 ${skew.edgeColor}`}>{skew.edgeNote}</p>
         </div>
+      </div>
+
+      {/* Sizing hint */}
+      <div className="px-4 pb-3">
+        <SizeHint
+          marketPrice={signal.market_price}
+          smDirection={signal.sm_direction}
+          bandStats={bandStats}
+        />
       </div>
 
       {/* Decision metadata */}

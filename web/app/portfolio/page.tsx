@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { FollowButton } from "@/components/follow-button";
 import { TableSkeleton } from "@/components/skeleton";
+import { TelegramConnect } from "@/components/telegram-connect";
 import { getClientId } from "@/lib/client-id";
 import { shortAddress, useIdentity } from "@/lib/identity";
 
@@ -210,6 +211,8 @@ export default function PortfolioPage() {
         </div>
       ) : (
         <>
+          <TelegramConnect />
+
           {/* New positions from followed traders */}
           {alerts.length > 0 && (
             <section className="mb-10">

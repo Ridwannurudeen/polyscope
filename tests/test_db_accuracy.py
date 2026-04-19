@@ -54,6 +54,7 @@ async def db(tmp_path, monkeypatch):
     await conn.execute("ALTER TABLE divergence_signals ADD COLUMN expired INTEGER DEFAULT 0")
     await conn.execute("ALTER TABLE divergence_signals ADD COLUMN expired_at TEXT")
     await conn.execute("ALTER TABLE divergence_signals ADD COLUMN signal_source TEXT DEFAULT 'positions'")
+    await conn.execute("ALTER TABLE follow_alerts ADD COLUMN tg_notified_at TEXT")
     await conn.commit()
     conn.row_factory = aiosqlite.Row
     yield conn
@@ -1117,3 +1118,85 @@ async def test_get_signal_evidence_contributors_ordered_by_weight(db):
     evidence = await get_signal_evidence(db, "mev3")
     assert evidence["contributors"][0]["trader_address"] == "0xhigh"
     assert evidence["contributors"][1]["trader_address"] == "0xlow"
+
+
+@pytest.mark.anyio
+async def test_bot_identity_link_and_pending_by_chat(db):
+    from api.database import (
+        get_bot_identity,
+        get_pending_follow_alerts_with_chat,
+        link_bot_identity,
+        mark_follow_alerts_tg_notified,
+        unlink_bot_identity,
+    )
+
+    trader = "0x" + "a" * 40
+    client = "client-tg-user"
+    chat_id = 987654
+
+    await follow_trader(db, trader, client)
+    await link_bot_identity(db, chat_id, client_id=client)
+    await db.commit()
+
+    stored = await get_bot_identity(db, chat_id)
+    assert stored is not None
+    assert stored["client_id"] == client
+
+    signal_id = await _seed_signal_with_traders(
+        db, "tgm1", 0.55, "crypto", [(trader, "YES")]
+    )
+    await emit_follow_alerts_for_signal(
+        db,
+        signal_id,
+        "tgm1",
+        [{"trader_address": trader, "position_direction": "YES"}],
+    )
+    await db.commit()
+
+    pending = await get_pending_follow_alerts_with_chat(db)
+    assert len(pending) == 1
+    assert pending[0]["chat_id"] == chat_id
+    assert pending[0]["trader_address"] == trader
+
+    marked = await mark_follow_alerts_tg_notified(db, [pending[0]["id"]])
+    await db.commit()
+    assert marked == 1
+
+    # Same alert should no longer surface as pending.
+    assert await get_pending_follow_alerts_with_chat(db) == []
+
+    # Unlink removes future pending matches.
+    assert await unlink_bot_identity(db, chat_id) is True
+    await db.commit()
+
+
+@pytest.mark.anyio
+async def test_bot_identity_link_by_wallet(db):
+    from api.database import (
+        get_pending_follow_alerts_with_chat,
+        link_bot_identity,
+    )
+
+    trader = "0x" + "b" * 40
+    wallet = "0x" + "1" * 40
+    client = "client-wallet-user"
+    chat_id = 111222
+
+    await follow_trader(db, trader, client, wallet_address=wallet)
+    await link_bot_identity(db, chat_id, wallet_address=wallet.upper())
+    await db.commit()
+
+    signal_id = await _seed_signal_with_traders(
+        db, "tgm2", 0.55, "crypto", [(trader, "YES")]
+    )
+    await emit_follow_alerts_for_signal(
+        db,
+        signal_id,
+        "tgm2",
+        [{"trader_address": trader, "position_direction": "YES"}],
+    )
+    await db.commit()
+
+    pending = await get_pending_follow_alerts_with_chat(db)
+    assert len(pending) == 1
+    assert pending[0]["chat_id"] == chat_id

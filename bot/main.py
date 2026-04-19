@@ -70,6 +70,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/subscribe — Whale alerts \\+ weekly digest\n"
         "/unsubscribe — Stop alerts and digest\n"
         "/threshold <amount> — Set min trade size filter\n"
+        "/connect <id> — Link your web identity for follow\\-trader DMs\n"
+        "/disconnect — Unlink this chat\n"
         "/calibration — Polymarket accuracy summary\n"
         "/accuracy — Signal track record\n"
         "/help — Command list"
@@ -261,6 +263,89 @@ async def threshold_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Failed to update threshold\\.", parse_mode="MarkdownV2")
 
 
+_EVM_ADDR_RE = __import__("re").compile(r"^0x[a-fA-F0-9]{40}$")
+
+
+async def connect_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Link this Telegram chat to a web identity.
+
+    Usage: /connect <client_id_or_wallet_address>
+
+    The argument can be either the 16+ char client_id shown on the
+    portfolio page, or a wallet address. Once linked, follow-trader
+    alerts for that identity are DM'd to this chat.
+    """
+    if not ctx.args:
+        await update.message.reply_text(
+            "Usage: /connect <id>\n\n"
+            "Find your ID on https://polyscope.gudman.xyz/portfolio "
+            "(Telegram section). You can also pass a wallet address (0x...)."
+        )
+        return
+
+    token = ctx.args[0].strip()
+    client_id: str | None = None
+    wallet: str | None = None
+    if _EVM_ADDR_RE.match(token):
+        wallet = token.lower()
+    elif len(token) >= 8:
+        client_id = token
+    else:
+        await update.message.reply_text(
+            "Invalid ID\\. Expected a client\\_id \\(8\\+ chars\\) or wallet address\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
+    chat_id = update.effective_chat.id
+    try:
+        from api.database import get_db, link_bot_identity
+
+        db = await get_db()
+        try:
+            await link_bot_identity(
+                db, chat_id, client_id=client_id, wallet_address=wallet
+            )
+            await db.commit()
+        finally:
+            await db.close()
+        target = _esc(wallet or client_id or "")
+        await update.message.reply_text(
+            f"Linked\\. I'll DM follow\\-trader alerts for `{target}` to this chat\\."
+            + DISCLAIMER,
+            parse_mode="MarkdownV2",
+        )
+    except Exception:
+        logger.exception("connect failed")
+        await update.message.reply_text(
+            "Failed to link\\. Try again later\\.", parse_mode="MarkdownV2"
+        )
+
+
+async def disconnect_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    try:
+        from api.database import get_db, unlink_bot_identity
+
+        db = await get_db()
+        try:
+            removed = await unlink_bot_identity(db, chat_id)
+            await db.commit()
+        finally:
+            await db.close()
+        msg = (
+            "Unlinked\\. No more follow\\-trader DMs to this chat\\."
+            if removed
+            else "This chat wasn't linked\\."
+        )
+        await update.message.reply_text(msg + DISCLAIMER, parse_mode="MarkdownV2")
+    except Exception:
+        logger.exception("disconnect failed")
+        await update.message.reply_text(
+            "Failed to unlink\\. Try again later\\.", parse_mode="MarkdownV2"
+        )
+
+
 async def calibration(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = await _api_get("/api/calibration")
     if not data:
@@ -412,6 +497,8 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/subscribe — Whale alerts \\+ weekly digest\n"
         "/unsubscribe — Stop alerts and digest\n"
         "/threshold <amount> — Min trade size filter\n"
+        "/connect <id> — Link web identity for follow\\-trader DMs\n"
+        "/disconnect — Unlink this chat\n"
         "/calibration — Accuracy dashboard\n"
         "/accuracy — Signal track record\n"
         "/help — This message"
@@ -455,6 +542,82 @@ async def digest_loop(app: Application):
             logger.exception("digest_loop error")
 
         await asyncio.sleep(week_seconds)
+
+
+async def follow_alert_loop(app: Application):
+    """Push follow-trader alerts to linked Telegram chats.
+
+    For each linked chat with at least one unnotified follow_alert,
+    compose a DM per alert, send it, then mark tg_notified_at.
+    """
+    await asyncio.sleep(30)
+    while True:
+        try:
+            from api.database import (
+                get_db,
+                get_pending_follow_alerts_with_chat,
+                mark_follow_alerts_tg_notified,
+            )
+
+            db = await get_db()
+            try:
+                pending = await get_pending_follow_alerts_with_chat(db)
+                sent_ids: list[int] = []
+                for a in pending:
+                    chat_id = a["chat_id"]
+                    trader = a["trader_address"] or ""
+                    addr_short = (trader[:6] + "…" + trader[-4:]) if len(trader) >= 10 else trader
+                    side_emoji = "🟢" if a.get("position_direction") == "YES" else "🔴"
+                    question = _esc(str(a.get("question") or "")[:60])
+                    direction = a.get("position_direction") or "—"
+                    price = a.get("market_price")
+                    price_str = _esc(f"{price:.0%}") if price is not None else "?"
+                    div = a.get("divergence_pct")
+                    div_str = _esc(f"{div:.0%}") if div is not None else "?"
+                    acc = a.get("accuracy_pct")
+                    total = a.get("total_divergent_signals") or 0
+                    if acc is not None and total >= 10:
+                        acc_str = f"\n  Trader accuracy: {_esc(f'{acc:.0f}%')} over {_esc(str(total))} signals"
+                    else:
+                        acc_str = ""
+
+                    msg = (
+                        f"{side_emoji} *Followed trader signal*\n"
+                        f"`{_esc(addr_short)}` just went *{_esc(direction)}* on\n"
+                        f"*{question}*\n"
+                        f"Market: {price_str} YES \\| Divergence: {div_str}"
+                        f"{acc_str}"
+                    )
+                    try:
+                        await app.bot.send_message(
+                            chat_id=chat_id,
+                            text=msg + DISCLAIMER,
+                            parse_mode="MarkdownV2",
+                            disable_web_page_preview=True,
+                        )
+                        sent_ids.append(a["id"])
+                    except Exception:
+                        # Failed send — skip marking so we retry next cycle.
+                        logger.warning(
+                            "Failed to DM follow_alert %s to chat %s",
+                            a.get("id"),
+                            chat_id,
+                        )
+
+                if sent_ids:
+                    await mark_follow_alerts_tg_notified(db, sent_ids)
+                    await db.commit()
+                    logger.info(
+                        "Sent %d follow-trader DMs across %d chats",
+                        len(sent_ids),
+                        len({a["chat_id"] for a in pending if a["id"] in sent_ids}),
+                    )
+            finally:
+                await db.close()
+        except Exception:
+            logger.exception("follow_alert_loop error")
+
+        await asyncio.sleep(60)
 
 
 async def alert_loop(app: Application):
@@ -521,12 +684,15 @@ def main():
     app.add_handler(CommandHandler("calibration", calibration))
     app.add_handler(CommandHandler("accuracy", accuracy))
     app.add_handler(CommandHandler("digest", digest_cmd))
+    app.add_handler(CommandHandler("connect", connect_cmd))
+    app.add_handler(CommandHandler("disconnect", disconnect_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
 
     # Start background loops as post_init
     async def post_init(application: Application):
         asyncio.create_task(alert_loop(application))
         asyncio.create_task(digest_loop(application))
+        asyncio.create_task(follow_alert_loop(application))
 
     app.post_init = post_init
 

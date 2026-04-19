@@ -96,6 +96,16 @@ CREATE TABLE IF NOT EXISTS bot_subscriptions (
     active INTEGER DEFAULT 1
 );
 
+-- Links a Telegram chat to a web identity (client_id + optional wallet)
+-- so the bot can DM follow-trader alerts to the right user.
+CREATE TABLE IF NOT EXISTS bot_identity_links (
+    chat_id INTEGER PRIMARY KEY,
+    client_id TEXT,
+    wallet_address TEXT,
+    created_at TEXT,
+    last_seen_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS trader_category_stats (
     trader_address TEXT,
     category TEXT,
@@ -325,6 +335,31 @@ async def migrate_db(db: aiosqlite.Connection):
     )
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_follow_alerts_follower ON follow_alerts(follower_wallet, follower_client_id, seen_at)"
+    )
+
+    # Telegram identity link + tg_notified_at so the bot can push
+    # follow-trader alerts to linked chats.
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS bot_identity_links (
+            chat_id INTEGER PRIMARY KEY,
+            client_id TEXT,
+            wallet_address TEXT,
+            created_at TEXT,
+            last_seen_at TEXT
+        )"""
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bot_links_client ON bot_identity_links(client_id)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bot_links_wallet ON bot_identity_links(wallet_address)"
+    )
+    cursor = await db.execute("PRAGMA table_info(follow_alerts)")
+    fa_cols = {row[1] for row in await cursor.fetchall()}
+    if "tg_notified_at" not in fa_cols:
+        await db.execute("ALTER TABLE follow_alerts ADD COLUMN tg_notified_at TEXT")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_follow_alerts_tg ON follow_alerts(tg_notified_at)"
     )
 
     await db.commit()
@@ -2003,6 +2038,96 @@ async def get_active_subscriptions(db: aiosqlite.Connection) -> list[dict]:
     )
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Telegram Identity Linking ──────────────────────────────
+
+
+async def link_bot_identity(
+    db: aiosqlite.Connection,
+    chat_id: int,
+    client_id: str | None = None,
+    wallet_address: str | None = None,
+) -> None:
+    """Associate a Telegram chat with a web identity (client_id + optional
+    wallet). Upsert keyed on chat_id."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    wallet = wallet_address.lower() if wallet_address else None
+    await db.execute(
+        """INSERT INTO bot_identity_links
+               (chat_id, client_id, wallet_address, created_at, last_seen_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(chat_id) DO UPDATE SET
+               client_id = excluded.client_id,
+               wallet_address = excluded.wallet_address,
+               last_seen_at = excluded.last_seen_at""",
+        (chat_id, client_id, wallet, now, now),
+    )
+
+
+async def unlink_bot_identity(db: aiosqlite.Connection, chat_id: int) -> bool:
+    cursor = await db.execute(
+        "DELETE FROM bot_identity_links WHERE chat_id = ?", (chat_id,)
+    )
+    return (cursor.rowcount or 0) > 0
+
+
+async def get_bot_identity(
+    db: aiosqlite.Connection, chat_id: int
+) -> dict | None:
+    cursor = await db.execute(
+        "SELECT * FROM bot_identity_links WHERE chat_id = ?", (chat_id,)
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def get_pending_follow_alerts_with_chat(
+    db: aiosqlite.Connection, limit: int = 200
+) -> list[dict]:
+    """Fetch follow_alerts not yet DM'd, joined with the follower's
+    chat_id (if linked) and market/signal/trader context needed to
+    render the alert message.
+    """
+    sql = """
+        SELECT fa.id, fa.trader_address, fa.signal_id, fa.market_id,
+               fa.position_direction, fa.created_at,
+               bil.chat_id,
+               ds.question, ds.market_price, ds.sm_consensus,
+               ds.divergence_pct, ds.signal_strength, ds.sm_direction,
+               ta.accuracy_pct, ta.total_divergent_signals
+        FROM follow_alerts fa
+        JOIN bot_identity_links bil
+          ON (fa.follower_client_id IS NOT NULL
+              AND bil.client_id = fa.follower_client_id)
+             OR (fa.follower_wallet IS NOT NULL
+                 AND bil.wallet_address = fa.follower_wallet)
+        LEFT JOIN divergence_signals ds ON ds.id = fa.signal_id
+        LEFT JOIN trader_accuracy ta ON ta.trader_address = fa.trader_address
+        WHERE fa.tg_notified_at IS NULL
+        ORDER BY fa.created_at ASC
+        LIMIT ?
+    """
+    cursor = await db.execute(sql, (limit,))
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def mark_follow_alerts_tg_notified(
+    db: aiosqlite.Connection, alert_ids: list[int]
+) -> int:
+    if not alert_ids:
+        return 0
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    placeholders = ",".join("?" for _ in alert_ids)
+    cursor = await db.execute(
+        f"UPDATE follow_alerts SET tg_notified_at = ? WHERE id IN ({placeholders})",
+        (now, *alert_ids),
+    )
+    return cursor.rowcount or 0
 
 
 # ── Category Stats ─────────────────────────────────────────
