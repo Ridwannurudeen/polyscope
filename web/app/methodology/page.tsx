@@ -130,20 +130,31 @@ export default function MethodologyPage() {
           3. The honest findings
         </h2>
         <p className="text-gray-300 leading-relaxed mb-4">
-          On 98K+ resolved signals captured through early April 2026, the raw
-          aggregate smart-money consensus was <strong>anti-predictive</strong>{" "}
-          — correct on only 8.3% of divergent signals. Flipping the direction
-          (fading SM consensus) inverted this to 95.4% at the headline level.
+          On our first 98K+ resolved signals we flipped the aggregate SM
+          direction universally (after finding the raw consensus was
+          anti-predictive at 8.3%). The flipped strategy hit 96% at the headline
+          level — but a follow-up per-skew backtest showed that was almost
+          entirely a composition effect from heavily lopsided markets.
         </p>
         <p className="text-gray-300 leading-relaxed mb-4">
-          But this headline is almost entirely a composition effect. Most
-          resolved signals came from markets already priced lopsided (e.g. 90%
-          YES). On those, fading a small contrarian SM position is
-          mathematically equivalent to siding with the obvious favorite — not
-          real edge.
+          The per-skew breakdown forced a correction. On <strong>tight
+          40-60% markets</strong>, fading SM lost 0 out of 17 unique markets.
+          On moderate markets, 3 of 21. SM was actually predictive when it
+          dissented on those bands — going <em>with</em> SM would have won.
+          On very-lopsided markets (≥90% or ≤10%), fading gives a near-100%
+          hit rate but ~0% ROI — the favorite almost always wins anyway.
         </p>
         <p className="text-gray-300 leading-relaxed mb-4">
-          The breakdown by market skew makes this explicit:
+          The live strategy now follows that finding:{" "}
+          <strong>
+            fade SM on very-lopsided markets (composition play), follow SM
+            everywhere else (real alpha).
+          </strong>{" "}
+          On the same 1,556-market backtest this flips net ROI from −2.6% to
+          +3.9% at the same 97% headline hit rate.
+        </p>
+        <p className="text-gray-300 leading-relaxed mb-4">
+          The per-band breakdown after the correction:
         </p>
 
         {loading ? (
@@ -155,7 +166,7 @@ export default function MethodologyPage() {
                 <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
                   <th className="text-left p-3">Market Skew</th>
                   <th className="text-right p-3">Signals</th>
-                  <th className="text-right p-3">Win Rate (fade SM)</th>
+                  <th className="text-right p-3">Win Rate (current strategy)</th>
                 </tr>
               </thead>
               <tbody>
@@ -188,47 +199,99 @@ export default function MethodologyPage() {
         )}
 
         <p className="text-gray-300 leading-relaxed">
-          On <strong>tight 40-60% markets</strong> — where real edge would have
-          to live — the fade strategy barely beats a coin flip. The 95%+
-          headline is not tradeable alpha. It is a composition artifact of
-          heavily skewed markets mixed into the average.
+          Headline hit rate is a misleading summary when the sample is
+          dominated by one skew band. We report it because it is the number
+          most people will ask for, but the per-band numbers and ROI are what
+          actually matter.
         </p>
       </section>
 
-      {/* Section 4: Why this still matters */}
+      {/* Section 4: Predictive-contributor filter */}
       <section className="mb-12">
         <h2 className="text-xl font-semibold text-white mb-3">
-          4. What the data <em>does</em> support
+          4. The predictive-contributor filter
         </h2>
         <p className="text-gray-300 leading-relaxed mb-3">
-          Two findings hold up:
+          Aggregating top-100 traders into a single consensus hides
+          per-trader skill. We score each contributor individually on their
+          resolved divergent positions. A trader qualifies as{" "}
+          <em>predictive</em> when their Wilson-95%-confidence-interval
+          lower bound on accuracy is at least 40% with at least 30 resolved
+          observations.
+        </p>
+        <p className="text-gray-300 leading-relaxed mb-3">
+          On 1,568 backtested signals, restricting to signals backed by at
+          least one predictive contributor left{" "}
+          <strong>75 signals at 96.0% hit rate and +17.7% simulated ROI</strong>{" "}
+          — compared to +4.2% ROI on the unfiltered set. Same hit rate;{" "}
+          <strong>roughly 4x the return</strong>.
+        </p>
+        <p className="text-gray-300 leading-relaxed mb-3">
+          The filter tends to cluster into tight and moderate markets where
+          aggregation is weakest and individual conviction matters more:
+        </p>
+        <ul className="space-y-1 text-gray-300 leading-relaxed list-disc list-inside mb-3 text-sm">
+          <li>tight (40-60%): 3/3 won, +109% ROI</li>
+          <li>moderate: 6/6 won, +151% ROI</li>
+          <li>lopsided: 1/2, +122% ROI</li>
+          <li>very-lopsided: 62/64, −2% ROI (still composition-bound)</li>
+        </ul>
+        <p className="text-gray-300 leading-relaxed mb-3">
+          Caveats: the eligible-contributor list is currently very short (two
+          traders cleared the 40% Wilson-lower threshold at time of writing).
+          The filter&apos;s value will grow as per-trader observations
+          accumulate. Signals on the Smart Money page are tagged with a{" "}
+          <span className="inline-block px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/40 text-violet-300 text-xs rounded">
+            ⚡ Predictive-backed
+          </span>{" "}
+          badge when they qualify.
+        </p>
+      </section>
+
+      {/* Section 5: Why per-trader attribution exists */}
+      <section className="mb-12">
+        <h2 className="text-xl font-semibold text-white mb-3">
+          5. What the data <em>does</em> support
+        </h2>
+        <p className="text-gray-300 leading-relaxed mb-3">
+          Three findings hold up:
         </p>
         <ol className="space-y-2 text-gray-300 leading-relaxed list-decimal list-inside mb-3">
           <li>
-            <strong>Polymarket&apos;s P&amp;L leaderboard is not a
-            predictive-skill leaderboard.</strong>{" "}
-            Top-ranked-by-profit traders take positions that are systematically
-            wrong when they diverge from market price.
+            <strong>
+              Polymarket&apos;s P&amp;L leaderboard is not a predictive-skill
+              leaderboard.
+            </strong>{" "}
+            Top-ranked-by-profit traders cluster near 45-55% individual
+            accuracy on divergent signals. Most are not reliably predictive.
           </li>
           <li>
-            <strong>Individual-trader accuracy varies significantly</strong>{" "}
-            and is the real signal worth extracting. Aggregating the top-100
-            discards this — you need per-trader attribution over time.
+            <strong>A handful of individuals clear a meaningful edge.</strong>{" "}
+            Two addresses currently have Wilson-CI lower bounds above 40% on
+            30+ resolved observations. This is the population the predictive
+            filter surfaces.
+          </li>
+          <li>
+            <strong>Aggregation changes the picture per-band.</strong>{" "}
+            Weighted consensus of top-100 traders is predictive enough to
+            overcome individual noise on tight and moderate markets; it is
+            composition-bound on very-lopsided markets.
           </li>
         </ol>
         <p className="text-gray-300 leading-relaxed">
-          That is why PolyScope captures per-signal per-trader records and
-          scores each address individually on resolved outcomes. The output is
-          on <Link href="/traders" className="text-emerald-400 hover:underline">/traders</Link>{" "}
-          — a dual leaderboard separating genuinely predictive addresses from
-          systematically anti-predictive ones.
+          The per-trader leaderboard is on{" "}
+          <Link href="/traders" className="text-emerald-400 hover:underline">
+            /traders
+          </Link>{" "}
+          — predictive ↔ anti-predictive, with sample sizes and confidence
+          intervals shown so you can weigh the evidence yourself.
         </p>
       </section>
 
       {/* Section 5: Live dataset */}
       <section className="mb-12">
         <h2 className="text-xl font-semibold text-white mb-3">
-          5. Live dataset
+          6. Live dataset
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -277,7 +340,7 @@ export default function MethodologyPage() {
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 col-span-2">
             <p className="text-xs text-gray-500 uppercase mb-1">
-              Overall Win Rate (fade)
+              Overall Win Rate (live strategy)
             </p>
             <p
               className={`text-xl font-semibold ${colorForAccuracy(data?.signals.overall_win_rate_pct ?? null)}`}
@@ -298,7 +361,7 @@ export default function MethodologyPage() {
       {/* Section 6: Caveats */}
       <section className="mb-12">
         <h2 className="text-xl font-semibold text-white mb-3">
-          6. Limitations we are honest about
+          7. Limitations we are honest about
         </h2>
         <ul className="space-y-2 text-gray-300 leading-relaxed list-disc list-inside">
           <li>

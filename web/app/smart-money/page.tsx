@@ -56,6 +56,7 @@ export default function SmartMoneyPage() {
   const [skew, setSkew] = useState<SkewFilter>("all");
   const [tier, setTier] = useState<TierFilter>("all");
   const [category, setCategory] = useState<string>("all");
+  const [predictiveOnly, setPredictiveOnly] = useState(false);
 
   const {
     data: lbData,
@@ -97,22 +98,29 @@ export default function SmartMoneyPage() {
       if (skew !== "all" && skewBand(d.market_price) !== skew) return false;
       if (tier !== "all" && tierBucket(d.score) !== tier) return false;
       if (category !== "all" && (d.category || "") !== category) return false;
+      if (predictiveOnly && !d.predictive_contributor) return false;
       return true;
     });
-  }, [divergences, direction, skew, tier, category]);
+  }, [divergences, direction, skew, tier, category, predictiveOnly]);
 
   const resetFilters = () => {
     setDirection("all");
     setSkew("all");
     setTier("all");
     setCategory("all");
+    setPredictiveOnly(false);
   };
 
   const filtersActive =
     direction !== "all" ||
     skew !== "all" ||
     tier !== "all" ||
-    category !== "all";
+    category !== "all" ||
+    predictiveOnly;
+
+  const predictiveCount = divergences.filter(
+    (d) => d.predictive_contributor
+  ).length;
 
   if (lbLoading) {
     return (
@@ -175,6 +183,22 @@ export default function SmartMoneyPage() {
 
           {/* Filter bar */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 mb-4 flex flex-wrap items-center gap-3 text-sm">
+            <button
+              onClick={() => setPredictiveOnly(!predictiveOnly)}
+              className={`text-xs px-2.5 py-1 rounded-md border font-medium transition-colors ${
+                predictiveOnly
+                  ? "bg-violet-500/20 border-violet-500/50 text-violet-200"
+                  : "bg-gray-950 border-gray-700 text-gray-400 hover:text-gray-200"
+              }`}
+              title="Backtest: predictive-backed signals returned +17.7% ROI on 75 signals vs +4.2% unfiltered"
+            >
+              ⚡ Predictive-backed only
+              {predictiveCount > 0 && (
+                <span className="ml-1.5 text-[11px] opacity-70">
+                  ({predictiveCount})
+                </span>
+              )}
+            </button>
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-500 uppercase">Direction</label>
               <select

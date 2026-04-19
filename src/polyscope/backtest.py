@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,12 +16,13 @@ class BacktestConfig:
     min_divergence_pct: float = 0.10
     min_score: float = 25
     label: str = ""
-    # Per-trader accuracy filter. When min_contributor_accuracy is set, a
-    # signal passes only if the average of its contributors' accuracy_pct
-    # (across traders with >=min_contributor_signals observations) is at
-    # or above the threshold.
+    # Predictive-contributor filter. A signal passes only if at least one
+    # of its contributors has a Wilson 95% CI *lower bound* on accuracy at
+    # or above this threshold, with sample >= min_contributor_signals.
+    # This beats averaging (a single +55% trader is stronger evidence than
+    # an average dragged toward 50% by noise).
     min_contributor_accuracy: float | None = None
-    min_contributor_signals: int = 10
+    min_contributor_signals: int = 30
     # Strategy simulation. The DB stores the live strategy (fade-SM
     # everywhere). This flips sm_direction + outcome_correct on bands
     # listed here so we can see what a different strategy would score.
@@ -48,14 +50,33 @@ def _signal_roi(signal: dict) -> float:
     return (1.0 / buy_price) * 100
 
 
+_Z_95 = 1.959963984540054
+
+
+def _wilson_lower(correct: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    p = correct / total
+    z = _Z_95
+    denom = 1 + (z * z) / total
+    center = (p + (z * z) / (2 * total)) / denom
+    half = (
+        z * math.sqrt((p * (1 - p)) / total + (z * z) / (4 * total * total))
+    ) / denom
+    return max(0.0, center - half) * 100.0
+
+
 def _load_contributor_accuracy(
     db: sqlite3.Connection, min_signals: int
 ) -> dict[str, dict[str, float]]:
-    """Map best-per-market signal_id -> {avg_acc, n_contributors, n_scored}.
+    """Map signal_id -> {max_wilson_lo, max_acc, n_scored, n_contributors}.
 
     Uses first-observed signal per (trader, market) pair to avoid
-    duplicating a trader's prediction across re-scans. Traders below
-    min_signals are treated as unscored.
+    duplicating a trader's prediction across re-scans. Scored means a
+    trader has >= min_signals observations. `max_wilson_lo` is the
+    highest Wilson-95%-CI lower bound across all scored contributors —
+    a stable anchor that says "at least one likely-predictive trader is
+    on this signal."
     """
     rows = db.execute(
         """
@@ -69,30 +90,34 @@ def _load_contributor_accuracy(
             ) f ON f.first_id = stp.id
         )
         SELECT fp.signal_id, fp.trader_address, ta.accuracy_pct,
-               ta.total_divergent_signals
+               ta.correct_predictions, ta.total_divergent_signals
         FROM first_pos fp
         LEFT JOIN trader_accuracy ta ON ta.trader_address = fp.trader_address
         """
     ).fetchall()
 
-    buckets: dict[int, list[float]] = {}
     counts: dict[int, int] = {}
-    for signal_id, _trader, acc, total in rows:
+    max_acc: dict[int, float] = {}
+    max_lo: dict[int, float] = {}
+    n_scored: dict[int, int] = {}
+    for signal_id, _trader, acc, correct, total in rows:
         counts[signal_id] = counts.get(signal_id, 0) + 1
-        if (
-            acc is not None
-            and total is not None
-            and total >= min_signals
-        ):
-            buckets.setdefault(signal_id, []).append(acc)
+        if acc is None or total is None or total < min_signals:
+            continue
+        n_scored[signal_id] = n_scored.get(signal_id, 0) + 1
+        lo = _wilson_lower(int(correct or 0), int(total or 0))
+        if acc > max_acc.get(signal_id, -1.0):
+            max_acc[signal_id] = float(acc)
+        if lo > max_lo.get(signal_id, -1.0):
+            max_lo[signal_id] = lo
 
     out: dict[int, dict[str, float]] = {}
     for sid, n in counts.items():
-        scored = buckets.get(sid, [])
         out[sid] = {
-            "avg_acc": sum(scored) / len(scored) if scored else -1.0,
+            "max_acc": max_acc.get(sid, -1.0),
+            "max_wilson_lo": max_lo.get(sid, -1.0),
+            "n_scored": float(n_scored.get(sid, 0)),
             "n_contributors": float(n),
-            "n_scored": float(len(scored)),
         }
     return out
 
@@ -187,7 +212,7 @@ def run_backtest(db_path: str | Path, configs: list[BacktestConfig]) -> list[dic
                 c = contrib_map.get(s["id"])
                 if not c or c["n_scored"] == 0:
                     continue
-                if c["avg_acc"] < cfg.min_contributor_accuracy:
+                if c["max_wilson_lo"] < cfg.min_contributor_accuracy:
                     continue
             filtered.append(s)
 
@@ -325,27 +350,27 @@ if __name__ == "__main__":
             min_volume_24h=10000,
             min_sm_traders=1,
             min_score=25,
-            min_contributor_accuracy=70.0,
-            min_contributor_signals=10,
-            label="Contributors avg acc >= 70%",
+            min_contributor_accuracy=40.0,
+            min_contributor_signals=30,
+            label="Has predictive contributor (CI-lo>=40)",
         ),
         BacktestConfig(
             min_oi=50000,
             min_volume_24h=10000,
             min_sm_traders=1,
             min_score=25,
-            min_contributor_accuracy=80.0,
-            min_contributor_signals=10,
-            label="Contributors avg acc >= 80%",
+            min_contributor_accuracy=45.0,
+            min_contributor_signals=30,
+            label="Has predictive contributor (CI-lo>=45)",
         ),
         BacktestConfig(
             min_oi=50000,
             min_volume_24h=10000,
             min_sm_traders=1,
             min_score=25,
-            min_contributor_accuracy=90.0,
-            min_contributor_signals=10,
-            label="Contributors avg acc >= 90%",
+            min_contributor_accuracy=50.0,
+            min_contributor_signals=30,
+            label="Has predictive contributor (CI-lo>=50)",
         ),
         BacktestConfig(
             min_oi=50000,

@@ -18,6 +18,7 @@ from .database import (
     get_db,
     get_divergence_history,
     get_divergence_signals,
+    get_predictive_contributors_for_markets,
     get_expired_signal_count,
     get_follow_alerts,
     get_followed_traders,
@@ -183,6 +184,12 @@ async def get_divergences():
         db = await get_db()
         try:
             rows = await get_divergence_signals(db, limit=50, hours=1)
+            market_ids = [r.get("market_id") for r in rows if r.get("market_id")]
+            predictive = await get_predictive_contributors_for_markets(
+                db, market_ids
+            )
+            for r in rows:
+                r["predictive_contributor"] = predictive.get(r.get("market_id"))
             return {
                 "signals": rows,
                 "count": len(rows),
@@ -193,9 +200,21 @@ async def get_divergences():
         finally:
             await db.close()
 
+    signals = [asdict(d) for d in divergences]
+    market_ids = [s["market_id"] for s in signals if s.get("market_id")]
+    if market_ids:
+        db = await get_db()
+        try:
+            predictive = await get_predictive_contributors_for_markets(
+                db, market_ids
+            )
+        finally:
+            await db.close()
+        for s in signals:
+            s["predictive_contributor"] = predictive.get(s.get("market_id"))
     return {
-        "signals": [asdict(d) for d in divergences],
-        "count": len(divergences),
+        "signals": signals,
+        "count": len(signals),
         "expired_count": expired_count,
         "source": source,
         "disclaimer": DISCLAIMER,

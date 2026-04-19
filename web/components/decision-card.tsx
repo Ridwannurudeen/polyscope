@@ -133,6 +133,16 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
             >
               {tier.tier}
             </span>
+            {signal.predictive_contributor && (
+              <span
+                className="text-xs px-2 py-0.5 rounded border bg-violet-500/10 border-violet-500/40 text-violet-300 font-medium"
+                title={`Backed by trader ${signal.predictive_contributor.trader_address.slice(0, 10)}… — ${signal.predictive_contributor.pct}% on ${signal.predictive_contributor.n} signals (Wilson CI ${signal.predictive_contributor.ci_lo}–${signal.predictive_contributor.ci_hi}%). Historical backtest: signals with a predictive-backed contributor averaged +17.7% ROI vs +4.2% unfiltered.`}
+              >
+                ⚡ Predictive-backed ·{" "}
+                {signal.predictive_contributor.pct.toFixed(0)}% (n=
+                {signal.predictive_contributor.n})
+              </span>
+            )}
             <span
               className={`text-xs px-2 py-0.5 rounded border bg-gray-950 ${
                 skew.band === "tight"

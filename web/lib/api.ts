@@ -8,6 +8,14 @@ export async function fetchAPI<T>(path: string): Promise<T> {
   return res.json();
 }
 
+export interface PredictiveContributor {
+  trader_address: string;
+  pct: number;
+  ci_lo: number;
+  ci_hi: number;
+  n: number;
+}
+
 export interface DivergenceSignal {
   market_id: string;
   question: string;
@@ -20,6 +28,7 @@ export interface DivergenceSignal {
   category: string;
   signal_source: string;
   timestamp: string;
+  predictive_contributor?: PredictiveContributor | null;
 }
 
 export interface WhaleAlert {

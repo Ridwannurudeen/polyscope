@@ -470,6 +470,93 @@ def _normalize_signal(row: dict) -> dict:
     return d
 
 
+def _wilson_lower_pct(correct: int, total: int) -> float:
+    """Wilson 95% CI lower bound on accuracy as a percentage."""
+    import math as _math
+
+    if total <= 0:
+        return 0.0
+    z = 1.959963984540054
+    p = correct / total
+    denom = 1 + (z * z) / total
+    center = (p + (z * z) / (2 * total)) / denom
+    half = (
+        z * _math.sqrt((p * (1 - p)) / total + (z * z) / (4 * total * total))
+    ) / denom
+    return max(0.0, center - half) * 100.0
+
+
+# Contributor must have at least this many resolved observations to count.
+PREDICTIVE_MIN_N = 30
+# Contributor's Wilson-CI lower bound must meet this (pct).
+PREDICTIVE_MIN_WILSON_LO = 40.0
+
+
+async def get_predictive_contributors_for_markets(
+    db: aiosqlite.Connection, market_ids: list[str]
+) -> dict[str, dict]:
+    """Return {market_id: {trader_address, pct, ci_lo, ci_hi, n}} for markets
+    where at least one contributor crosses the predictive threshold.
+
+    "Contributor" = any trader whose position on this market was captured
+    in signal_trader_positions. Picks the contributor with the highest
+    Wilson-CI lower bound per market (most credible single backing).
+    """
+    if not market_ids:
+        return {}
+    placeholders = ",".join("?" for _ in market_ids)
+    cursor = await db.execute(
+        f"""
+        SELECT DISTINCT stp.market_id, stp.trader_address,
+               ta.correct_predictions, ta.total_divergent_signals,
+               ta.accuracy_pct
+        FROM signal_trader_positions stp
+        JOIN trader_accuracy ta ON ta.trader_address = stp.trader_address
+        WHERE stp.market_id IN ({placeholders})
+          AND ta.total_divergent_signals >= ?
+        """,
+        (*market_ids, PREDICTIVE_MIN_N),
+    )
+    rows = await cursor.fetchall()
+
+    best: dict[str, dict] = {}
+    for r in rows:
+        mid = r["market_id"]
+        correct = int(r["correct_predictions"] or 0)
+        total = int(r["total_divergent_signals"] or 0)
+        lo = _wilson_lower_pct(correct, total)
+        if lo < PREDICTIVE_MIN_WILSON_LO:
+            continue
+        current = best.get(mid)
+        if current is None or lo > current["ci_lo"]:
+            z = 1.959963984540054
+            import math as _math
+
+            p = correct / total if total else 0.0
+            denom = 1 + (z * z) / total if total else 1
+            center = (p + (z * z) / (2 * total)) / denom if total else 0.0
+            half = (
+                (
+                    z
+                    * _math.sqrt(
+                        (p * (1 - p)) / total + (z * z) / (4 * total * total)
+                    )
+                )
+                / denom
+                if total
+                else 0.0
+            )
+            hi = min(1.0, center + half) * 100.0
+            best[mid] = {
+                "trader_address": r["trader_address"],
+                "pct": round(float(r["accuracy_pct"] or 0.0), 1),
+                "ci_lo": round(lo, 1),
+                "ci_hi": round(hi, 1),
+                "n": total,
+            }
+    return best
+
+
 async def get_divergence_signals(
     db: aiosqlite.Connection, limit: int = 50, hours: int | None = None
 ) -> list[dict]:

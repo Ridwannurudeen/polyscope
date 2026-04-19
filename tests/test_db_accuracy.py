@@ -1121,6 +1121,80 @@ async def test_get_signal_evidence_contributors_ordered_by_weight(db):
 
 
 @pytest.mark.anyio
+async def test_predictive_contributors_threshold(db):
+    """Only traders with Wilson-CI lower >= 40% on >=30 signals qualify;
+    best contributor per market is chosen by Wilson-lower."""
+    from api.database import get_predictive_contributors_for_markets
+
+    strong = "0x" + "s" * 40
+    weak = "0x" + "w" * 40
+    thin = "0x" + "t" * 40
+    market = "mpred1"
+
+    # One signal that attributes all three contributors to the same market.
+    signal_id = await _seed_signal_with_traders(
+        db, market, 0.55, "crypto",
+        [(strong, "YES"), (weak, "NO"), (thin, "YES")],
+    )
+    await db.commit()
+
+    # trader_accuracy rows (hand-crafted so Wilson-lower is deterministic).
+    now = "2026-04-19T00:00:00"
+    await db.execute(
+        """INSERT INTO trader_accuracy
+               (trader_address, total_divergent_signals, correct_predictions,
+                wrong_predictions, accuracy_pct, accuracy_by_skew,
+                accuracy_by_category, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (strong, 200, 110, 90, 55.0, "{}", "{}", now),  # Wilson-lo ~48.1%
+    )
+    await db.execute(
+        """INSERT INTO trader_accuracy
+               (trader_address, total_divergent_signals, correct_predictions,
+                wrong_predictions, accuracy_pct, accuracy_by_skew,
+                accuracy_by_category, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (weak, 200, 80, 120, 40.0, "{}", "{}", now),  # Wilson-lo ~33%
+    )
+    await db.execute(
+        """INSERT INTO trader_accuracy
+               (trader_address, total_divergent_signals, correct_predictions,
+                wrong_predictions, accuracy_pct, accuracy_by_skew,
+                accuracy_by_category, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (thin, 10, 9, 1, 90.0, "{}", "{}", now),  # filtered: n<30
+    )
+    await db.commit()
+
+    out = await get_predictive_contributors_for_markets(db, [market])
+    assert market in out
+    assert out[market]["trader_address"] == strong
+    assert out[market]["n"] == 200
+    assert out[market]["ci_lo"] >= 40.0
+
+
+@pytest.mark.anyio
+async def test_predictive_contributors_returns_empty_when_none_qualify(db):
+    from api.database import get_predictive_contributors_for_markets
+
+    addr = "0x" + "n" * 40
+    await _seed_signal_with_traders(
+        db, "mpred2", 0.55, "crypto", [(addr, "YES")]
+    )
+    await db.execute(
+        """INSERT INTO trader_accuracy
+               (trader_address, total_divergent_signals, correct_predictions,
+                wrong_predictions, accuracy_pct, accuracy_by_skew,
+                accuracy_by_category, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (addr, 50, 15, 35, 30.0, "{}", "{}", "2026-04-19T00:00:00"),
+    )
+    await db.commit()
+
+    assert await get_predictive_contributors_for_markets(db, ["mpred2"]) == {}
+
+
+@pytest.mark.anyio
 async def test_bot_identity_link_and_pending_by_chat(db):
     from api.database import (
         get_bot_identity,
