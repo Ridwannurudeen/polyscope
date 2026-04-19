@@ -193,6 +193,7 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
           question={signal.question}
           direction={signal.sm_direction}
           divergencePct={signal.divergence_pct}
+          marketPrice={signal.market_price}
         />
       </div>
 
