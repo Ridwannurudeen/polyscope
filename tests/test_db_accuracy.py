@@ -1174,6 +1174,32 @@ async def test_predictive_contributors_threshold(db):
 
 
 @pytest.mark.anyio
+async def test_predictive_contributors_rejects_wide_ci_on_anti_predictive(db):
+    """A trader at 47.5% on 1000 signals has Wilson-lower ~44.4% — still
+    crosses the 40% CI gate — but is not predictive because point
+    accuracy is below coin flip. Must be rejected."""
+    from api.database import get_predictive_contributors_for_markets
+
+    anti = "0x" + "a" * 40
+    await _seed_signal_with_traders(
+        db, "mantipr1", 0.55, "crypto", [(anti, "YES")]
+    )
+    await db.execute(
+        """INSERT INTO trader_accuracy
+               (trader_address, total_divergent_signals, correct_predictions,
+                wrong_predictions, accuracy_pct, accuracy_by_skew,
+                accuracy_by_category, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (anti, 1000, 475, 525, 47.5, "{}", "{}", "2026-04-19T00:00:00"),
+    )
+    await db.commit()
+
+    # Wilson-lower on 475/1000 is ~44.4%, clearing the 40% gate. But the
+    # point estimate 47.5% is below 50%, so the filter must reject.
+    assert await get_predictive_contributors_for_markets(db, ["mantipr1"]) == {}
+
+
+@pytest.mark.anyio
 async def test_predictive_contributors_returns_empty_when_none_qualify(db):
     from api.database import get_predictive_contributors_for_markets
 

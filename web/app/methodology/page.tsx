@@ -215,26 +215,34 @@ export default function MethodologyPage() {
           Aggregating top-100 traders into a single consensus hides
           per-trader skill. We score each contributor individually on their
           resolved divergent positions. A trader qualifies as{" "}
-          <em>predictive</em> when their Wilson-95%-confidence-interval
-          lower bound on accuracy is at least 40% with at least 30 resolved
-          observations.
+          <em>predictive</em> when all three hold: at least 30 resolved
+          observations, point accuracy above 50% (genuinely above coin flip),
+          and a Wilson-95%-CI lower bound at least 40% (not purely noise).
         </p>
         <p className="text-gray-300 leading-relaxed mb-3">
-          On 1,568 backtested signals, restricting to signals backed by at
+          On 1,592 backtested signals, restricting to signals backed by at
           least one predictive contributor left{" "}
-          <strong>75 signals at 96.0% hit rate and +17.7% simulated ROI</strong>{" "}
-          — compared to +4.2% ROI on the unfiltered set. Same hit rate;{" "}
-          <strong>roughly 4x the return</strong>.
+          <strong>33 signals at 97.0% hit rate and +14.9% simulated ROI</strong>
+          {" "}— compared to +4.2% ROI on the unfiltered set. Same hit rate;{" "}
+          <strong>roughly 3.5x the return</strong>.
         </p>
         <p className="text-gray-300 leading-relaxed mb-3">
-          The filter tends to cluster into tight and moderate markets where
-          aggregation is weakest and individual conviction matters more:
+          An earlier version used only the CI-lower gate and misreported
+          75 signals at +17.7% ROI. The issue: high-volume anti-predictive
+          traders (e.g. 47.5% accuracy on 1,000+ observations) have a
+          Wilson-CI lower bound that still crosses 40%, so they cleared the
+          gate and appeared on nearly every signal. Requiring the point
+          estimate itself to be above 50% restores the filter&apos;s
+          meaning.
+        </p>
+        <p className="text-gray-300 leading-relaxed mb-3">
+          The filter concentrates into tight and moderate markets where
+          aggregation is weakest and individual conviction matters most:
         </p>
         <ul className="space-y-1 text-gray-300 leading-relaxed list-disc list-inside mb-3 text-sm">
-          <li>tight (40-60%): 3/3 won, +109% ROI</li>
-          <li>moderate: 6/6 won, +151% ROI</li>
-          <li>lopsided: 1/2, +122% ROI</li>
-          <li>very-lopsided: 62/64, −2% ROI (still composition-bound)</li>
+          <li>tight (40-60%): 1/1 won, +113% ROI</li>
+          <li>moderate: 3/3 won, +156% ROI</li>
+          <li>very-lopsided: 28/29, −3% ROI (still composition-bound)</li>
         </ul>
         <p className="text-gray-300 leading-relaxed mb-3">
           Caveats: the eligible-contributor list is currently very short (two

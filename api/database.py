@@ -490,6 +490,11 @@ def _wilson_lower_pct(correct: int, total: int) -> float:
 PREDICTIVE_MIN_N = 30
 # Contributor's Wilson-CI lower bound must meet this (pct).
 PREDICTIVE_MIN_WILSON_LO = 40.0
+# Contributor's point accuracy must be above coin flip. Without this, any
+# high-volume trader whose true accuracy hovers near 45-48% will pass the
+# CI-lo gate (wide intervals on small-from-50 deviations) and appear on
+# nearly every signal — defeating the purpose.
+PREDICTIVE_MIN_PCT = 50.0
 
 
 async def get_predictive_contributors_for_markets(
@@ -524,6 +529,9 @@ async def get_predictive_contributors_for_markets(
         mid = r["market_id"]
         correct = int(r["correct_predictions"] or 0)
         total = int(r["total_divergent_signals"] or 0)
+        pct = float(r["accuracy_pct"] or 0.0)
+        if pct < PREDICTIVE_MIN_PCT:
+            continue
         lo = _wilson_lower_pct(correct, total)
         if lo < PREDICTIVE_MIN_WILSON_LO:
             continue

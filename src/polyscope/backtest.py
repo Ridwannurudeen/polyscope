@@ -104,6 +104,10 @@ def _load_contributor_accuracy(
         counts[signal_id] = counts.get(signal_id, 0) + 1
         if acc is None or total is None or total < min_signals:
             continue
+        # Point estimate must be above coin flip; otherwise a wide CI on
+        # an anti-predictive trader can still clear a Wilson-lower gate.
+        if float(acc) < 50.0:
+            continue
         n_scored[signal_id] = n_scored.get(signal_id, 0) + 1
         lo = _wilson_lower(int(correct or 0), int(total or 0))
         if acc > max_acc.get(signal_id, -1.0):

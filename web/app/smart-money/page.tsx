@@ -190,7 +190,7 @@ export default function SmartMoneyPage() {
                   ? "bg-violet-500/20 border-violet-500/50 text-violet-200"
                   : "bg-gray-950 border-gray-700 text-gray-400 hover:text-gray-200"
               }`}
-              title="Backtest: predictive-backed signals returned +17.7% ROI on 75 signals vs +4.2% unfiltered"
+              title="Backtest: predictive-backed signals returned +14.9% ROI on 33 signals vs +4.2% unfiltered"
             >
               ⚡ Predictive-backed only
               {predictiveCount > 0 && (
