@@ -17,9 +17,11 @@ from polyscope.polymarket import PolymarketClient
 
 from .cache import cache
 from .database import (
+    apply_builder_order_sync,
     expire_converged_signals,
     get_category_weights,
     get_db,
+    get_pending_builder_orders,
     rebuild_trader_accuracy,
     emit_follow_alerts_for_signal,
     rebuild_trader_category_stats,
@@ -482,5 +484,96 @@ async def cleanup_job():
         logger.info("Cleanup complete")
     except Exception:
         logger.exception("cleanup_job failed")
+    finally:
+        await db.close()
+
+
+# ── Builder order status polling ──────────────────────────
+
+_TERMINAL_STATUSES = {"filled", "canceled", "cancelled", "rejected", "expired"}
+
+_STATUS_ALIAS = {
+    # Map CLOB response strings to our canonical statuses.
+    "LIVE": "live",
+    "MATCHED": "filled",
+    "FILLED": "filled",
+    "COMPLETE": "filled",
+    "CANCELED": "canceled",
+    "CANCELLED": "canceled",
+    "EXPIRED": "expired",
+    "REJECTED": "rejected",
+    "UNMATCHED": "live",
+    "DELAYED": "live",
+}
+
+
+def _normalize_status(raw: str | None) -> str:
+    if not raw:
+        return "submitted"
+    s = str(raw).strip().upper()
+    return _STATUS_ALIAS.get(s, s.lower())
+
+
+async def sync_builder_orders_job():
+    """Sync pending attributed orders against the CLOB order endpoint.
+
+    Runs frequently to move orders out of the ``submitted`` holding
+    status into ``live``/``filled``/``canceled``/``expired``. Silent
+    when trading is not configured (dev deployments).
+    """
+    from .polymarket_trading import get_client as get_trading_client
+    from .polymarket_trading import is_trading_configured
+    import json
+
+    if not is_trading_configured():
+        return
+
+    db = await get_db()
+    try:
+        pending = await get_pending_builder_orders(db, limit=50)
+        if not pending:
+            return
+
+        try:
+            client = get_trading_client()
+        except Exception:
+            logger.exception("sync_builder_orders_job: client init failed")
+            return
+
+        synced = 0
+        for row in pending:
+            clob_id = row["clob_order_id"]
+            try:
+                resp = client.get_order(clob_id)
+            except Exception as e:
+                logger.warning("get_order(%s) failed: %s", clob_id, e)
+                continue
+
+            # CLOB returns a dict; status field varies across schemas.
+            status_raw = None
+            if isinstance(resp, dict):
+                status_raw = (
+                    resp.get("status")
+                    or resp.get("state")
+                    or resp.get("order_status")
+                )
+            normalized = _normalize_status(status_raw)
+
+            await apply_builder_order_sync(
+                db,
+                row["id"],
+                status=normalized,
+                raw_response=json.dumps(resp, default=str)[:8000],
+            )
+            synced += 1
+
+            if normalized in _TERMINAL_STATUSES:
+                logger.info("Order %s reached terminal status: %s",
+                            clob_id, normalized)
+
+        if synced:
+            logger.info("sync_builder_orders_job: %d orders synced", synced)
+    except Exception:
+        logger.exception("sync_builder_orders_job failed")
     finally:
         await db.close()

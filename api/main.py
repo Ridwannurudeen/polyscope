@@ -58,6 +58,7 @@ from .scheduler import (
     detect_whale_trades_job,
     fetch_leaderboard_job,
     fetch_markets_job,
+    sync_builder_orders_job,
     track_outcomes_job,
 )
 
@@ -90,6 +91,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(detect_movers_job, "interval", minutes=5, id="detect_movers")
     scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes")
     scheduler.add_job(detect_whale_trades_job, "interval", minutes=2, id="detect_whales")
+    scheduler.add_job(sync_builder_orders_job, "interval", seconds=60, id="sync_builder_orders")
     scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
     scheduler.start()
 
@@ -1129,6 +1131,48 @@ async def orders_config():
         "max_order_usdc": max_order_usdc(),
         "builder_code": get_builder_code(),
     }
+
+
+@app.get("/api/orders/public")
+async def orders_public(limit: int = Query(default=20, ge=1, le=100)):
+    """Public read-only view of attributed orders.
+
+    Orders include the builder code on-chain, so their existence is
+    already public. This endpoint omits the raw CLOB response (may
+    contain internal wallet addresses) and the raw error messages.
+    """
+    db = await get_db()
+    try:
+        rows = await list_builder_orders(db, limit=limit)
+    finally:
+        await db.close()
+
+    stats = {
+        "total": len(rows),
+        "by_status": {},
+        "total_notional_usdc": 0.0,
+    }
+    redacted: list[dict] = []
+    for r in rows:
+        status = r.get("status") or "unknown"
+        stats["by_status"][status] = stats["by_status"].get(status, 0) + 1
+        if status not in {"rejected", "failed"}:
+            stats["total_notional_usdc"] += float(r.get("notional_usdc") or 0)
+        redacted.append({
+            "id": r["id"],
+            "market_id": r["market_id"],
+            "token_id": r["token_id"],
+            "side": r["side"],
+            "price": r["price"],
+            "size": r["size"],
+            "notional_usdc": r["notional_usdc"],
+            "order_type": r["order_type"],
+            "status": r["status"],
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+        })
+    stats["total_notional_usdc"] = round(stats["total_notional_usdc"], 4)
+    return {"orders": redacted, "stats": stats}
 
 
 @app.post("/api/sign")

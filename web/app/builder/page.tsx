@@ -1,0 +1,237 @@
+"use client";
+
+import Link from "next/link";
+import { Disclaimer } from "@/components/disclaimer";
+import { TableSkeleton } from "@/components/skeleton";
+import { usePollingFetch } from "@/lib/hooks";
+
+interface BuilderIdentity {
+  configured: boolean;
+  code: string | null;
+}
+
+interface OrderConfig {
+  trading_configured: boolean;
+  max_order_usdc: number;
+  builder_code: string | null;
+}
+
+interface PublicOrder {
+  id: number;
+  market_id: string | null;
+  token_id: string;
+  side: string;
+  price: number;
+  size: number;
+  notional_usdc: number;
+  order_type: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PublicOrdersResponse {
+  orders: PublicOrder[];
+  stats: {
+    total: number;
+    by_status: Record<string, number>;
+    total_notional_usdc: number;
+  };
+}
+
+function statusClass(status: string) {
+  const s = status.toLowerCase();
+  if (s === "filled") return "text-emerald-400";
+  if (s === "live" || s === "submitted") return "text-sky-400";
+  if (s === "canceled" || s === "expired") return "text-gray-500";
+  if (s === "rejected" || s === "failed") return "text-red-400";
+  return "text-amber-400";
+}
+
+function fmtDate(iso: string) {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+export default function BuilderPage() {
+  const { data: identity } = usePollingFetch<BuilderIdentity>(
+    "/api/builder/identity",
+    300_000
+  );
+  const { data: config } = usePollingFetch<OrderConfig>(
+    "/api/orders/config",
+    60_000
+  );
+  const { data: orders, loading } = usePollingFetch<PublicOrdersResponse>(
+    "/api/orders/public?limit=50",
+    30_000
+  );
+
+  const ordersList = orders?.orders ?? [];
+  const stats = orders?.stats;
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <h1 className="text-3xl font-bold text-white mb-2">Builder</h1>
+      <p className="text-gray-400 mb-8">
+        Public transparency page for PolyScope&apos;s Polymarket builder
+        registration and any orders routed through the platform.
+      </p>
+
+      {/* Identity */}
+      <section className="mb-10">
+        <h2 className="text-xl font-semibold text-white mb-3">Identity</h2>
+        {identity?.configured && identity.code ? (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-xs text-gray-500 uppercase mb-2">
+              Builder Code (bytes32)
+            </p>
+            <p className="font-mono text-sm text-emerald-400 break-all mb-3">
+              {identity.code}
+            </p>
+            <p className="text-sm text-gray-400">
+              This code is attached to every CLOB order routed through
+              PolyScope. It credits volume to our builder profile on
+              Polymarket&apos;s{" "}
+              <a
+                href="https://builders.polymarket.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-400 hover:underline"
+              >
+                builder leaderboard
+              </a>
+              .
+            </p>
+          </div>
+        ) : (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-sm text-gray-400">
+            Builder code not configured on this deployment.
+          </div>
+        )}
+      </section>
+
+      {/* Trading status */}
+      <section className="mb-10">
+        <h2 className="text-xl font-semibold text-white mb-3">
+          Trading status
+        </h2>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-xs text-gray-500 uppercase mb-1">
+              Trading wired up
+            </p>
+            <p
+              className={`text-xl font-semibold ${
+                config?.trading_configured
+                  ? "text-emerald-400"
+                  : "text-gray-500"
+              }`}
+            >
+              {config?.trading_configured ? "Yes" : "No"}
+            </p>
+          </div>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-xs text-gray-500 uppercase mb-1">
+              Per-order cap
+            </p>
+            <p className="text-xl font-semibold text-white">
+              {config ? `$${config.max_order_usdc.toFixed(2)}` : "—"}
+              <span className="text-xs text-gray-500 font-normal">
+                {" "}USDC
+              </span>
+            </p>
+          </div>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-xs text-gray-500 uppercase mb-1">
+              Attributed notional
+            </p>
+            <p className="text-xl font-semibold text-white">
+              {stats ? `$${stats.total_notional_usdc.toFixed(2)}` : "—"}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Orders */}
+      <section className="mb-10">
+        <h2 className="text-xl font-semibold text-white mb-3">
+          Recent attributed orders
+        </h2>
+        <p className="text-gray-400 text-sm mb-4">
+          Every order carries our builder code on-chain. Status is polled
+          from Polymarket&apos;s CLOB every 60 seconds.
+        </p>
+
+        {loading ? (
+          <TableSkeleton rows={5} />
+        ) : ordersList.length === 0 ? (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-sm">
+            No attributed orders yet. The first order will appear here as
+            soon as PolyScope routes one through Polymarket.
+          </div>
+        ) : (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
+                  <th className="text-left p-3">When</th>
+                  <th className="text-left p-3">Side</th>
+                  <th className="text-right p-3">Price</th>
+                  <th className="text-right p-3">Size</th>
+                  <th className="text-right p-3">Notional</th>
+                  <th className="text-left p-3">Type</th>
+                  <th className="text-left p-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ordersList.map((o) => (
+                  <tr key={o.id} className="border-b border-gray-800/50">
+                    <td className="p-3 text-gray-300 whitespace-nowrap">
+                      {fmtDate(o.updated_at || o.created_at)}
+                    </td>
+                    <td className="p-3 text-white">{o.side}</td>
+                    <td className="p-3 text-right text-gray-300">
+                      {o.price.toFixed(3)}
+                    </td>
+                    <td className="p-3 text-right text-gray-300">
+                      {o.size.toFixed(2)}
+                    </td>
+                    <td className="p-3 text-right text-gray-300">
+                      ${o.notional_usdc.toFixed(2)}
+                    </td>
+                    <td className="p-3 text-gray-400">{o.order_type}</td>
+                    <td
+                      className={`p-3 font-medium ${statusClass(o.status)}`}
+                    >
+                      {o.status}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <div className="text-sm text-gray-400 mb-10">
+        <Link
+          href="/methodology"
+          className="text-emerald-400 hover:underline"
+        >
+          Back to methodology
+        </Link>
+      </div>
+
+      <Disclaimer />
+    </div>
+  );
+}

@@ -2374,3 +2374,45 @@ async def list_builder_orders(
     )
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+async def get_pending_builder_orders(
+    db: aiosqlite.Connection, limit: int = 50
+) -> list[dict]:
+    """Orders that still need CLOB status sync.
+
+    ``submitted`` rows with a clob_order_id are candidates. Terminal
+    statuses (``filled``, ``canceled``, ``rejected``, ``failed``,
+    ``expired``) are excluded.
+    """
+    cursor = await db.execute(
+        """SELECT id, clob_order_id, market_id, token_id, status
+           FROM builder_orders
+           WHERE status = 'submitted'
+             AND clob_order_id IS NOT NULL
+             AND clob_order_id != ''
+           ORDER BY id ASC
+           LIMIT ?""",
+        (limit,),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def apply_builder_order_sync(
+    db: aiosqlite.Connection,
+    row_id: int,
+    *,
+    status: str,
+    raw_response: str | None = None,
+):
+    """Update only status + raw_response + updated_at (no error overwrite)."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        """UPDATE builder_orders
+           SET status = ?, raw_response = COALESCE(?, raw_response), updated_at = ?
+           WHERE id = ?""",
+        (status, raw_response, now, row_id),
+    )
+    await db.commit()

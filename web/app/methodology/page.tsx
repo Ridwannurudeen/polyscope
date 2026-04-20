@@ -401,10 +401,14 @@ export default function MethodologyPage() {
           </div>
         )}
         <p className="text-gray-400 leading-relaxed text-sm mt-3">
-          Attributed order routing is not live yet — PolyScope is read-only
-          today. The code is published here so it can be cross-checked
-          against Polymarket&apos;s builder profile and any future routed
-          orders.
+          Full transparency page with live order log:{" "}
+          <Link
+            href="/builder"
+            className="text-emerald-400 hover:underline"
+          >
+            /builder
+          </Link>
+          .
         </p>
       </section>
 

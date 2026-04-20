@@ -236,3 +236,35 @@ def test_get_attributed_trades(good_env, fake_clob):
     trades = get_attributed_trades(market="0xabc")
     assert len(trades) == 1
     assert trades[0]["market"] == "0xabc"
+
+
+# ── status polling ───────────────────────────────────────
+
+
+def test_normalize_status_known_codes():
+    from api.scheduler import _normalize_status
+
+    assert _normalize_status("LIVE") == "live"
+    assert _normalize_status("MATCHED") == "filled"
+    assert _normalize_status("FILLED") == "filled"
+    assert _normalize_status("CANCELED") == "canceled"
+    assert _normalize_status("CANCELLED") == "canceled"
+    assert _normalize_status("EXPIRED") == "expired"
+    assert _normalize_status("REJECTED") == "rejected"
+
+
+def test_normalize_status_unknown_lowercased():
+    from api.scheduler import _normalize_status
+
+    assert _normalize_status("PARTIAL") == "partial"
+    assert _normalize_status(None) == "submitted"
+    assert _normalize_status("") == "submitted"
+
+
+async def test_sync_job_no_op_when_unconfigured(monkeypatch):
+    """Sync is silent when trading env is missing."""
+    monkeypatch.delenv("POLYMARKET_PRIVATE_KEY", raising=False)
+    from api.scheduler import sync_builder_orders_job
+
+    # Should return cleanly, not raise
+    await sync_builder_orders_job()
