@@ -438,8 +438,15 @@ export default function MethodologyPage() {
             inconsistent across similar markets.
           </li>
           <li>
-            This is research. PolyScope does not currently route orders and
-            does not provide trading advice.
+            PolyScope offers an optional non-custodial order-routing UI.
+            Your wallet signs every order locally and submits directly to
+            Polymarket; PolyScope never holds keys or funds. Signals are
+            research, not trading advice. Past accuracy does not imply
+            future performance. See{" "}
+            <Link href="/terms" className="text-emerald-400 hover:underline">
+              /terms
+            </Link>
+            .
           </li>
         </ul>
       </section>

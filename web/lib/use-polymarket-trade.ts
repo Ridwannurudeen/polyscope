@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWalletClient } from "wagmi";
 import { polygon } from "wagmi/chains";
 import {
+  AssetType,
   ClobClient,
   OrderType,
   Side,
   SignatureTypeV2,
   type ApiKeyCreds,
+  type BalanceAllowanceResponse,
 } from "@polymarket/clob-client-v2";
 
 const CLOB_HOST =
@@ -22,7 +24,7 @@ const CREDS_KEY_PREFIX = "polyscope.polymarket.creds.";
 function loadCachedCreds(address: string): ApiKeyCreds | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(`${CREDS_KEY_PREFIX}${address.toLowerCase()}`);
+    const raw = sessionStorage.getItem(`${CREDS_KEY_PREFIX}${address.toLowerCase()}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.key && parsed?.secret && parsed?.passphrase) return parsed;
@@ -34,7 +36,7 @@ function loadCachedCreds(address: string): ApiKeyCreds | null {
 
 function saveCachedCreds(address: string, creds: ApiKeyCreds) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  sessionStorage.setItem(
     `${CREDS_KEY_PREFIX}${address.toLowerCase()}`,
     JSON.stringify(creds)
   );
@@ -70,6 +72,7 @@ export function usePolymarketTrade() {
   const { data: walletClient } = useWalletClient();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<SubmitOrderResult | null>(null);
 
@@ -100,6 +103,91 @@ export function usePolymarketTrade() {
     [walletClient]
   );
 
+  const buildClient = useCallback(
+    async (creds: ApiKeyCreds) => {
+      if (!walletClient) throw new Error("Wallet client not ready");
+      return new ClobClient({
+        host: CLOB_HOST,
+        chain: polygon.id,
+        signer: walletClient,
+        creds,
+        signatureType: SignatureTypeV2.EOA,
+        builderConfig: { builderCode: BUILDER_CODE },
+      });
+    },
+    [walletClient]
+  );
+
+  const checkAllowance = useCallback(
+    async (
+      input: SubmitOrderInput
+    ): Promise<{ ok: boolean; reason?: string; response: BalanceAllowanceResponse }> => {
+      if (!address) throw new Error("Wallet not connected");
+      const creds = await deriveOrLoadCreds(address);
+      const client = await buildClient(creds);
+
+      if (input.side === "BUY") {
+        const resp = await client.getBalanceAllowance({
+          asset_type: AssetType.COLLATERAL,
+        });
+        const allowance = Number(resp.allowance || "0");
+        const balance = Number(resp.balance || "0");
+        const need = input.price * input.size;
+        if (balance < need) {
+          return { ok: false, reason: "insufficient_balance", response: resp };
+        }
+        if (allowance < need) {
+          return { ok: false, reason: "needs_approval", response: resp };
+        }
+        return { ok: true, response: resp };
+      }
+
+      const resp = await client.getBalanceAllowance({
+        asset_type: AssetType.CONDITIONAL,
+        token_id: input.tokenId,
+      });
+      const allowance = Number(resp.allowance || "0");
+      const balance = Number(resp.balance || "0");
+      if (balance < input.size) {
+        return { ok: false, reason: "insufficient_balance", response: resp };
+      }
+      if (allowance < input.size) {
+        return { ok: false, reason: "needs_approval", response: resp };
+      }
+      return { ok: true, response: resp };
+    },
+    [address, buildClient, deriveOrLoadCreds]
+  );
+
+  const approveAllowance = useCallback(
+    async (input: SubmitOrderInput): Promise<void> => {
+      if (!address) throw new Error("Wallet not connected");
+      setSubmitError(null);
+      setIsApproving(true);
+      try {
+        const creds = await deriveOrLoadCreds(address);
+        const client = await buildClient(creds);
+        if (input.side === "BUY") {
+          await client.updateBalanceAllowance({
+            asset_type: AssetType.COLLATERAL,
+          });
+        } else {
+          await client.updateBalanceAllowance({
+            asset_type: AssetType.CONDITIONAL,
+            token_id: input.tokenId,
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setSubmitError(`Approval failed: ${msg}`);
+        throw err;
+      } finally {
+        setIsApproving(false);
+      }
+    },
+    [address, buildClient, deriveOrLoadCreds]
+  );
+
   const submitOrder = useCallback(
     async (input: SubmitOrderInput): Promise<SubmitOrderResult> => {
       setSubmitError(null);
@@ -117,15 +205,7 @@ export function usePolymarketTrade() {
       setIsSubmitting(true);
       try {
         const creds = await deriveOrLoadCreds(address);
-
-        const client = new ClobClient({
-          host: CLOB_HOST,
-          chain: polygon.id,
-          signer: walletClient,
-          creds,
-          signatureType: SignatureTypeV2.EOA,
-          builderConfig: { builderCode: BUILDER_CODE },
-        });
+        const client = await buildClient(creds);
 
         const orderType = (input.orderType ?? "GTC") as OrderType;
         const sideEnum = input.side === "BUY" ? Side.BUY : Side.SELL;
@@ -166,7 +246,7 @@ export function usePolymarketTrade() {
         setIsSubmitting(false);
       }
     },
-    [address, deriveOrLoadCreds, isConnected, onWrongChain, walletClient]
+    [address, buildClient, deriveOrLoadCreds, isConnected, onWrongChain, walletClient]
   );
 
   const switchToPolygon = useCallback(() => {
@@ -198,8 +278,11 @@ export function usePolymarketTrade() {
     onWrongChain,
     connectError: connectError?.message ?? null,
     connectStatus,
+    checkAllowance,
+    approveAllowance,
     submitOrder,
     isSubmitting,
+    isApproving,
     submitError,
     lastResult,
     builderCodeConfigured: Boolean(BUILDER_CODE),

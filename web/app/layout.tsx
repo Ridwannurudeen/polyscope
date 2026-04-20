@@ -112,9 +112,17 @@ export default function RootLayout({
         <footer className="border-t border-gray-800 mt-16 py-8">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <p className="text-xs text-gray-500 text-center">
-              PolyScope provides market intelligence only. It does not
-              facilitate, recommend, or enable participation in prediction
-              markets.
+              PolyScope is a non-custodial interface for Polymarket. We
+              never hold your keys or funds. Orders you submit are signed
+              by your own wallet and sent directly to Polymarket. For full
+              disclosures see{" "}
+              <Link
+                href="/terms"
+                className="text-gray-400 hover:text-gray-200 underline underline-offset-2"
+              >
+                Terms
+              </Link>
+              .
             </p>
           </div>
         </footer>

@@ -21,6 +21,9 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_POLYMARKET_BUILDER_CODE: ${POLYMARKET_BUILDER_CODE:-}
+        NEXT_PUBLIC_POLYMARKET_CLOB_HOST: ${POLYMARKET_CLOB_HOST:-https://clob.polymarket.com}
     ports:
       - "127.0.0.1:3020:3020"
     depends_on:

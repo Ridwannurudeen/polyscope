@@ -38,8 +38,11 @@ export function TradeModal(props: TradeModalProps) {
     onWrongChain,
     connectError,
     connectStatus,
+    checkAllowance,
+    approveAllowance,
     submitOrder,
     isSubmitting,
+    isApproving,
     submitError,
     lastResult,
     builderCodeConfigured,
@@ -48,11 +51,15 @@ export function TradeModal(props: TradeModalProps) {
   const [side, setSide] = useState<TradeSide>(suggestedSide);
   const [price, setPrice] = useState<string>(suggestedPrice.toFixed(2));
   const [size, setSize] = useState<string>("10");
+  const [needsApproval, setNeedsApproval] = useState<boolean>(false);
+  const [allowanceError, setAllowanceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setSide(suggestedSide);
       setPrice(suggestedPrice.toFixed(2));
+      setNeedsApproval(false);
+      setAllowanceError(null);
     }
   }, [open, suggestedPrice, suggestedSide]);
 
@@ -69,18 +76,35 @@ export function TradeModal(props: TradeModalProps) {
     sizeNum > 0 &&
     builderCodeConfigured;
 
+  const orderInput = {
+    tokenId,
+    side,
+    price: priceNum,
+    size: sizeNum,
+    orderType: "GTC" as const,
+    tickSize,
+    negRisk,
+  };
+
   const handleSubmit = async () => {
     trackEvent("trade_submit_clicked", { side, price: priceNum, size: sizeNum });
+    setAllowanceError(null);
     try {
-      const res = await submitOrder({
-        tokenId,
-        side,
-        price: priceNum,
-        size: sizeNum,
-        orderType: "GTC",
-        tickSize,
-        negRisk,
-      });
+      const check = await checkAllowance(orderInput);
+      if (!check.ok && check.reason === "insufficient_balance") {
+        setAllowanceError(
+          side === "BUY"
+            ? "Insufficient pUSD balance. Deposit more on Polymarket first."
+            : "You don't hold enough of this outcome to sell."
+        );
+        return;
+      }
+      if (!check.ok && check.reason === "needs_approval") {
+        setNeedsApproval(true);
+        return;
+      }
+
+      const res = await submitOrder(orderInput);
       trackEvent("trade_submit_result", {
         success: res.success,
         status: res.status,
@@ -88,6 +112,18 @@ export function TradeModal(props: TradeModalProps) {
       });
     } catch {
       // error already captured in hook state; UI shows it
+    }
+  };
+
+  const handleApprove = async () => {
+    trackEvent("trade_approve_clicked", { side });
+    try {
+      await approveAllowance(orderInput);
+      setNeedsApproval(false);
+      trackEvent("trade_approve_result", { success: true });
+    } catch {
+      trackEvent("trade_approve_result", { success: false });
+      // error in submitError
     }
   };
 
@@ -205,6 +241,18 @@ export function TradeModal(props: TradeModalProps) {
           >
             Switch to Polygon
           </button>
+        ) : needsApproval ? (
+          <button
+            onClick={handleApprove}
+            disabled={isApproving}
+            className="w-full py-2.5 bg-amber-500/20 border border-amber-500/50 text-amber-200 rounded-lg font-medium hover:bg-amber-500/30 disabled:opacity-60"
+          >
+            {isApproving
+              ? "Approving…"
+              : side === "BUY"
+              ? "Approve pUSD (one-time)"
+              : "Approve outcome token (one-time)"}
+          </button>
         ) : (
           <button
             onClick={handleSubmit}
@@ -215,6 +263,19 @@ export function TradeModal(props: TradeModalProps) {
               ? "Signing + submitting…"
               : `${side === "BUY" ? "Buy" : "Sell"} for $${notional.toFixed(2)}`}
           </button>
+        )}
+
+        {needsApproval && (
+          <p className="mt-2 text-[11px] text-amber-300/80">
+            First trade requires approving Polymarket&apos;s exchange contract to
+            move your {side === "BUY" ? "pUSD" : "outcome tokens"}. One-time
+            gasless signature.
+          </p>
+        )}
+        {allowanceError && (
+          <div className="mt-3 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs text-amber-200">
+            {allowanceError}
+          </div>
         )}
 
         {/* Connect error */}
