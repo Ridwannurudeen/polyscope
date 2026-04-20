@@ -6,7 +6,12 @@ import hmac
 
 import pytest
 
-from api.polymarket_signing import is_configured, sign_request
+from api.polymarket_signing import (
+    get_builder_code,
+    is_builder_code_configured,
+    is_configured,
+    sign_request,
+)
 
 
 def test_stub_mode_when_unconfigured(monkeypatch):
@@ -89,3 +94,43 @@ def test_changing_body_changes_signature(monkeypatch):
     a = sign_request("POST", "/x", '{"a":1}', timestamp="1")
     b = sign_request("POST", "/x", '{"a":2}', timestamp="1")
     assert a.signature != b.signature
+
+
+# ── Builder Code ───────────────────────────────────────────
+
+
+def test_builder_code_unset(monkeypatch):
+    monkeypatch.delenv("POLYMARKET_BUILDER_CODE", raising=False)
+    assert get_builder_code() is None
+    assert is_builder_code_configured() is False
+
+
+def test_builder_code_valid_bytes32(monkeypatch):
+    code = "0x" + "a" * 64
+    monkeypatch.setenv("POLYMARKET_BUILDER_CODE", code)
+    assert get_builder_code() == code
+    assert is_builder_code_configured() is True
+
+
+def test_builder_code_normalizes_case_and_whitespace(monkeypatch):
+    mixed = "  0x" + "A" * 32 + "b" * 32 + "\n"
+    monkeypatch.setenv("POLYMARKET_BUILDER_CODE", mixed)
+    assert get_builder_code() == "0x" + "a" * 32 + "b" * 32
+
+
+def test_builder_code_rejects_bad_format(monkeypatch):
+    for bad in ("0xabc", "not-hex", "6bf238" * 11, "0x" + "z" * 64, ""):
+        monkeypatch.setenv("POLYMARKET_BUILDER_CODE", bad)
+        assert get_builder_code() is None
+        assert is_builder_code_configured() is False
+
+
+def test_builder_code_independent_of_hmac_creds(monkeypatch):
+    """Builder Code (public attribution) is separate from HMAC auth."""
+    monkeypatch.delenv("POLYMARKET_BUILDER_API_KEY", raising=False)
+    monkeypatch.delenv("POLYMARKET_BUILDER_API_SECRET", raising=False)
+    monkeypatch.delenv("POLYMARKET_BUILDER_PASSPHRASE", raising=False)
+    monkeypatch.setenv("POLYMARKET_BUILDER_CODE", "0x" + "1" * 64)
+
+    assert is_configured() is False
+    assert is_builder_code_configured() is True

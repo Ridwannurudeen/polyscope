@@ -1,27 +1,35 @@
-"""Polymarket builder-attribution signing.
+"""Polymarket builder-attribution primitives.
 
-Produces the four HMAC headers Polymarket expects on attributed CLOB
-order requests:
+Two separate paths live here:
 
-  POLY_BUILDER_API_KEY
-  POLY_BUILDER_TIMESTAMP
-  POLY_BUILDER_PASSPHRASE
-  POLY_BUILDER_SIGNATURE
+1. **Builder Code** — a public ``bytes32`` identifier attached to CLOB
+   orders via the ``builder_code`` field in ``OrderArgs``. No HMAC, no
+   headers. Volume attributes to the registered builder profile. Env:
 
-Signature scheme (per Polymarket docs / py_builder_signing_sdk):
+     POLYMARKET_BUILDER_CODE   (e.g. 0x + 64 hex chars)
 
-  message   = timestamp + method + path + body
-  signature = base64_urlsafe( HMAC_SHA256(api_secret, message) )
+2. **Builder API Key signing** — HMAC-signed headers used for
+   authenticated Relayer/builder-scoped endpoints. Separate from
+   attribution. Env:
 
-Secrets live in env vars:
+     POLYMARKET_BUILDER_API_KEY       (client key, sent as header)
+     POLYMARKET_BUILDER_API_SECRET    (server-only, used for HMAC)
+     POLYMARKET_BUILDER_PASSPHRASE    (sent as header)
 
-  POLYMARKET_BUILDER_API_KEY       (client key, sent as header)
-  POLYMARKET_BUILDER_API_SECRET    (server-only, used for HMAC)
-  POLYMARKET_BUILDER_PASSPHRASE    (sent as header)
+   Header set:
 
-When any of the three are missing, `sign_request` returns a sentinel
-with `mode="stub"` — lets us wire the UI + endpoint flow without
-pausing for credentials. Flip to live mode by setting all three.
+     POLY_BUILDER_API_KEY
+     POLY_BUILDER_TIMESTAMP
+     POLY_BUILDER_PASSPHRASE
+     POLY_BUILDER_SIGNATURE
+
+   Signature scheme:
+
+     message   = timestamp + METHOD + path + body
+     signature = base64_urlsafe( HMAC_SHA256(api_secret, message) )
+
+When HMAC creds are absent, ``sign_request`` returns a stub so the
+UI/endpoint flow stays functional without pausing for credentials.
 """
 
 from __future__ import annotations
@@ -30,8 +38,11 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import time
 from dataclasses import dataclass
+
+_BUILDER_CODE_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 
 
 @dataclass(frozen=True)
@@ -118,3 +129,27 @@ def sign_request(
 def is_configured() -> bool:
     """True when all three builder-attribution secrets are present."""
     return all(_load_creds())
+
+
+# ── Builder Code (public, CLOB order attribution) ──────────
+
+
+def get_builder_code() -> str | None:
+    """Return the configured Polymarket Builder Code, or None.
+
+    The code is a public ``bytes32`` (``0x`` + 64 hex chars). It must
+    be attached to ``OrderArgs.builder_code`` on every CLOB order to
+    attribute volume to the registered builder profile.
+    """
+    code = os.getenv("POLYMARKET_BUILDER_CODE")
+    if code is None:
+        return None
+    code = code.strip()
+    if not _BUILDER_CODE_RE.match(code):
+        return None
+    return code.lower()
+
+
+def is_builder_code_configured() -> bool:
+    """True when POLYMARKET_BUILDER_CODE is set to a valid bytes32."""
+    return get_builder_code() is not None

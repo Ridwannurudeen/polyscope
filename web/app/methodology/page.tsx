@@ -29,6 +29,11 @@ interface MethodologyStats {
   };
 }
 
+interface BuilderIdentity {
+  configured: boolean;
+  code: string | null;
+}
+
 const SKEW_LABELS: Record<string, string> = {
   very_lopsided: "Very lopsided (≥90% or ≤10%)",
   lopsided: "Lopsided (75-90% or 10-25%)",
@@ -57,6 +62,10 @@ export default function MethodologyPage() {
   const { data, loading } = usePollingFetch<MethodologyStats>(
     "/api/methodology/stats",
     60_000
+  );
+  const { data: identity } = usePollingFetch<BuilderIdentity>(
+    "/api/builder/identity",
+    300_000
   );
 
   const spanDays = daysBetween(
@@ -366,10 +375,43 @@ export default function MethodologyPage() {
         </div>
       </section>
 
-      {/* Section 6: Caveats */}
+      {/* Section 7: Builder identity */}
       <section className="mb-12">
         <h2 className="text-xl font-semibold text-white mb-3">
-          7. Limitations we are honest about
+          7. Builder identity
+        </h2>
+        <p className="text-gray-300 leading-relaxed mb-3">
+          PolyScope is a registered Polymarket builder. Our builder code
+          is a public <code className="text-xs bg-gray-800 px-1 py-0.5 rounded">bytes32</code>{" "}
+          identifier tied to our builder profile; orders routed through
+          PolyScope carry this code and attribute volume to us on-chain.
+        </p>
+        {identity?.configured && identity.code ? (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-xs text-gray-500 uppercase mb-2">
+              Builder Code
+            </p>
+            <p className="font-mono text-sm text-emerald-400 break-all">
+              {identity.code}
+            </p>
+          </div>
+        ) : (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-sm text-gray-400">
+            Builder code not configured on this deployment.
+          </div>
+        )}
+        <p className="text-gray-400 leading-relaxed text-sm mt-3">
+          Attributed order routing is not live yet — PolyScope is read-only
+          today. The code is published here so it can be cross-checked
+          against Polymarket&apos;s builder profile and any future routed
+          orders.
+        </p>
+      </section>
+
+      {/* Section 8: Caveats */}
+      <section className="mb-12">
+        <h2 className="text-xl font-semibold text-white mb-3">
+          8. Limitations we are honest about
         </h2>
         <ul className="space-y-2 text-gray-300 leading-relaxed list-disc list-inside">
           <li>

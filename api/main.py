@@ -940,7 +940,12 @@ async def follow_alerts_mark_seen(
 
 # ── Polymarket builder-attribution signing ─────────────────
 
-from .polymarket_signing import is_configured, sign_request
+from .polymarket_signing import (
+    get_builder_code,
+    is_builder_code_configured,
+    is_configured,
+    sign_request,
+)
 
 
 class SignRequest(BaseModel):
@@ -953,6 +958,19 @@ class SignRequest(BaseModel):
 async def builder_status():
     """Whether builder attribution secrets are configured on this server."""
     return {"configured": is_configured()}
+
+
+@app.get("/api/builder/identity")
+async def builder_identity():
+    """Public Polymarket Builder Code for this deployment.
+
+    Returned unconditionally — the code is a public on-chain identifier,
+    not a secret. When unset, ``configured`` is false and ``code`` is null.
+    """
+    return {
+        "configured": is_builder_code_configured(),
+        "code": get_builder_code(),
+    }
 
 
 @app.post("/api/sign")
