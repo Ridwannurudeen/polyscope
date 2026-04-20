@@ -39,13 +39,16 @@ from .database import (
     init_db,
     is_following,
     link_wallet_to_client,
+    list_builder_orders,
     mark_alerts_notified,
     mark_alerts_seen,
+    record_builder_order_attempt,
     record_event,
     record_user_action,
     remove_from_watchlist,
     search_universal,
     unfollow_trader,
+    update_builder_order_result,
 )
 from .scheduler import (
     cleanup_job,
@@ -970,6 +973,161 @@ async def builder_identity():
     return {
         "configured": is_builder_code_configured(),
         "code": get_builder_code(),
+    }
+
+
+# ── Attributed order submission (Phase B) ──────────────────
+
+import os as _os
+import json as _json
+from fastapi import Header
+
+from .polymarket_trading import (
+    OrderCapExceeded,
+    TradingConfigError,
+    is_trading_configured,
+    max_order_usdc,
+    place_attributed_order,
+)
+
+
+class PlaceOrderRequest(BaseModel):
+    token_id: str = Field(min_length=1, max_length=128)
+    side: str = Field(pattern="^(BUY|SELL)$")
+    price: float = Field(gt=0.0, lt=1.0)
+    size: float = Field(gt=0.0, le=1_000_000.0)
+    order_type: str = Field(default="GTC", pattern="^(GTC|GTD|FOK|FAK)$")
+    market_id: str | None = Field(default=None, max_length=128)
+    tick_size: str = Field(default="0.01", pattern="^0\\.(001|01|1)$")
+    neg_risk: bool = False
+
+
+def _require_admin(x_admin_token: str | None):
+    expected = _os.getenv("POLYSCOPE_ADMIN_TOKEN")
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin endpoint disabled (POLYSCOPE_ADMIN_TOKEN not set)",
+        )
+    if not x_admin_token or x_admin_token != expected:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+
+
+@app.post("/api/orders/place")
+async def place_order(
+    body: PlaceOrderRequest,
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+):
+    """Submit a builder-attributed CLOB order to Polymarket.
+
+    Admin-gated (requires ``X-Admin-Token`` matching ``POLYSCOPE_ADMIN_TOKEN``).
+    Enforces ``POLYMARKET_MAX_ORDER_USDC`` cap. Attaches the configured
+    Builder Code to every order.
+    """
+    _require_admin(x_admin_token)
+
+    if not is_trading_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Trading not configured (missing Polymarket env vars)",
+        )
+
+    builder_code = get_builder_code() or ""
+    notional = round(body.price * body.size, 6)
+    cap = max_order_usdc()
+    if notional > cap:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Order notional ${notional:.4f} exceeds cap ${cap:.2f}",
+        )
+
+    db = await get_db()
+    try:
+        row_id = await record_builder_order_attempt(
+            db,
+            token_id=body.token_id,
+            side=body.side,
+            price=body.price,
+            size=body.size,
+            order_type=body.order_type,
+            builder_code=builder_code,
+            market_id=body.market_id,
+        )
+    finally:
+        await db.close()
+
+    try:
+        resp = place_attributed_order(
+            token_id=body.token_id,
+            side=body.side,
+            price=body.price,
+            size=body.size,
+            order_type=body.order_type,
+            tick_size=body.tick_size,
+            neg_risk=body.neg_risk,
+        )
+    except OrderCapExceeded as e:
+        await _finalize_order(row_id, "rejected", error=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except TradingConfigError as e:
+        await _finalize_order(row_id, "rejected", error=str(e))
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:  # CLOB/network errors
+        await _finalize_order(row_id, "failed", error=f"{type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail=f"CLOB error: {e}")
+
+    clob_id = (
+        resp.get("orderID")
+        or resp.get("order_id")
+        or resp.get("id")
+        or None
+    )
+    await _finalize_order(
+        row_id,
+        "submitted",
+        clob_order_id=clob_id,
+        raw_response=_json.dumps(resp, default=str)[:8000],
+    )
+    return {
+        "row_id": row_id,
+        "clob_order_id": clob_id,
+        "status": "submitted",
+        "notional_usdc": notional,
+        "builder_code": builder_code,
+        "response": resp,
+    }
+
+
+async def _finalize_order(row_id: int, status: str, **kwargs):
+    db = await get_db()
+    try:
+        await update_builder_order_result(db, row_id, status=status, **kwargs)
+    finally:
+        await db.close()
+
+
+@app.get("/api/orders/recent")
+async def recent_orders(
+    limit: int = Query(default=20, ge=1, le=100),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+):
+    """List recent attributed orders. Admin-gated."""
+    _require_admin(x_admin_token)
+    db = await get_db()
+    try:
+        rows = await list_builder_orders(db, limit=limit)
+    finally:
+        await db.close()
+    return {"orders": rows, "count": len(rows)}
+
+
+@app.get("/api/orders/config")
+async def orders_config():
+    """Public, non-sensitive trading config — useful for dashboards."""
+    return {
+        "trading_configured": is_trading_configured(),
+        "max_order_usdc": max_order_usdc(),
+        "builder_code": get_builder_code(),
     }
 
 

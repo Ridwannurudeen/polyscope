@@ -11,6 +11,7 @@ dependencies = [
     "pydantic>=2.10.0",
     "python-telegram-bot>=20.7",
     "aiosqlite>=0.20.0",
+    "py_clob_client_v2>=1.0.0",
 ]
 
 [project.optional-dependencies]

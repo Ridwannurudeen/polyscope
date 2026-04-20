@@ -213,6 +213,24 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS builder_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    clob_order_id TEXT,
+    market_id TEXT,
+    token_id TEXT NOT NULL,
+    side TEXT NOT NULL,
+    price REAL NOT NULL,
+    size REAL NOT NULL,
+    notional_usdc REAL NOT NULL,
+    order_type TEXT NOT NULL,
+    builder_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    raw_response TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_snapshots_market_ts ON market_snapshots(market_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON market_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_ts ON divergence_signals(timestamp);
@@ -233,6 +251,9 @@ CREATE INDEX IF NOT EXISTS idx_user_actions_market ON user_actions(market_id);
 CREATE INDEX IF NOT EXISTS idx_events_client ON events(client_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_builder_orders_created ON builder_orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_builder_orders_status ON builder_orders(status);
+CREATE INDEX IF NOT EXISTS idx_builder_orders_clob_id ON builder_orders(clob_order_id);
 -- Wallet-linked indexes created in migrate_db AFTER ALTER TABLE runs on
 -- existing DBs (otherwise SCHEMA fails on prod restarts where the column
 -- hasn't been added yet).
@@ -2282,3 +2303,74 @@ async def get_expired_signal_count(db: aiosqlite.Connection) -> int:
     )
     row = await cursor.fetchone()
     return row[0] or 0
+
+
+# ── Builder Orders (Phase B) ───────────────────────────────
+
+
+async def record_builder_order_attempt(
+    db: aiosqlite.Connection,
+    *,
+    token_id: str,
+    side: str,
+    price: float,
+    size: float,
+    order_type: str,
+    builder_code: str,
+    market_id: str | None = None,
+) -> int:
+    """Insert a pending builder_orders row before calling CLOB. Returns row id."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    notional = round(price * size, 6)
+    cursor = await db.execute(
+        """INSERT INTO builder_orders
+           (market_id, token_id, side, price, size, notional_usdc,
+            order_type, builder_code, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+        (market_id, token_id, side, price, size, notional,
+         order_type, builder_code, now, now),
+    )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def update_builder_order_result(
+    db: aiosqlite.Connection,
+    row_id: int,
+    *,
+    status: str,
+    clob_order_id: str | None = None,
+    error: str | None = None,
+    raw_response: str | None = None,
+):
+    """Update a builder_orders row after CLOB call returns."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        """UPDATE builder_orders
+           SET status = ?, clob_order_id = ?, error = ?,
+               raw_response = ?, updated_at = ?
+           WHERE id = ?""",
+        (status, clob_order_id, error, raw_response, now, row_id),
+    )
+    await db.commit()
+
+
+async def list_builder_orders(
+    db: aiosqlite.Connection, limit: int = 50
+) -> list[dict]:
+    """Return recent builder_orders rows, newest first."""
+    cursor = await db.execute(
+        """SELECT id, clob_order_id, market_id, token_id, side, price, size,
+                  notional_usdc, order_type, builder_code, status, error,
+                  created_at, updated_at
+           FROM builder_orders
+           ORDER BY id DESC
+           LIMIT ?""",
+        (limit,),
+    )
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
