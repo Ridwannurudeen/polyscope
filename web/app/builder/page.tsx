@@ -39,6 +39,30 @@ interface PublicOrdersResponse {
   };
 }
 
+interface AttributedTrade {
+  trade_id: string;
+  market_id: string | null;
+  side: string | null;
+  size: number | null;
+  price: number | null;
+  notional_usdc: number | null;
+  status: string | null;
+  outcome: string | null;
+  owner_short: string;
+  transaction_hash: string | null;
+  match_time: string | null;
+}
+
+interface AttributedTradesResponse {
+  trades: AttributedTrade[];
+  stats: {
+    total_trades: number;
+    total_notional_usdc: number;
+    total_fees_usdc: number;
+    unique_owners: number;
+  };
+}
+
 function statusClass(status: string) {
   const s = status.toLowerCase();
   if (s === "filled") return "text-emerald-400";
@@ -74,9 +98,16 @@ export default function BuilderPage() {
     "/api/orders/public?limit=50",
     30_000
   );
+  const { data: trades, loading: tradesLoading } =
+    usePollingFetch<AttributedTradesResponse>(
+      "/api/builder/trades/public?limit=50",
+      60_000
+    );
 
   const ordersList = orders?.orders ?? [];
   const stats = orders?.stats;
+  const tradesList = trades?.trades ?? [];
+  const tradeStats = trades?.stats;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -152,13 +183,103 @@ export default function BuilderPage() {
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
             <p className="text-xs text-gray-500 uppercase mb-1">
-              Attributed notional
+              Attributed volume
             </p>
             <p className="text-xl font-semibold text-white">
-              {stats ? `$${stats.total_notional_usdc.toFixed(2)}` : "—"}
+              {tradeStats
+                ? `$${tradeStats.total_notional_usdc.toFixed(2)}`
+                : stats
+                ? `$${stats.total_notional_usdc.toFixed(2)}`
+                : "—"}
             </p>
+            {tradeStats && (
+              <p className="text-[11px] text-gray-500 mt-1">
+                {tradeStats.total_trades} trades, {tradeStats.unique_owners}{" "}
+                unique users
+              </p>
+            )}
           </div>
         </div>
+      </section>
+
+      {/* Attributed trades */}
+      <section className="mb-10">
+        <h2 className="text-xl font-semibold text-white mb-3">
+          Attributed trades (on-chain settled)
+        </h2>
+        <p className="text-gray-400 text-sm mb-4">
+          Pulled from Polymarket&apos;s builder trades endpoint every 3
+          minutes. Each trade was matched on-chain with our builder code
+          in its <code className="text-xs bg-gray-800 px-1 rounded">builder</code>{" "}
+          field.
+        </p>
+
+        {tradesLoading ? (
+          <TableSkeleton rows={5} />
+        ) : tradesList.length === 0 ? (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-sm">
+            No attributed trades yet. The first trade routed through
+            PolyScope will appear here once it settles on Polymarket.
+          </div>
+        ) : (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
+                  <th className="text-left p-3">When</th>
+                  <th className="text-left p-3">Owner</th>
+                  <th className="text-left p-3">Side</th>
+                  <th className="text-right p-3">Price</th>
+                  <th className="text-right p-3">Size</th>
+                  <th className="text-right p-3">Notional</th>
+                  <th className="text-left p-3">Status</th>
+                  <th className="text-left p-3">Tx</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tradesList.map((t) => (
+                  <tr key={t.trade_id} className="border-b border-gray-800/50">
+                    <td className="p-3 text-gray-300 whitespace-nowrap">
+                      {t.match_time ? fmtDate(t.match_time) : "—"}
+                    </td>
+                    <td className="p-3 text-gray-400 font-mono text-xs">
+                      {t.owner_short}
+                    </td>
+                    <td className="p-3 text-white">{t.side ?? "—"}</td>
+                    <td className="p-3 text-right text-gray-300">
+                      {t.price != null ? t.price.toFixed(3) : "—"}
+                    </td>
+                    <td className="p-3 text-right text-gray-300">
+                      {t.size != null ? t.size.toFixed(2) : "—"}
+                    </td>
+                    <td className="p-3 text-right text-gray-300">
+                      {t.notional_usdc != null
+                        ? `$${t.notional_usdc.toFixed(2)}`
+                        : "—"}
+                    </td>
+                    <td className={`p-3 font-medium ${statusClass(t.status ?? "")}`}>
+                      {t.status ?? "—"}
+                    </td>
+                    <td className="p-3">
+                      {t.transaction_hash ? (
+                        <a
+                          href={`https://polygonscan.com/tx/${t.transaction_hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-400 hover:underline text-xs"
+                        >
+                          view
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* Orders */}

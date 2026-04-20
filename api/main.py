@@ -39,7 +39,9 @@ from .database import (
     init_db,
     is_following,
     link_wallet_to_client,
+    builder_trades_stats,
     list_builder_orders,
+    list_builder_trades,
     mark_alerts_notified,
     mark_alerts_seen,
     record_builder_order_attempt,
@@ -58,6 +60,7 @@ from .scheduler import (
     detect_whale_trades_job,
     fetch_leaderboard_job,
     fetch_markets_job,
+    sync_attributed_trades_job,
     sync_builder_orders_job,
     track_outcomes_job,
 )
@@ -92,6 +95,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes")
     scheduler.add_job(detect_whale_trades_job, "interval", minutes=2, id="detect_whales")
     scheduler.add_job(sync_builder_orders_job, "interval", seconds=60, id="sync_builder_orders")
+    scheduler.add_job(sync_attributed_trades_job, "interval", minutes=3, id="sync_builder_trades")
     scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
     scheduler.start()
 
@@ -1131,6 +1135,40 @@ async def orders_config():
         "max_order_usdc": max_order_usdc(),
         "builder_code": get_builder_code(),
     }
+
+
+@app.get("/api/builder/trades/public")
+async def builder_trades_public(limit: int = Query(default=50, ge=1, le=200)):
+    """Public: trades attributed to our Builder Code on-chain.
+
+    Populated by the ``sync_attributed_trades_job`` scheduler, which polls
+    Polymarket's ``get_builder_trades`` endpoint every few minutes.
+    """
+    db = await get_db()
+    try:
+        trades = await list_builder_trades(db, limit=limit)
+        stats = await builder_trades_stats(db)
+    finally:
+        await db.close()
+
+    redacted: list[dict] = []
+    for t in trades:
+        owner = t.get("owner") or ""
+        redacted.append({
+            "trade_id": t.get("trade_id"),
+            "market_id": t.get("market_id"),
+            "side": t.get("side"),
+            "size": t.get("size"),
+            "price": t.get("price"),
+            "notional_usdc": t.get("notional_usdc"),
+            "status": t.get("status"),
+            "outcome": t.get("outcome"),
+            # Short-form owner for display; full addr is on-chain anyway
+            "owner_short": (owner[:6] + "…" + owner[-4:]) if len(owner) > 10 else owner,
+            "transaction_hash": t.get("transaction_hash"),
+            "match_time": t.get("match_time"),
+        })
+    return {"trades": redacted, "stats": stats}
 
 
 @app.get("/api/orders/public")

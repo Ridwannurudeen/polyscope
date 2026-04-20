@@ -6,6 +6,7 @@ import { ScoreBadge } from "@/components/score-badge";
 import { ShareButton } from "@/components/share-button";
 import { SignalEvidence } from "@/components/signal-evidence";
 import { SizeHint } from "@/components/size-hint";
+import { TradeButton } from "@/components/trade-button";
 import { WatchlistButton } from "@/components/watchlist-button";
 import { trackEvent } from "@/lib/analytics";
 import type { DivergenceSignal } from "@/lib/api";
@@ -179,6 +180,12 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
       {/* Action bar */}
       <div className="px-4 pb-3 flex items-center gap-2 flex-wrap">
         <WatchlistButton marketId={signal.market_id} />
+        <TradeButton
+          marketId={signal.market_id}
+          question={signal.question}
+          direction={signal.sm_direction as "YES" | "NO"}
+          marketPrice={signal.market_price}
+        />
         <LogTrade
           marketId={signal.market_id}
           defaultDirection={signal.sm_direction}

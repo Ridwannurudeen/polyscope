@@ -7,6 +7,7 @@ import { ConnectWallet } from "@/components/connect-wallet";
 import { MobileNav } from "@/components/mobile-nav";
 import { PageViewTracker } from "@/components/page-view-tracker";
 import { SearchBar } from "@/components/search-bar";
+import { Web3Provider } from "@/lib/web3-provider";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -61,6 +62,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950 text-gray-100 min-h-screen`}
       >
+        <Web3Provider>
         <Suspense fallback={null}>
           <PageViewTracker />
         </Suspense>
@@ -116,6 +118,7 @@ export default function RootLayout({
             </p>
           </div>
         </footer>
+        </Web3Provider>
       </body>
     </html>
   );

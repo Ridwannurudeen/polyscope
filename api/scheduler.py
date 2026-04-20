@@ -32,6 +32,7 @@ from .database import (
     save_snapshot,
     save_whale_alert,
     update_signal_outcomes,
+    upsert_builder_trade,
 )
 
 logger = logging.getLogger(__name__)
@@ -575,5 +576,72 @@ async def sync_builder_orders_job():
             logger.info("sync_builder_orders_job: %d orders synced", synced)
     except Exception:
         logger.exception("sync_builder_orders_job failed")
+    finally:
+        await db.close()
+
+
+async def sync_attributed_trades_job():
+    """Pull all trades attributed to our Builder Code via CLOB API.
+
+    Runs less frequently than order sync (these are settled events, not
+    in-flight state). Upserts into ``builder_trades`` so the /builder
+    transparency page reflects real attributed volume — including trades
+    placed by end users through the frontend, not just admin orders.
+    """
+    from .polymarket_signing import get_builder_code
+    from .polymarket_trading import get_client as get_trading_client
+    from .polymarket_trading import is_trading_configured
+    import json
+
+    if not is_trading_configured():
+        return
+
+    code = get_builder_code()
+    if not code:
+        return
+
+    try:
+        client = get_trading_client()
+    except Exception:
+        logger.exception("sync_attributed_trades_job: client init failed")
+        return
+
+    try:
+        from py_clob_client_v2.clob_types import BuilderTradeParams
+    except Exception:
+        logger.exception("py_clob_client_v2 not importable; sync skipped")
+        return
+
+    db = await get_db()
+    try:
+        try:
+            resp = client.get_builder_trades(
+                BuilderTradeParams(builder_code=code)
+            )
+        except Exception as e:
+            logger.warning("get_builder_trades failed: %s", e)
+            return
+
+        trades = (resp or {}).get("trades") if isinstance(resp, dict) else None
+        if not trades:
+            return
+
+        inserted = 0
+        updated = 0
+        for t in trades:
+            raw_json = json.dumps(t, default=str)[:8000]
+            is_new = await upsert_builder_trade(db, t, raw_json)
+            if is_new:
+                inserted += 1
+            else:
+                updated += 1
+
+        if inserted or updated:
+            logger.info(
+                "sync_attributed_trades_job: %d new, %d updated",
+                inserted, updated,
+            )
+    except Exception:
+        logger.exception("sync_attributed_trades_job failed")
     finally:
         await db.close()

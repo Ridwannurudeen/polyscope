@@ -231,6 +231,29 @@ CREATE TABLE IF NOT EXISTS builder_orders (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS builder_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id TEXT UNIQUE NOT NULL,
+    market_id TEXT,
+    token_id TEXT,
+    side TEXT,
+    size REAL,
+    price REAL,
+    notional_usdc REAL,
+    status TEXT,
+    outcome TEXT,
+    owner TEXT,
+    maker TEXT,
+    builder_code TEXT,
+    transaction_hash TEXT,
+    match_time TEXT,
+    fee TEXT,
+    fee_usdc REAL,
+    raw TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_synced_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_snapshots_market_ts ON market_snapshots(market_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON market_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_ts ON divergence_signals(timestamp);
@@ -254,6 +277,9 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_builder_orders_created ON builder_orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_builder_orders_status ON builder_orders(status);
 CREATE INDEX IF NOT EXISTS idx_builder_orders_clob_id ON builder_orders(clob_order_id);
+CREATE INDEX IF NOT EXISTS idx_builder_trades_match_time ON builder_trades(match_time);
+CREATE INDEX IF NOT EXISTS idx_builder_trades_market ON builder_trades(market_id);
+CREATE INDEX IF NOT EXISTS idx_builder_trades_owner ON builder_trades(owner);
 -- Wallet-linked indexes created in migrate_db AFTER ALTER TABLE runs on
 -- existing DBs (otherwise SCHEMA fails on prod restarts where the column
 -- hasn't been added yet).
@@ -2416,3 +2442,114 @@ async def apply_builder_order_sync(
         (status, raw_response, now, row_id),
     )
     await db.commit()
+
+
+async def upsert_builder_trade(
+    db: aiosqlite.Connection, trade: dict, raw_json: str
+) -> bool:
+    """Insert-or-update a builder_trade row keyed by trade_id.
+
+    Returns True when a new row was inserted, False on update.
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    trade_id = (
+        trade.get("id")
+        or trade.get("trade_id")
+        or trade.get("tradeID")
+    )
+    if not trade_id:
+        return False
+    size = float(trade.get("size") or 0)
+    price = float(trade.get("price") or 0)
+    notional = round(size * price, 6)
+
+    cursor = await db.execute(
+        "SELECT id FROM builder_trades WHERE trade_id = ?", (trade_id,)
+    )
+    existing = await cursor.fetchone()
+
+    if existing:
+        await db.execute(
+            """UPDATE builder_trades SET
+                status = ?, outcome = ?, raw = ?, last_synced_at = ?
+               WHERE trade_id = ?""",
+            (
+                trade.get("status"),
+                trade.get("outcome"),
+                raw_json,
+                now,
+                trade_id,
+            ),
+        )
+        await db.commit()
+        return False
+
+    await db.execute(
+        """INSERT INTO builder_trades (
+            trade_id, market_id, token_id, side, size, price,
+            notional_usdc, status, outcome, owner, maker,
+            builder_code, transaction_hash, match_time, fee, fee_usdc,
+            raw, first_seen_at, last_synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            trade_id,
+            trade.get("market"),
+            trade.get("asset_id") or trade.get("assetId"),
+            trade.get("side"),
+            size,
+            price,
+            notional,
+            trade.get("status"),
+            trade.get("outcome"),
+            trade.get("owner"),
+            trade.get("maker"),
+            trade.get("builder"),
+            trade.get("transaction_hash") or trade.get("transactionHash"),
+            trade.get("match_time") or trade.get("matchTime"),
+            str(trade.get("fee")) if trade.get("fee") is not None else None,
+            float(trade.get("fee_usdc") or trade.get("feeUsdc") or 0) or None,
+            raw_json,
+            now,
+            now,
+        ),
+    )
+    await db.commit()
+    return True
+
+
+async def list_builder_trades(
+    db: aiosqlite.Connection, limit: int = 50
+) -> list[dict]:
+    """Return recent builder_trades, newest by match_time first."""
+    cursor = await db.execute(
+        """SELECT id, trade_id, market_id, token_id, side, size, price,
+                  notional_usdc, status, outcome, owner, maker,
+                  transaction_hash, match_time, fee_usdc,
+                  first_seen_at, last_synced_at
+           FROM builder_trades
+           ORDER BY COALESCE(match_time, first_seen_at) DESC
+           LIMIT ?""",
+        (limit,),
+    )
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def builder_trades_stats(db: aiosqlite.Connection) -> dict:
+    """Aggregate attribution stats across all builder_trades."""
+    cursor = await db.execute(
+        """SELECT COUNT(*) AS total,
+                  COALESCE(SUM(notional_usdc), 0) AS total_notional,
+                  COALESCE(SUM(fee_usdc), 0) AS total_fees,
+                  COUNT(DISTINCT owner) AS unique_owners
+           FROM builder_trades"""
+    )
+    row = await cursor.fetchone()
+    return {
+        "total_trades": row[0] or 0,
+        "total_notional_usdc": round(float(row[1] or 0), 4),
+        "total_fees_usdc": round(float(row[2] or 0), 6),
+        "unique_owners": row[3] or 0,
+    }
