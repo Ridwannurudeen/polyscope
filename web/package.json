@@ -11,10 +11,14 @@
   "dependencies": {
     "@polymarket/clob-client-v2": "^1.0.0",
     "@tanstack/react-query": "^5.99.2",
+    "buffer": "^6.0.3",
+    "crypto-browserify": "^3.12.1",
     "next": "14.2.35",
+    "process": "^0.11.10",
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^3.8.1",
+    "stream-browserify": "^3.0.0",
     "viem": "^2.48.1",
     "wagmi": "^2.19.5"
   },

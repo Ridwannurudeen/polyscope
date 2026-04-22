@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePolymarketTrade, type TradeSide } from "@/lib/use-polymarket-trade";
 import { trackEvent } from "@/lib/analytics";
 
@@ -32,7 +32,6 @@ export function TradeModal(props: TradeModalProps) {
   const {
     address,
     isConnected,
-    status,
     connect,
     switchToPolygon,
     onWrongChain,
