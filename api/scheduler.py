@@ -587,59 +587,126 @@ async def sync_attributed_trades_job():
     in-flight state). Upserts into ``builder_trades`` so the /builder
     transparency page reflects real attributed volume — including trades
     placed by end users through the frontend, not just admin orders.
-    """
-    from .polymarket_signing import get_builder_code
-    from .polymarket_trading import get_client as get_trading_client
-    from .polymarket_trading import is_trading_configured
-    import json
 
-    if not is_trading_configured():
-        return
+    Auth note: ``/builder/trades`` requires Polymarket's **builder
+    signing scheme** (POLY_BUILDER_API_KEY / _PASSPHRASE / _TIMESTAMP /
+    _SIGNATURE). This is NOT L2 — ``py_clob_client_v2.get_builder_trades``
+    incorrectly signs with L2 headers and always 401s on this endpoint.
+    We use ``py_builder_signing_sdk`` (Polymarket's official builder-
+    auth package) to generate the correct headers and call the endpoint
+    via httpx directly.
+    """
+    import json
+    import os
+    import urllib.parse
+
+    import httpx
+
+    from .polymarket_signing import get_builder_code
 
     code = get_builder_code()
     if not code:
         return
 
-    try:
-        client = get_trading_client()
-    except Exception:
-        logger.exception("sync_attributed_trades_job: client init failed")
+    builder_key = os.getenv("POLYMARKET_BUILDER_API_KEY", "").strip()
+    builder_secret = os.getenv("POLYMARKET_BUILDER_API_SECRET", "").strip()
+    builder_passphrase = os.getenv("POLYMARKET_BUILDER_PASSPHRASE", "").strip()
+    if not (builder_key and builder_secret and builder_passphrase):
+        logger.warning(
+            "sync_attributed_trades_job: builder creds not configured; skipping"
+        )
         return
 
     try:
-        from py_clob_client_v2.clob_types import BuilderTradeParams
+        from py_builder_signing_sdk.config import BuilderConfig
+        from py_builder_signing_sdk.sdk_types import BuilderApiKeyCreds
     except Exception:
-        logger.exception("py_clob_client_v2 not importable; sync skipped")
+        logger.exception("py_builder_signing_sdk not importable; sync skipped")
         return
+
+    try:
+        builder_cfg = BuilderConfig(
+            local_builder_creds=BuilderApiKeyCreds(
+                key=builder_key,
+                secret=builder_secret,
+                passphrase=builder_passphrase,
+            )
+        )
+    except Exception:
+        logger.exception("sync_attributed_trades_job: BuilderConfig init failed")
+        return
+
+    host = os.getenv("POLYMARKET_CLOB_HOST", "https://clob.polymarket.com")
+    path = "/builder/trades"
 
     db = await get_db()
     try:
-        try:
-            resp = client.get_builder_trades(
-                BuilderTradeParams(builder_code=code)
-            )
-        except Exception as e:
-            logger.warning("get_builder_trades failed: %s", e)
-            return
+        next_cursor: str | None = None
+        total_inserted = 0
+        total_updated = 0
 
-        trades = (resp or {}).get("trades") if isinstance(resp, dict) else None
-        if not trades:
-            return
+        # Cap at 50 pages so a misbehaving server can't spin this forever.
+        for _ in range(50):
+            params: dict[str, str] = {"builder_code": code}
+            if next_cursor:
+                params["next_cursor"] = next_cursor
+            url = f"{host}{path}?{urllib.parse.urlencode(params)}"
 
-        inserted = 0
-        updated = 0
-        for t in trades:
-            raw_json = json.dumps(t, default=str)[:8000]
-            is_new = await upsert_builder_trade(db, t, raw_json)
-            if is_new:
-                inserted += 1
-            else:
-                updated += 1
+            # Headers carry HMAC signed over the bare path (no query),
+            # matching Polymarket's builder L2 convention.
+            try:
+                hp = builder_cfg.generate_builder_headers("GET", path)
+                headers = hp.to_dict() if hasattr(hp, "to_dict") else dict(hp.__dict__)
+                headers["Accept"] = "application/json"
+            except Exception as e:
+                logger.warning("builder header generation failed: %s", str(e)[:200])
+                return
 
-        if inserted or updated:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as hc:
+                    resp = await hc.get(url, headers=headers)
+            except Exception as e:
+                logger.warning("get_builder_trades http failed: %s", str(e)[:200])
+                return
+
+            if resp.status_code != 200:
+                logger.warning(
+                    "get_builder_trades http %d: %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                return
+
+            try:
+                body = resp.json()
+            except Exception:
+                logger.warning("get_builder_trades: non-JSON body")
+                return
+
+            # Polymarket's response shape: {"data": [...], "next_cursor": "...",
+            # "limit": N, "count": N}. The trade rows live in `data`, not
+            # `trades` (legacy SDK name).
+            trades = body.get("data") if isinstance(body, dict) else None
+            if not trades:
+                break
+
+            for t in trades:
+                raw_json = json.dumps(t, default=str)[:8000]
+                is_new = await upsert_builder_trade(db, t, raw_json)
+                if is_new:
+                    total_inserted += 1
+                else:
+                    total_updated += 1
+
+            next_cursor = body.get("next_cursor") if isinstance(body, dict) else None
+            # "LTE=" is Polymarket's "no more pages" sentinel.
+            if not next_cursor or next_cursor in ("", "LTE="):
+                break
+
+        if total_inserted or total_updated:
             logger.info(
                 "sync_attributed_trades_job: %d new, %d updated",
-                inserted, updated,
+                total_inserted, total_updated,
             )
     except Exception:
         logger.exception("sync_attributed_trades_job failed")
