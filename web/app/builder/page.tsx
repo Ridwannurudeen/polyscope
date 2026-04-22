@@ -86,14 +86,10 @@ function fmtDate(iso: string) {
 }
 
 export default function BuilderPage() {
-  const { data: identity } = usePollingFetch<BuilderIdentity>(
-    "/api/builder/identity",
-    300_000
-  );
-  const { data: config } = usePollingFetch<OrderConfig>(
-    "/api/orders/config",
-    60_000
-  );
+  const { data: identity, loading: identityLoading } =
+    usePollingFetch<BuilderIdentity>("/api/builder/identity", 300_000);
+  const { data: config, loading: configLoading } =
+    usePollingFetch<OrderConfig>("/api/orders/config", 60_000);
   const { data: orders, loading } = usePollingFetch<PublicOrdersResponse>(
     "/api/orders/public?limit=50",
     30_000
@@ -117,10 +113,18 @@ export default function BuilderPage() {
         registration and any orders routed through the platform.
       </p>
 
-      {/* Identity */}
+      {/* Identity — tri-state so the SSR/cold-hydration render doesn't
+          claim "not configured" when the endpoint actually returns true.
+          Previously the ternary skipped straight to the fallback on any
+          undefined, which rendered the wrong message on first paint. */}
       <section className="mb-10">
         <h2 className="text-xl font-semibold text-white mb-3">Identity</h2>
-        {identity?.configured && identity.code ? (
+        {identityLoading && !identity ? (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="h-3 w-40 bg-gray-800 rounded animate-pulse mb-3" />
+            <div className="h-3 w-full max-w-md bg-gray-800 rounded animate-pulse" />
+          </div>
+        ) : identity?.configured && identity.code ? (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
             <p className="text-xs text-gray-500 uppercase mb-2">
               Builder Code (bytes32)
@@ -160,15 +164,19 @@ export default function BuilderPage() {
             <p className="text-xs text-gray-500 uppercase mb-1">
               Trading wired up
             </p>
-            <p
-              className={`text-xl font-semibold ${
-                config?.trading_configured
-                  ? "text-emerald-400"
-                  : "text-gray-500"
-              }`}
-            >
-              {config?.trading_configured ? "Yes" : "No"}
-            </p>
+            {configLoading && !config ? (
+              <div className="h-6 w-10 bg-gray-800 rounded animate-pulse" />
+            ) : (
+              <p
+                className={`text-xl font-semibold ${
+                  config?.trading_configured
+                    ? "text-emerald-400"
+                    : "text-gray-500"
+                }`}
+              >
+                {config?.trading_configured ? "Yes" : "No"}
+              </p>
+            )}
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
             <p className="text-xs text-gray-500 uppercase mb-1">
