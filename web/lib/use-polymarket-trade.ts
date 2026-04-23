@@ -140,9 +140,22 @@ export function usePolymarketTrade() {
         signer: walletClient,
         signatureType: SignatureTypeV2.EOA,
       });
-      const creds = await tmpClient.createOrDeriveApiKey();
-      saveCachedCreds(addr, creds);
-      return creds;
+      try {
+        const creds = await tmpClient.createOrDeriveApiKey();
+        saveCachedCreds(addr, creds);
+        return creds;
+      } catch (err) {
+        // /auth/api-key returns 400 "Could not create api key" when the
+        // signer EOA has no Polymarket account. Translate into a clear
+        // user-facing message; the raw SDK error is an opaque axios dump.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/could not create api key/i.test(msg)) {
+          throw new Error(
+            "This wallet has no Polymarket account. Sign up at polymarket.com with this wallet, then reconnect.",
+          );
+        }
+        throw err;
+      }
     },
     [walletClient]
   );

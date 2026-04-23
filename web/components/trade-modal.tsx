@@ -460,6 +460,20 @@ export function TradeModal(props: TradeModalProps) {
             handles your private key. Attribution via our builder code is the
             only way we benefit.
           </p>
+          {isConnected && (
+            <p className="mt-1">
+              New to Polymarket? Your wallet needs a Polymarket account —{" "}
+              <a
+                href="https://polymarket.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-400/80 hover:text-emerald-300 underline"
+              >
+                sign up there first
+              </a>
+              .
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -32,6 +32,14 @@ export function TradeButton({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Markets inside ±1% of certainty can't be traded meaningfully — no
+  // counterparty will sell YES at 0.99 when the market is at ~1.00, and
+  // the inputs would be clamped to 0.99 anyway. Hide the button rather
+  // than render a dead UI element on resolved/near-resolved markets.
+  if (marketPrice >= 0.99 || marketPrice <= 0.01) {
+    return null;
+  }
+
   const handleClick = async () => {
     setError(null);
     setLoading(true);
@@ -48,7 +56,7 @@ export function TradeButton({
       if (direction === "YES") {
         if (!yesToken) throw new Error("Market has no YES token id");
         setTokenId(yesToken);
-        setSuggestedPrice(marketPrice);
+        setSuggestedPrice(Math.max(0.01, Math.min(0.99, marketPrice)));
       } else {
         if (!noToken) throw new Error("Market has no NO token id");
         setTokenId(noToken);
