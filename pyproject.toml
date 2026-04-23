@@ -16,7 +16,7 @@ dependencies = [
     # py_clob_client_v2.get_builder_trades() incorrectly signs with L2
     # headers, which the /builder/trades endpoint rejects (401). The
     # builder SDK produces the correct POLY_BUILDER_* headers.
-    "py-builder-signing-sdk>=0.1.0",
+    "py-builder-signing-sdk>=0.0.2",
 ]
 
 [project.optional-dependencies]
