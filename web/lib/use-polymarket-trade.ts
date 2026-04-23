@@ -20,6 +20,43 @@ const CLOB_HOST =
 const BUILDER_CODE = process.env.NEXT_PUBLIC_POLYMARKET_BUILDER_CODE || "";
 
 const CREDS_KEY_PREFIX = "polyscope.polymarket.creds.";
+const FUNDER_KEY_PREFIX = "polyscope.polymarket.funder.";
+
+// ── Safe-funder storage ──────────────────────────────────────
+// Per-EOA cache of the Polymarket Safe address the user trades through.
+// Keyed by lowercased EOA. Users with Magic-based Polymarket accounts
+// deposit into a Safe proxy controlled by their EOA; the EOA's raw USDC
+// balance is zero, so every trade has to sign with signatureType=
+// POLY_GNOSIS_SAFE and pass the Safe as funder. Users paste this once;
+// it persists in sessionStorage (not localStorage — we don't want it
+// following across tabs indefinitely).
+
+export function loadSafeFunder(address: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(
+      `${FUNDER_KEY_PREFIX}${address.toLowerCase()}`,
+    );
+    if (raw && /^0x[0-9a-fA-F]{40}$/.test(raw)) return raw.toLowerCase();
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSafeFunder(address: string, funder: string) {
+  if (typeof window === "undefined") return;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(funder)) return;
+  sessionStorage.setItem(
+    `${FUNDER_KEY_PREFIX}${address.toLowerCase()}`,
+    funder.toLowerCase(),
+  );
+}
+
+export function clearSafeFunder(address: string) {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(`${FUNDER_KEY_PREFIX}${address.toLowerCase()}`);
+}
 
 function loadCachedCreds(address: string): ApiKeyCreds | null {
   if (typeof window === "undefined") return null;
@@ -83,6 +120,13 @@ export function usePolymarketTrade() {
     if (injected) connect({ connector: injected });
   }, [connect, connectors]);
 
+  // When the connected EOA has a cached Safe funder, trades route
+  // through Polymarket's Gnosis-Safe proxy (signatureType=
+  // POLY_GNOSIS_SAFE). Otherwise trades sign as the EOA directly.
+  // deriveOrLoadCreds uses plain EOA for the initial API-key derivation
+  // (Polymarket's derivation endpoint keys against the signer itself,
+  // not the funder), then buildClient switches to Safe mode for the
+  // actual trade calls.
   const deriveOrLoadCreds = useCallback(
     async (addr: string): Promise<ApiKeyCreds> => {
       const cached = loadCachedCreds(addr);
@@ -105,7 +149,19 @@ export function usePolymarketTrade() {
 
   const buildClient = useCallback(
     async (creds: ApiKeyCreds) => {
-      if (!walletClient) throw new Error("Wallet client not ready");
+      if (!walletClient || !address) throw new Error("Wallet client not ready");
+      const funder = loadSafeFunder(address);
+      if (funder) {
+        return new ClobClient({
+          host: CLOB_HOST,
+          chain: polygon.id,
+          signer: walletClient,
+          creds,
+          signatureType: SignatureTypeV2.POLY_GNOSIS_SAFE,
+          funderAddress: funder,
+          builderConfig: { builderCode: BUILDER_CODE },
+        });
+      }
       return new ClobClient({
         host: CLOB_HOST,
         chain: polygon.id,
@@ -115,7 +171,7 @@ export function usePolymarketTrade() {
         builderConfig: { builderCode: BUILDER_CODE },
       });
     },
-    [walletClient]
+    [walletClient, address]
   );
 
   const checkAllowance = useCallback(

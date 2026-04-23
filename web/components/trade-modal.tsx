@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePolymarketTrade, type TradeSide } from "@/lib/use-polymarket-trade";
+import {
+  usePolymarketTrade,
+  type TradeSide,
+  loadSafeFunder,
+  saveSafeFunder,
+  clearSafeFunder,
+} from "@/lib/use-polymarket-trade";
 import { trackEvent } from "@/lib/analytics";
 
 interface TradeModalProps {
@@ -53,6 +59,15 @@ export function TradeModal(props: TradeModalProps) {
   const [needsApproval, setNeedsApproval] = useState<boolean>(false);
   const [allowanceError, setAllowanceError] = useState<string | null>(null);
 
+  // Funder state — Magic-account users have their USDC in a Gnosis-Safe
+  // proxy controlled by their EOA, not the EOA itself. When a Safe
+  // address is entered and saved, trades use signatureType=
+  // POLY_GNOSIS_SAFE with the Safe as funder. Otherwise EOA-direct.
+  const [funder, setFunder] = useState<string | null>(null);
+  const [funderInput, setFunderInput] = useState<string>("");
+  const [funderMode, setFunderMode] = useState<"eoa" | "safe">("eoa");
+  const [funderError, setFunderError] = useState<string | null>(null);
+
   useEffect(() => {
     if (open) {
       setSide(suggestedSide);
@@ -61,6 +76,54 @@ export function TradeModal(props: TradeModalProps) {
       setAllowanceError(null);
     }
   }, [open, suggestedPrice, suggestedSide]);
+
+  // Load any cached Safe funder whenever the connected wallet changes.
+  useEffect(() => {
+    if (!address) return;
+    const cached = loadSafeFunder(address);
+    if (cached) {
+      setFunder(cached);
+      setFunderMode("safe");
+    } else {
+      setFunder(null);
+      setFunderMode("eoa");
+    }
+    setFunderInput("");
+    setFunderError(null);
+  }, [address]);
+
+  const handleSaveFunder = () => {
+    const clean = funderInput.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(clean)) {
+      setFunderError("Paste a valid 0x… address (40 hex chars after 0x).");
+      return;
+    }
+    if (address && clean === address.toLowerCase()) {
+      setFunderError(
+        "That's your wallet address — use 'My wallet (EOA)' mode instead, or paste your Polymarket Safe address.",
+      );
+      return;
+    }
+    if (!address) return;
+    saveSafeFunder(address, clean);
+    setFunder(clean);
+    setFunderMode("safe");
+    setFunderError(null);
+    setNeedsApproval(false);
+    setAllowanceError(null);
+    trackEvent("polymarket_safe_linked", { safe_short: `${clean.slice(0, 6)}…${clean.slice(-4)}` });
+  };
+
+  const handleClearFunder = () => {
+    if (!address) return;
+    clearSafeFunder(address);
+    setFunder(null);
+    setFunderMode("eoa");
+    setFunderInput("");
+    setFunderError(null);
+    setNeedsApproval(false);
+    setAllowanceError(null);
+  };
 
   const priceNum = Number.parseFloat(price) || 0;
   const sizeNum = Number.parseFloat(size) || 0;
@@ -208,7 +271,7 @@ export function TradeModal(props: TradeModalProps) {
         </div>
 
         {/* Notional preview */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mb-5">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mb-4">
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Total cost</span>
             <span className="text-white font-semibold">
@@ -219,6 +282,94 @@ export function TradeModal(props: TradeModalProps) {
             Limit order, good-til-canceled. Resting orders may or may not fill.
           </p>
         </div>
+
+        {/* Funder — EOA vs Polymarket Safe */}
+        {isConnected && !onWrongChain && (
+          <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-500 uppercase tracking-wide">
+                Fund from
+              </span>
+              <div className="flex gap-1 text-xs">
+                <button
+                  onClick={() => {
+                    if (funder) handleClearFunder();
+                    else setFunderMode("eoa");
+                  }}
+                  className={`px-2 py-1 rounded transition-colors ${
+                    funderMode === "eoa"
+                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      : "text-gray-400 border border-transparent hover:text-white"
+                  }`}
+                >
+                  My wallet
+                </button>
+                <button
+                  onClick={() => setFunderMode("safe")}
+                  className={`px-2 py-1 rounded transition-colors ${
+                    funderMode === "safe"
+                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      : "text-gray-400 border border-transparent hover:text-white"
+                  }`}
+                >
+                  Polymarket Safe
+                </button>
+              </div>
+            </div>
+
+            {funderMode === "eoa" && (
+              <p className="text-[11px] text-gray-600 leading-snug">
+                Trades sign from and settle to your connected wallet directly.
+                Use this if your USDC is already in this wallet (not on
+                Polymarket).
+              </p>
+            )}
+
+            {funderMode === "safe" && funder && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-mono text-emerald-300">
+                  {funder.slice(0, 6)}…{funder.slice(-4)}
+                </span>
+                <button
+                  onClick={handleClearFunder}
+                  className="text-gray-500 hover:text-red-400 transition-colors"
+                >
+                  Unlink
+                </button>
+              </div>
+            )}
+
+            {funderMode === "safe" && !funder && (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="0x… Polymarket Safe address"
+                  value={funderInput}
+                  onChange={(e) => setFunderInput(e.target.value)}
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="w-full px-3 py-1.5 bg-gray-950 border border-gray-800 text-white text-xs font-mono rounded focus:outline-none focus:border-emerald-500/50"
+                />
+                <button
+                  onClick={handleSaveFunder}
+                  disabled={!funderInput.trim()}
+                  className="w-full py-1.5 text-xs bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 rounded hover:bg-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Link Safe
+                </button>
+                <p className="text-[11px] text-gray-600 leading-snug">
+                  Polymarket deposits live in a Safe proxy controlled by your
+                  wallet. Copy it from polymarket.com → Profile (under your
+                  avatar — NOT your wallet address).
+                </p>
+              </div>
+            )}
+
+            {funderError && (
+              <p className="text-[11px] text-red-400 mt-2">{funderError}</p>
+            )}
+          </div>
+        )}
 
         {/* Status / actions */}
         {!builderCodeConfigured ? (
