@@ -25,12 +25,12 @@ export function ConnectWallet() {
   async function submit() {
     setError(null);
     if (!isValidEvmAddress(input)) {
-      setError("Paste a valid 0x… address");
+      setError("paste a valid 0x… address");
       return;
     }
     const result = await linkWallet(input);
     if (!result.ok) {
-      setError(result.error || "Link failed");
+      setError(result.error || "link failed");
       return;
     }
     trackEvent("wallet_linked", { method: "paste" });
@@ -43,22 +43,22 @@ export function ConnectWallet() {
       <div className="relative" ref={ref}>
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-lg hover:bg-emerald-500/20 transition-colors"
+          className="flex items-center gap-1.5 h-8 px-2.5 text-eyebrow font-mono uppercase tracking-wider text-scope-400 border border-scope-500/30 bg-scope-500/8 rounded-md hover:bg-scope-500/14 hover:border-scope-500/50 transition-colors duration-120"
           title={walletAddress}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          {shortAddress(walletAddress)}
+          <span className="w-1.5 h-1.5 rounded-full bg-scope-500 animate-pulse-subtle" />
+          <span className="num">{shortAddress(walletAddress)}</span>
         </button>
         {open && (
-          <div className="absolute right-0 mt-2 w-64 bg-gray-900 border border-gray-800 rounded-lg shadow-xl p-3 z-50">
-            <p className="text-xs text-gray-500 mb-1">Linked wallet</p>
-            <p className="text-xs font-mono text-white break-all mb-3">
+          <div className="absolute right-0 mt-2 w-64 surface-elevated rounded-md shadow-elevated p-4 z-50">
+            <div className="eyebrow mb-2">linked wallet</div>
+            <p className="text-body-sm font-mono text-ink-100 break-all mb-3 num">
               {walletAddress}
             </p>
-            <p className="text-[11px] text-gray-500 mb-3">
-              Your watchlist &amp; portfolio history is now tied to this
-              wallet. Log in from another device with the same wallet and
-              it&apos;ll follow you.
+            <p className="text-micro text-ink-400 mb-4 leading-relaxed">
+              Your watchlist and portfolio history is tied to this wallet.
+              Log in from another device with the same wallet and it&apos;ll
+              follow you.
             </p>
             <button
               onClick={() => {
@@ -66,9 +66,9 @@ export function ConnectWallet() {
                 unlinkWallet();
                 setOpen(false);
               }}
-              className="w-full px-3 py-1.5 text-xs bg-gray-800 text-gray-300 rounded-md hover:bg-gray-700"
+              className="btn-secondary w-full"
             >
-              Unlink wallet
+              unlink
             </button>
           </div>
         )}
@@ -80,19 +80,17 @@ export function ConnectWallet() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="px-3 py-1.5 text-xs font-medium bg-emerald-500/10 border border-emerald-500/40 text-emerald-300 rounded-lg hover:bg-emerald-500/20 transition-colors"
+        className="btn-secondary"
       >
-        Link wallet
+        link wallet
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 w-72 bg-gray-900 border border-gray-800 rounded-lg shadow-xl p-3 z-50">
-          <p className="text-sm text-white font-medium mb-1">
-            Link your wallet
-          </p>
-          <p className="text-[11px] text-gray-500 mb-3">
+        <div className="absolute right-0 mt-2 w-72 surface-elevated rounded-md shadow-elevated p-4 z-50">
+          <div className="eyebrow mb-2">link wallet</div>
+          <p className="text-micro text-ink-400 mb-3 leading-relaxed">
             Paste your Polymarket wallet address to carry your watchlist
-            + portfolio across devices. We never sign or send transactions
-            — read-only identity only.
+            and portfolio across devices. Read-only identity — we never
+            sign or send transactions.
           </p>
           <input
             type="text"
@@ -102,21 +100,23 @@ export function ConnectWallet() {
               if (e.key === "Enter") submit();
             }}
             placeholder="0x…"
-            className="w-full px-2.5 py-1.5 text-xs font-mono bg-gray-950 border border-gray-800 text-white rounded-md focus:outline-none focus:border-emerald-500/50 mb-2"
+            spellCheck={false}
+            autoComplete="off"
+            className="w-full h-8 px-2.5 text-body-sm font-mono num bg-background border border-ink-700 text-ink-100 rounded-md focus:outline-none focus:border-scope-500/60 placeholder:text-ink-500 mb-2"
             autoFocus
           />
           {error && (
-            <p className="text-[11px] text-red-400 mb-2">{error}</p>
+            <p className="text-micro text-alert-500 mb-2 font-mono">{error}</p>
           )}
           <button
             onClick={submit}
             disabled={linking || !input}
-            className="w-full px-3 py-1.5 text-xs font-medium bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-md hover:bg-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-primary w-full"
           >
-            {linking ? "Linking…" : "Link"}
+            {linking ? "linking…" : "link"}
           </button>
-          <p className="text-[10px] text-gray-600 mt-2">
-            One-click Privy wallet connect ships next.
+          <p className="text-micro text-ink-500 mt-3 font-mono">
+            privy wallet connect · next release
           </p>
         </div>
       )}

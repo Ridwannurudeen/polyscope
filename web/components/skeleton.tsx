@@ -1,21 +1,21 @@
 export function SkeletonCard() {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 animate-pulse">
-      <div className="h-3 w-20 bg-gray-800 rounded mb-3" />
-      <div className="h-7 w-16 bg-gray-800 rounded" />
+    <div className="surface rounded-lg p-5 animate-pulse-subtle">
+      <div className="h-2.5 w-20 bg-ink-800 rounded-sm mb-3" />
+      <div className="h-7 w-16 bg-ink-800 rounded-sm" />
     </div>
   );
 }
 
 export function SkeletonRow() {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 animate-pulse">
-      <div className="flex items-center justify-between">
+    <div className="surface rounded-lg p-4 animate-pulse-subtle">
+      <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
-          <div className="h-4 w-3/4 bg-gray-800 rounded mb-2" />
-          <div className="h-3 w-1/2 bg-gray-800 rounded" />
+          <div className="h-3.5 w-3/4 bg-ink-800 rounded-sm mb-2" />
+          <div className="h-2.5 w-1/2 bg-ink-800/70 rounded-sm" />
         </div>
-        <div className="h-8 w-12 bg-gray-800 rounded" />
+        <div className="h-6 w-12 bg-ink-800 rounded-sm" />
       </div>
     </div>
   );
@@ -24,30 +24,29 @@ export function SkeletonRow() {
 export function DashboardSkeleton() {
   return (
     <div>
-      <div className="mb-8">
-        <div className="h-8 w-80 bg-gray-800 rounded animate-pulse mb-2" />
-        <div className="h-4 w-96 bg-gray-800/60 rounded animate-pulse" />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <SkeletonCard key={i} />
-        ))}
-      </div>
-
-      <div className="mb-10">
-        <div className="h-6 w-52 bg-gray-800 rounded animate-pulse mb-4" />
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <SkeletonRow key={i} />
+      <div className="mb-10 pb-10 border-b border-ink-800">
+        <div className="h-3 w-24 bg-ink-800 rounded-sm animate-pulse-subtle mb-5" />
+        <div className="h-12 w-80 bg-ink-800 rounded-sm animate-pulse-subtle mb-3" />
+        <div className="h-10 w-96 bg-ink-800/70 rounded-sm animate-pulse-subtle mb-8" />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-x-10 gap-y-6 pt-8 border-t border-ink-800">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i}>
+              <div className="h-2.5 w-20 bg-ink-800 rounded-sm mb-2 animate-pulse-subtle" />
+              <div className="h-7 w-24 bg-ink-800 rounded-sm animate-pulse-subtle" />
+            </div>
           ))}
         </div>
       </div>
 
-      <div>
-        <div className="h-6 w-44 bg-gray-800 rounded animate-pulse mb-4" />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
+      <div className="mb-12">
+        <div className="h-5 w-52 bg-ink-800 rounded-sm animate-pulse-subtle mb-4" />
+        <div className="surface rounded-lg p-6 h-60 animate-pulse-subtle" />
+      </div>
+
+      <div className="mb-12">
+        <div className="h-5 w-48 bg-ink-800 rounded-sm animate-pulse-subtle mb-5" />
+        <div className="space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
             <SkeletonRow key={i} />
           ))}
         </div>
@@ -58,18 +57,21 @@ export function DashboardSkeleton() {
 
 export function TableSkeleton({ rows = 10 }: { rows?: number }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden animate-pulse">
-      <div className="border-b border-gray-800 p-3 flex gap-8">
+    <div className="surface rounded-lg overflow-hidden animate-pulse-subtle">
+      <div className="border-b border-ink-800 p-3 flex gap-8">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-3 w-16 bg-gray-800 rounded" />
+          <div key={i} className="h-2.5 w-16 bg-ink-800 rounded-sm" />
         ))}
       </div>
       {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="border-b border-gray-800/50 p-3 flex items-center gap-8">
-          <div className="h-3 w-8 bg-gray-800/60 rounded" />
-          <div className="h-3 w-48 bg-gray-800/60 rounded flex-1" />
-          <div className="h-3 w-16 bg-gray-800/60 rounded" />
-          <div className="h-3 w-16 bg-gray-800/60 rounded" />
+        <div
+          key={i}
+          className="border-b border-ink-800/50 p-3 flex items-center gap-8 last:border-0"
+        >
+          <div className="h-3 w-8 bg-ink-800/70 rounded-sm" />
+          <div className="h-3 w-48 bg-ink-800/70 rounded-sm flex-1" />
+          <div className="h-3 w-16 bg-ink-800/70 rounded-sm" />
+          <div className="h-3 w-16 bg-ink-800/70 rounded-sm" />
         </div>
       ))}
     </div>

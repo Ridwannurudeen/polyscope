@@ -7,14 +7,14 @@ interface LastUpdatedProps {
 export function LastUpdated({ lastUpdated, error, retry }: LastUpdatedProps) {
   if (error) {
     return (
-      <div className="flex items-center gap-2 text-sm">
-        <span className="w-2 h-2 rounded-full bg-red-500" />
-        <span className="text-red-400">Failed to load</span>
+      <div className="flex items-center gap-2 font-mono text-caption">
+        <span className="w-1.5 h-1.5 rounded-full bg-alert-500" />
+        <span className="text-alert-500">failed to load</span>
         <button
           onClick={retry}
-          className="text-xs text-gray-400 hover:text-white underline ml-1"
+          className="text-ink-400 hover:text-ink-100 underline underline-offset-2 transition-colors"
         >
-          Retry
+          retry
         </button>
       </div>
     );
@@ -23,10 +23,13 @@ export function LastUpdated({ lastUpdated, error, retry }: LastUpdatedProps) {
   if (!lastUpdated) return null;
 
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-      <span className="text-gray-500">
-        Updated {lastUpdated.toLocaleTimeString()}
+    <div className="flex items-center gap-2 font-mono text-caption">
+      <span className="w-1.5 h-1.5 rounded-full bg-scope-500 animate-pulse-subtle" />
+      <span className="text-ink-400">
+        updated{" "}
+        <span className="text-ink-200 num">
+          {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+        </span>
       </span>
     </div>
   );

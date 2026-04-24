@@ -2,26 +2,149 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens ─────────────────────────────────────────
+   Semantic CSS variables map to ink/scope/fade tokens. Never
+   reference Tailwind default grays. Component code reads
+   `bg-surface`, `text-muted` etc. from these vars. */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Terminal is dark-first; we ship a single theme. */
+  --background: #0A0C10;
+  --foreground: #ECEEF2;
+  --surface: #0F1218;
+  --elevated: #161A22;
+  --border: #1E232D;
+  --border-strong: #2A303D;
+  --muted: #7A8496;
+
+  --scope: #00E5A0;
+  --scope-dim: rgba(0, 229, 160, 0.14);
+  --fade: #FFB636;
+  --fade-dim: rgba(255, 182, 54, 0.12);
+  --alert: #FF5A6B;
+
+  /* Typography — consumed via font-family: var(--font-*) */
+  --tabular: "tnum" 1, "lnum" 1;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  color: var(--foreground);
+html, body {
+  height: 100%;
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv01", "cv02";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+
+/* Every number, anywhere, should be tabular. Non-negotiable for a
+   terminal. If a designer explicitly wants proportional nums they
+   can opt out with .font-proportional. */
+.tabular,
+[data-tabular],
+.font-mono,
+code,
+pre,
+kbd,
+samp {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+/* Selection — matches accent */
+::selection {
+  background: var(--scope-dim);
+  color: var(--foreground);
+}
+
+/* Focus — subtle outer ring, not a chunky glow */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--background), 0 0 0 2.5px var(--scope);
+  border-radius: 4px;
+}
+
+/* Scrollbar — thin, terminal-appropriate */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 2px solid var(--background);
+  border-radius: 10px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* ── Utility classes ───────────────────────────────────── */
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  /* Eyebrow label — the terminal's workhorse. UPPERCASE, tracked,
+     monospace. Used above every data section. */
+  .eyebrow {
+    @apply text-eyebrow font-mono uppercase text-ink-400;
+    letter-spacing: 0.12em;
+  }
+
+  /* Hairline — single-pixel divider in ink-700 */
+  .hairline {
+    @apply border-ink-700;
+  }
+
+  /* Numeric cell — monospace, tabular, right-aligned */
+  .num {
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* Card surface — single canonical card styling */
+  .surface {
+    @apply bg-surface border border-ink-700;
+  }
+  .surface-elevated {
+    @apply bg-elevated border border-ink-700;
+  }
+
+  /* Button primitives */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 font-mono uppercase tracking-wider text-eyebrow h-8 px-3 rounded-md transition-colors duration-120 ease-out-quart;
+  }
+  .btn-primary {
+    @apply btn bg-scope-500 text-ink-950 hover:bg-scope-400 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply btn bg-transparent text-ink-100 border border-ink-600 hover:border-scope-500 hover:text-scope-400 disabled:opacity-40;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-ink-300 hover:text-ink-100 hover:bg-ink-800;
+  }
+
+  /* Hover row for table-like content */
+  .row-hover {
+    @apply transition-colors duration-120 hover:bg-ink-800/60;
+  }
+
+  /* Scanline — optional texture for hero/empty states */
+  .scanline {
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 3px,
+      rgba(255, 255, 255, 0.015) 3px,
+      rgba(255, 255, 255, 0.015) 4px
+    );
   }
 }

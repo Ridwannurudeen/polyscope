@@ -4,10 +4,10 @@ import { usePollingFetch } from "@/lib/hooks";
 import type { SignalAccuracy, SignalAccuracyTier } from "@/lib/api";
 
 const SKEW_LABELS: Record<keyof SignalAccuracy["by_skew"], string> = {
-  tight: "Tight (40–60%)",
-  moderate: "Moderate (25–40% / 60–75%)",
-  lopsided: "Lopsided (10–25% / 75–90%)",
-  very_lopsided: "Very lopsided (≤10% / ≥90%)",
+  tight: "tight · 40–60%",
+  moderate: "moderate · 25–40 / 60–75",
+  lopsided: "lopsided · 10–25 / 75–90",
+  very_lopsided: "very lopsided · ≤10 / ≥90",
 };
 
 function SkewRow({
@@ -20,29 +20,63 @@ function SkewRow({
   highlight?: boolean;
 }) {
   const pct =
-    data.total > 0 ? `${(data.win_rate * 100).toFixed(1)}%` : "\u2014";
+    data.total > 0 ? `${(data.win_rate * 100).toFixed(1)}%` : "—";
   return (
     <div
-      className={`flex items-center justify-between rounded-lg px-3 py-2 ${
+      className={`flex items-center justify-between px-3.5 py-2.5 rounded-md border ${
         highlight
-          ? "bg-emerald-500/5 border border-emerald-500/30"
-          : "bg-gray-950/50 border border-gray-800"
+          ? "border-scope-500/35 bg-scope-500/5"
+          : "border-ink-800 bg-surface"
       }`}
     >
-      <p className={`text-sm ${highlight ? "text-emerald-300" : "text-gray-300"}`}>
+      <p
+        className={`font-mono text-caption ${
+          highlight ? "text-scope-300" : "text-ink-300"
+        }`}
+      >
         {label}
       </p>
       <div className="flex items-baseline gap-3">
         <p
-          className={`text-lg font-bold ${
-            highlight ? "text-emerald-400" : "text-white"
+          className={`num text-body font-medium ${
+            highlight ? "text-scope-400" : "text-ink-100"
           }`}
         >
           {pct}
         </p>
-        <p className="text-xs text-gray-500">
+        <p className="text-micro text-ink-500 num">
           {data.correct}/{data.total}
         </p>
+      </div>
+    </div>
+  );
+}
+
+function HeadlineCell({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  accent?: "scope" | "fade" | "neutral";
+}) {
+  const color =
+    accent === "scope"
+      ? "text-scope-400"
+      : accent === "fade"
+        ? "text-fade-500"
+        : "text-ink-100";
+  return (
+    <div>
+      <div className="eyebrow mb-2">{label}</div>
+      <div className={`num ${color} text-h2 leading-none tracking-tighter`}>
+        {value}
+      </div>
+      <div className="text-micro text-ink-400 font-mono mt-2 leading-snug">
+        {sub}
       </div>
     </div>
   );
@@ -51,7 +85,7 @@ function SkewRow({
 export function SignalTrackRecord() {
   const { data } = usePollingFetch<SignalAccuracy>(
     "/api/signals/accuracy",
-    300_000
+    300_000,
   );
 
   if (!data || !data.overall) return null;
@@ -62,148 +96,140 @@ export function SignalTrackRecord() {
   const tightReady = tight && tight.total >= 10;
 
   return (
-    <section className="mb-10">
-      <h2 className="text-xl font-semibold text-white mb-4">
-        Signal Track Record
-      </h2>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-        {collecting ? (
-          <div className="text-center py-4">
-            <p className="text-2xl font-bold text-gray-400">Collecting Data</p>
-            <p className="text-sm text-gray-500 mt-2">
-              {overall.total_signals} of 10 unique markets resolved with signals.
-              Accuracy metrics will appear once enough data is collected.
+    <div className="surface rounded-lg p-6">
+      {collecting ? (
+        <div className="text-center py-8">
+          <div className="eyebrow mb-3">status</div>
+          <p className="num text-h3 text-ink-300">collecting data</p>
+          <p className="text-caption text-ink-400 mt-2 font-mono">
+            <span className="num text-ink-200">{overall.total_signals}</span> of{" "}
+            <span className="num text-ink-200">10</span> unique markets resolved.
+            Accuracy metrics appear once the sample crosses the threshold.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-6 pb-6 border-b border-ink-800">
+            <HeadlineCell
+              label="tight-market accuracy"
+              value={
+                tightReady
+                  ? `${(tight.win_rate * 100).toFixed(1)}%`
+                  : "—"
+              }
+              sub={
+                tightReady
+                  ? `${tight.correct}/${tight.total} resolved in 40–60% markets`
+                  : "need 10+ resolved tight-market signals"
+              }
+              accent="scope"
+            />
+            <HeadlineCell
+              label="markets analyzed"
+              value={overall.total_signals.toLocaleString()}
+              sub={`${overall.correct} counter-consensus hits`}
+            />
+            <HeadlineCell
+              label="avg signal score"
+              value={String(overall.avg_score)}
+              sub="composite divergence strength"
+              accent="fade"
+            />
+          </div>
+
+          <div className="border border-fade-500/20 bg-fade-500/5 rounded-md px-4 py-3 mb-6">
+            <p className="text-micro text-fade-400/90 font-mono leading-relaxed">
+              <span className="text-fade-500 font-medium">why tight-market first.</span>{" "}
+              Headline win rates on resolved signals are dominated by lopsided
+              markets where the favored side wins regardless — composition
+              effect, not edge. The honest test of signal quality is the 40–60%
+              band, where outcomes are genuinely uncertain.{" "}
+              <a
+                href="/methodology"
+                className="text-fade-400 underline underline-offset-2 hover:text-fade-300"
+              >
+                methodology →
+              </a>
             </p>
           </div>
-        ) : (
-          <>
-            {/* Honest headline: tight-market accuracy */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
-              <div className="text-center md:text-left">
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                  Tight-market accuracy
-                </p>
-                <p className="text-4xl font-bold text-emerald-400">
-                  {tightReady
-                    ? `${(tight.win_rate * 100).toFixed(1)}%`
-                    : "\u2014"}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {tightReady
-                    ? `${tight.correct}/${tight.total} resolved in 40–60% markets`
-                    : "Need 10+ resolved tight-market signals"}
-                </p>
-              </div>
-              <div className="text-center md:text-left">
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                  Markets analyzed
-                </p>
-                <p className="text-4xl font-bold text-white">
-                  {overall.total_signals}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {overall.correct} counter-consensus hits
-                </p>
-              </div>
-              <div className="text-center md:text-left">
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                  Avg signal score
-                </p>
-                <p className="text-4xl font-bold text-amber-400">
-                  {overall.avg_score}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Composite divergence strength
-                </p>
+
+          {by_skew && (
+            <div>
+              <div className="eyebrow mb-3">by market skew</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <SkewRow label={SKEW_LABELS.tight} data={by_skew.tight} highlight />
+                <SkewRow label={SKEW_LABELS.moderate} data={by_skew.moderate} />
+                <SkewRow label={SKEW_LABELS.lopsided} data={by_skew.lopsided} />
+                <SkewRow label={SKEW_LABELS.very_lopsided} data={by_skew.very_lopsided} />
               </div>
             </div>
+          )}
 
-            <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 mb-4">
-              <p className="text-xs text-amber-200/90 leading-relaxed">
-                <span className="font-semibold">Why tight-market first?</span>{" "}
-                Headline win rates on resolved signals are dominated by
-                lopsided markets where the favored side wins regardless — a
-                composition effect, not edge. The honest test of signal
-                quality is the 40–60% band, where outcomes are genuinely
-                uncertain.{" "}
-                <a
-                  href="/methodology"
-                  className="text-amber-300 underline hover:text-amber-200"
-                >
-                  Full methodology →
-                </a>
+          {data.simulation && data.simulation.total_wagered > 0 && (
+            <div className="border-t border-ink-800 pt-5 mt-6">
+              <div className="eyebrow mb-3">simulated p&amp;l · $100 per signal</div>
+              <div className="grid grid-cols-3 gap-8">
+                <div>
+                  <p
+                    className={`num text-h3 tracking-tighter ${
+                      data.simulation.roi_pct >= 0
+                        ? "text-scope-400"
+                        : "text-alert-500"
+                    }`}
+                  >
+                    {data.simulation.roi_pct >= 0 ? "+" : ""}
+                    {data.simulation.roi_pct.toFixed(1)}%
+                  </p>
+                  <p className="text-micro text-ink-400 font-mono mt-1">
+                    simulated roi
+                  </p>
+                </div>
+                <div>
+                  <p className="num text-h3 text-ink-100 tracking-tighter">
+                    $
+                    {data.simulation.total_return.toLocaleString(undefined, {
+                      maximumFractionDigits: 0,
+                    })}
+                  </p>
+                  <p className="text-micro text-ink-400 font-mono mt-1">
+                    on{" "}
+                    <span className="num text-ink-200">
+                      $
+                      {data.simulation.total_wagered.toLocaleString(undefined, {
+                        maximumFractionDigits: 0,
+                      })}
+                    </span>{" "}
+                    wagered
+                  </p>
+                </div>
+                <div>
+                  <p className="num text-h3 text-fade-500 tracking-tighter">
+                    {data.simulation.avg_odds_on_hits.toFixed(1)}x
+                  </p>
+                  <p className="text-micro text-ink-400 font-mono mt-1">
+                    avg odds on hits
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {rolling_30d.total > 0 && (
+            <div className="border-t border-ink-800 pt-4 mt-5">
+              <p className="text-caption text-ink-400 font-mono text-center">
+                <span className="text-ink-500">30d · </span>
+                <span className="num text-ink-200">
+                  {rolling_30d.correct}/{rolling_30d.total}
+                </span>{" "}
+                hits ·{" "}
+                <span className="num text-ink-100">
+                  {(rolling_30d.win_rate * 100).toFixed(1)}%
+                </span>
               </p>
             </div>
-
-            {by_skew && (
-              <div className="border-t border-gray-800 pt-4">
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-3">
-                  By market skew
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <SkewRow
-                    label={SKEW_LABELS.tight}
-                    data={by_skew.tight}
-                    highlight
-                  />
-                  <SkewRow
-                    label={SKEW_LABELS.moderate}
-                    data={by_skew.moderate}
-                  />
-                  <SkewRow
-                    label={SKEW_LABELS.lopsided}
-                    data={by_skew.lopsided}
-                  />
-                  <SkewRow
-                    label={SKEW_LABELS.very_lopsided}
-                    data={by_skew.very_lopsided}
-                  />
-                </div>
-              </div>
-            )}
-
-            {data.simulation && data.simulation.total_wagered > 0 && (
-              <div className="border-t border-gray-800 pt-4 mt-4">
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-3">
-                  Simulated P&L ($100/signal)
-                </p>
-                <div className="grid grid-cols-3 gap-4 text-center">
-                  <div>
-                    <p className={`text-lg font-bold ${data.simulation.roi_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {data.simulation.roi_pct >= 0 ? "+" : ""}
-                      {data.simulation.roi_pct.toFixed(1)}%
-                    </p>
-                    <p className="text-xs text-gray-500">Simulated ROI</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold text-white">
-                      ${data.simulation.total_return.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      on ${data.simulation.total_wagered.toLocaleString(undefined, { maximumFractionDigits: 0 })} wagered
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold text-amber-400">
-                      {data.simulation.avg_odds_on_hits.toFixed(1)}x
-                    </p>
-                    <p className="text-xs text-gray-500">Avg odds on hits</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {rolling_30d.total > 0 && (
-              <div className="border-t border-gray-800 pt-4 mt-4 text-center">
-                <p className="text-xs text-gray-500">
-                  30-day: {rolling_30d.correct}/{rolling_30d.total} hits (
-                  {(rolling_30d.win_rate * 100).toFixed(1)}%)
-                </p>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </section>
+          )}
+        </>
+      )}
+    </div>
   );
 }

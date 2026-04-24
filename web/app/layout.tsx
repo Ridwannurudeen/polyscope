@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import "./globals.css";
 import { ConnectWallet } from "@/components/connect-wallet";
+import { Wordmark } from "@/components/logo";
 import { MobileNav } from "@/components/mobile-nav";
 import { PageViewTracker } from "@/components/page-view-tracker";
 import { SearchBar } from "@/components/search-bar";
@@ -41,15 +42,14 @@ export const metadata: Metadata = {
 };
 
 const NAV_ITEMS = [
-  { href: "/", label: "Dashboard" },
-  { href: "/markets", label: "Markets" },
-  { href: "/smart-money", label: "Smart Money" },
-  { href: "/traders", label: "Traders" },
-  { href: "/compare", label: "Compare" },
-  { href: "/portfolio", label: "Portfolio" },
-  { href: "/calibration", label: "Calibration" },
-  { href: "/methodology", label: "Methodology" },
-  { href: "/api/docs", label: "API", external: true },
+  { href: "/", label: "terminal" },
+  { href: "/smart-money", label: "signals" },
+  { href: "/traders", label: "traders" },
+  { href: "/markets", label: "markets" },
+  { href: "/portfolio", label: "portfolio" },
+  { href: "/calibration", label: "calibration" },
+  { href: "/methodology", label: "methodology" },
+  { href: "/api/docs", label: "api", external: true },
 ];
 
 export default function RootLayout({
@@ -58,74 +58,106 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950 text-gray-100 min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
       >
         <Web3Provider>
-        <Suspense fallback={null}>
-          <PageViewTracker />
-        </Suspense>
-        <nav className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <Link href="/" className="flex items-center gap-2">
-                <span className="text-xl font-bold text-white">PolyScope</span>
-                <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">
-                  BETA
-                </span>
-              </Link>
-              <div className="hidden md:flex items-center gap-1 flex-1 justify-center">
-                {NAV_ITEMS.map((item) =>
-                  item.external ? (
-                    <a
-                      key={item.href}
-                      href={item.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
-                    >
-                      {item.label}
-                    </a>
-                  ) : (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className="px-2 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
-                    >
-                      {item.label}
-                    </Link>
-                  )
-                )}
+          <Suspense fallback={null}>
+            <PageViewTracker />
+          </Suspense>
+
+          <header className="border-b border-ink-700 bg-background/85 backdrop-blur-md sticky top-0 z-50">
+            <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-10">
+              <div className="flex items-center justify-between h-14">
+                <Link href="/" className="flex items-center gap-2 group">
+                  <Wordmark variant="crosshair" size={18} />
+                  <span className="eyebrow text-scope-500 ml-1.5 border border-scope-500/35 px-1.5 py-[1px] rounded-sm bg-scope-500/8">
+                    beta
+                  </span>
+                </Link>
+
+                <nav className="hidden lg:flex items-center gap-0.5 flex-1 justify-center">
+                  {NAV_ITEMS.map((item) =>
+                    item.external ? (
+                      <a
+                        key={item.href}
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 text-body-sm text-ink-400 hover:text-ink-100 font-mono transition-colors duration-120"
+                      >
+                        {item.label}
+                      </a>
+                    ) : (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className="px-2.5 py-1.5 text-body-sm text-ink-400 hover:text-ink-100 font-mono transition-colors duration-120"
+                      >
+                        {item.label}
+                      </Link>
+                    ),
+                  )}
+                </nav>
+
+                <div className="hidden lg:flex items-center gap-2">
+                  <SearchBar />
+                  <ConnectWallet />
+                </div>
+                <MobileNav items={NAV_ITEMS} />
               </div>
-              <div className="hidden md:flex items-center gap-2">
-                <SearchBar />
-                <ConnectWallet />
-              </div>
-              <MobileNav items={NAV_ITEMS} />
             </div>
-          </div>
-        </nav>
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {children}
-        </main>
-        <footer className="border-t border-gray-800 mt-16 py-8">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <p className="text-xs text-gray-500 text-center">
-              PolyScope is a non-custodial interface for Polymarket. We
-              never hold your keys or funds. Orders you submit are signed
-              by your own wallet and sent directly to Polymarket. For full
-              disclosures see{" "}
-              <Link
-                href="/terms"
-                className="text-gray-400 hover:text-gray-200 underline underline-offset-2"
-              >
-                Terms
-              </Link>
-              .
-            </p>
-          </div>
-        </footer>
+          </header>
+
+          <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-10 py-8">
+            {children}
+          </main>
+
+          <footer className="border-t border-ink-700 mt-20">
+            <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-10 py-8">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+                <div className="max-w-md">
+                  <Wordmark variant="crosshair" size={16} />
+                  <p className="text-micro text-ink-400 mt-3 leading-relaxed">
+                    Non-custodial interface for Polymarket. Orders you submit
+                    are signed by your own wallet and sent directly to
+                    Polymarket&apos;s CLOB. We never hold your keys or funds.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-10 gap-y-2 text-body-sm font-mono">
+                  <Link href="/methodology" className="text-ink-400 hover:text-ink-100 transition-colors">
+                    methodology
+                  </Link>
+                  <Link href="/calibration" className="text-ink-400 hover:text-ink-100 transition-colors">
+                    calibration
+                  </Link>
+                  <Link href="/builder" className="text-ink-400 hover:text-ink-100 transition-colors">
+                    builder
+                  </Link>
+                  <a
+                    href="/api/docs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-ink-400 hover:text-ink-100 transition-colors"
+                  >
+                    api
+                  </a>
+                  <Link href="/terms" className="text-ink-400 hover:text-ink-100 transition-colors">
+                    terms
+                  </Link>
+                </div>
+              </div>
+              <div className="mt-6 pt-6 border-t border-ink-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <p className="text-micro text-ink-500 font-mono">
+                  polyscope · intelligence layer for prediction markets
+                </p>
+                <p className="text-micro text-ink-500 font-mono">
+                  polymarket-v2 · clob · polygon
+                </p>
+              </div>
+            </div>
+          </footer>
         </Web3Provider>
       </body>
     </html>

@@ -20,51 +20,55 @@ function timeAgo(ts: string): string {
 export function WhaleFlow() {
   const { data } = usePollingFetch<WhaleFlowResponse>(
     "/api/whale-flow?hours=24",
-    60_000
+    60_000,
   );
 
   if (!data || !data.alerts || data.alerts.length === 0) return null;
 
   return (
-    <section className="mb-10">
-      <h2 className="text-xl font-semibold text-white mb-4">
-        Whale Flow (24h)
-      </h2>
-      <div className="space-y-3">
+    <div>
+      <div className="flex items-end justify-between mb-5 pb-3 border-b border-ink-800">
+        <div>
+          <div className="eyebrow mb-2">flow · top-trader entries</div>
+          <h2 className="text-h3 text-ink-100 tracking-tight">whale flow · 24h</h2>
+          <p className="text-caption text-ink-400 mt-1 max-w-2xl">
+            New positions ≥ $10K from top-ranked traders in the last 24 hours.
+          </p>
+        </div>
+      </div>
+      <div className="surface rounded-lg overflow-hidden divide-y divide-ink-800">
         {data.alerts.slice(0, 10).map((a) => (
           <div
             key={a.id}
-            className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-4"
+            className="flex items-center justify-between px-5 py-4 row-hover"
           >
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-medium text-sm truncate">
+            <div className="flex-1 min-w-0 pr-6">
+              <p className="text-body text-ink-100 truncate font-medium">
                 {a.question}
               </p>
-              <div className="flex items-center gap-3 mt-1.5 text-sm">
-                <span className="text-gray-500">
-                  Trader #{a.trader_rank}
+              <div className="flex items-center gap-5 mt-1.5 text-caption font-mono">
+                <span className="text-ink-500">
+                  trader <span className="num text-ink-300">#{a.trader_rank}</span>
                 </span>
                 <span
-                  className={
-                    a.side === "YES" ? "text-emerald-400" : "text-red-400"
-                  }
+                  className={`num ${
+                    a.side === "YES" ? "text-scope-400" : "text-alert-500"
+                  }`}
                 >
                   {a.side}
                 </span>
-                <span className="text-gray-400">
-                  {(a.price * 100).toFixed(0)}%
+                <span className="text-ink-400 num">
+                  @ {(a.price * 100).toFixed(0)}%
                 </span>
-                <span className="text-gray-500 text-xs">
-                  {timeAgo(a.detected_at)}
-                </span>
+                <span className="text-ink-500">{timeAgo(a.detected_at)}</span>
               </div>
             </div>
-            <span className="text-lg font-bold text-white whitespace-nowrap">
+            <span className="num text-h4 text-ink-100 whitespace-nowrap tracking-tight">
               ${a.size.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </span>
           </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
