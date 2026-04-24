@@ -203,10 +203,10 @@ def place_attributed_order(
     )
 
     side_enum = Side.BUY if side.upper() == "BUY" else Side.SELL
-    try:
-        ot = OrderType[order_type.upper()]
-    except KeyError as e:
-        raise ValueError(f"Unsupported order_type: {order_type}") from e
+    order_type_upper = order_type.upper()
+    if not hasattr(OrderType, order_type_upper):
+        raise ValueError(f"Unsupported order_type: {order_type}")
+    ot = getattr(OrderType, order_type_upper)
 
     client = get_client()
     resp = client.create_and_post_order(
