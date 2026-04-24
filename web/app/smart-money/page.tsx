@@ -66,17 +66,17 @@ export default function SmartMoneyPage() {
     retry,
   } = usePollingFetch<LeaderboardResponse>(
     "/api/smart-money/leaderboard",
-    60_000
+    60_000,
   );
 
   const { data: divData } = usePollingFetch<DivergencesResponse>(
     "/api/divergences",
-    60_000
+    60_000,
   );
 
   const { data: histData } = usePollingFetch<HistoryResponse>(
     "/api/divergences/history?limit=50",
-    60_000
+    60_000,
   );
 
   const traders = lbData?.traders || [];
@@ -119,15 +119,16 @@ export default function SmartMoneyPage() {
     predictiveOnly;
 
   const predictiveCount = divergences.filter(
-    (d) => d.predictive_contributor
+    (d) => d.predictive_contributor,
   ).length;
 
   if (lbLoading) {
     return (
       <div>
-        <div className="mb-2">
-          <div className="h-8 w-48 bg-gray-800 rounded animate-pulse mb-2" />
-          <div className="h-4 w-80 bg-gray-800/60 rounded animate-pulse mb-6" />
+        <div className="mb-10 pb-10 border-b border-ink-800">
+          <div className="h-3 w-24 bg-ink-800 rounded-sm mb-5 animate-pulse-subtle" />
+          <div className="h-10 w-80 bg-ink-800 rounded-sm mb-3 animate-pulse-subtle" />
+          <div className="h-4 w-96 bg-ink-800/70 rounded-sm animate-pulse-subtle" />
         </div>
         <TableSkeleton rows={10} />
       </div>
@@ -136,13 +137,12 @@ export default function SmartMoneyPage() {
 
   if (lbError && !lbData) {
     return (
-      <div className="text-center py-12">
-        <p className="text-red-400 mb-3">Failed to load smart money data.</p>
-        <button
-          onClick={retry}
-          className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
-        >
-          Retry
+      <div className="text-center py-16">
+        <p className="text-alert-500 font-mono text-body-sm mb-4">
+          failed to load smart-money data
+        </p>
+        <button onClick={retry} className="btn-secondary">
+          retry
         </button>
       </div>
     );
@@ -150,123 +150,123 @@ export default function SmartMoneyPage() {
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-2">
-        <h1 className="text-3xl font-bold text-white">Smart Money Feed</h1>
-        <LastUpdated lastUpdated={lastUpdated} error={lbError} retry={retry} />
-      </div>
-      <p className="text-gray-400 mb-6">
-        Top trader rankings and counter-consensus signals. Read-only intelligence.
-      </p>
+      {/* HERO */}
+      <section className="mb-10 pb-10 border-b border-ink-800">
+        <div className="flex items-start justify-between gap-8 mb-2">
+          <div className="max-w-3xl">
+            <div className="eyebrow mb-3 text-scope-500">signals · realtime</div>
+            <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight">
+              smart money feed
+            </h1>
+            <p className="text-body-lg text-ink-300 mt-3 max-w-2xl leading-relaxed">
+              Top-trader rankings and counter-consensus signals with per-contributor
+              accuracy. Every decision card shows the evidence under the claim.
+            </p>
+          </div>
+          <LastUpdated lastUpdated={lastUpdated} error={lbError} retry={retry} />
+        </div>
+      </section>
 
       {/* Whale Flow */}
-      <WhaleFlow />
+      <section className="mb-12">
+        <WhaleFlow />
+      </section>
 
-      {/* Counter-consensus signals */}
+      {/* Active divergences */}
       {divergences.length > 0 && (
-        <section className="mb-10">
-          <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-            <h2 className="text-xl font-semibold text-white">
-              Active Divergences
-              <span className="text-sm text-gray-500 font-normal ml-2">
-                {filtered.length} of {divergences.length}
-              </span>
-            </h2>
+        <section className="mb-12">
+          <div className="flex items-end justify-between mb-5 pb-3 border-b border-ink-800 flex-wrap gap-3">
+            <div>
+              <div className="eyebrow mb-2">realtime · divergence feed</div>
+              <h2 className="text-h3 text-ink-100 tracking-tight">
+                active divergences{" "}
+                <span className="num text-ink-500 font-normal tracking-normal">
+                  {filtered.length} / {divergences.length}
+                </span>
+              </h2>
+            </div>
             {filtersActive && (
-              <button
-                onClick={resetFilters}
-                className="text-xs text-gray-400 hover:text-white"
-              >
-                Clear filters
+              <button onClick={resetFilters} className="btn-ghost">
+                clear filters
               </button>
             )}
           </div>
 
           {/* Filter bar */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 mb-4 flex flex-wrap items-center gap-3 text-sm">
+          <div className="surface rounded-lg p-3 mb-4 flex flex-wrap items-center gap-2.5">
             <button
               onClick={() => setPredictiveOnly(!predictiveOnly)}
-              className={`text-xs px-2.5 py-1 rounded-md border font-medium transition-colors ${
+              className={`btn ${
                 predictiveOnly
-                  ? "bg-violet-500/20 border-violet-500/50 text-violet-200"
-                  : "bg-gray-950 border-gray-700 text-gray-400 hover:text-gray-200"
+                  ? "bg-scope-500/15 border border-scope-500/45 text-scope-300"
+                  : "border border-ink-700 text-ink-400 hover:text-ink-100 hover:border-ink-600"
               }`}
-              title="Backtest: predictive-backed signals returned +14.9% ROI on 33 signals vs +4.2% unfiltered"
+              title="Backtest · predictive-backed signals: +14.9% ROI on 33 signals vs +4.2% unfiltered"
             >
-              ⚡ Predictive-backed only
+              predictive-backed only
               {predictiveCount > 0 && (
-                <span className="ml-1.5 text-[11px] opacity-70">
+                <span className="ml-1.5 num opacity-70">
                   ({predictiveCount})
                 </span>
               )}
             </button>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 uppercase">Direction</label>
-              <select
-                value={direction}
-                onChange={(e) => setDirection(e.target.value as DirectionFilter)}
-                className="bg-gray-950 border border-gray-800 text-white rounded px-2 py-1 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="YES">YES only</option>
-                <option value="NO">NO only</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 uppercase">Tier</label>
-              <select
-                value={tier}
-                onChange={(e) => setTier(e.target.value as TierFilter)}
-                className="bg-gray-950 border border-gray-800 text-white rounded px-2 py-1 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="tier1">Tier 1 (≥80)</option>
-                <option value="tier2">Tier 2 (60-79)</option>
-                <option value="tier3plus">Tier 3+ (&lt;60)</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 uppercase">Skew</label>
-              <select
-                value={skew}
-                onChange={(e) => setSkew(e.target.value as SkewFilter)}
-                className="bg-gray-950 border border-gray-800 text-white rounded px-2 py-1 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="tight">Tight (40-60%)</option>
-                <option value="moderate">Moderate</option>
-                <option value="lopsided">Lopsided</option>
-                <option value="very_lopsided">Very lopsided</option>
-              </select>
-            </div>
+
+            <FilterSelect
+              label="direction"
+              value={direction}
+              onChange={(v) => setDirection(v as DirectionFilter)}
+              options={[
+                { value: "all", label: "all" },
+                { value: "YES", label: "yes only" },
+                { value: "NO", label: "no only" },
+              ]}
+            />
+            <FilterSelect
+              label="tier"
+              value={tier}
+              onChange={(v) => setTier(v as TierFilter)}
+              options={[
+                { value: "all", label: "all" },
+                { value: "tier1", label: "tier 1 · ≥80" },
+                { value: "tier2", label: "tier 2 · 60–79" },
+                { value: "tier3plus", label: "tier 3+ · <60" },
+              ]}
+            />
+            <FilterSelect
+              label="skew"
+              value={skew}
+              onChange={(v) => setSkew(v as SkewFilter)}
+              options={[
+                { value: "all", label: "all" },
+                { value: "tight", label: "tight · 40–60" },
+                { value: "moderate", label: "moderate" },
+                { value: "lopsided", label: "lopsided" },
+                { value: "very_lopsided", label: "very lopsided" },
+              ]}
+            />
             {categories.length > 1 && (
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-gray-500 uppercase">Category</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="bg-gray-950 border border-gray-800 text-white rounded px-2 py-1 text-sm max-w-[200px]"
-                >
-                  <option value="all">All</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <FilterSelect
+                label="category"
+                value={category}
+                onChange={setCategory}
+                options={[
+                  { value: "all", label: "all" },
+                  ...categories.map((c) => ({ value: c, label: c })),
+                ]}
+              />
             )}
           </div>
 
           {filtered.length === 0 ? (
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
-              <p className="text-gray-400 mb-2">
-                No signals match the current filters.
+            <div className="surface rounded-lg p-10 text-center">
+              <p className="text-body-sm text-ink-400 font-mono mb-3">
+                no signals match current filters
               </p>
               <button
                 onClick={resetFilters}
-                className="text-sm text-emerald-400 hover:text-emerald-300"
+                className="text-body-sm text-scope-500 hover:text-scope-400 font-mono"
               >
-                Clear filters
+                clear filters
               </button>
             </div>
           ) : (
@@ -279,53 +279,56 @@ export default function SmartMoneyPage() {
         </section>
       )}
 
-      {/* Resolved Signals */}
+      {/* Resolved signals */}
       {history.length > 0 && (
-        <section className="mb-10">
-          <h2 className="text-xl font-semibold text-white mb-4">
-            Resolved Signals
-          </h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-            <table className="w-full">
+        <section className="mb-12">
+          <div className="mb-5 pb-3 border-b border-ink-800">
+            <div className="eyebrow mb-2">ledger · resolved</div>
+            <h2 className="text-h3 text-ink-100 tracking-tight">resolved signals</h2>
+          </div>
+          <div className="surface rounded-lg overflow-x-auto">
+            <table className="w-full text-body-sm">
               <thead>
-                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
-                  <th className="text-left p-3">Date</th>
-                  <th className="text-left p-3">Market</th>
-                  <th className="text-center p-3">SM Called</th>
-                  <th className="text-center p-3">Crowd Said</th>
-                  <th className="text-center p-3">Correct</th>
+                <tr className="border-b border-ink-800">
+                  <th className="eyebrow text-left px-4 py-3">date</th>
+                  <th className="eyebrow text-left px-4 py-3">market</th>
+                  <th className="eyebrow text-center px-4 py-3">sm called</th>
+                  <th className="eyebrow text-center px-4 py-3">crowd</th>
+                  <th className="eyebrow text-center px-4 py-3">correct</th>
                 </tr>
               </thead>
               <tbody>
                 {history.map((h, i) => (
                   <tr
                     key={h.market_id + i}
-                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                    className="border-b border-ink-800/60 last:border-0 row-hover"
                   >
-                    <td className="p-3 text-gray-400 text-xs whitespace-nowrap">
+                    <td className="px-4 py-3 text-ink-400 text-caption font-mono num whitespace-nowrap">
                       {new Date(h.timestamp).toLocaleDateString()}
                     </td>
-                    <td className="p-3 text-white text-sm truncate max-w-[300px]">
+                    <td className="px-4 py-3 text-ink-100 truncate max-w-[360px]">
                       {h.question}
                     </td>
                     <td
-                      className={`p-3 text-center text-sm font-medium ${
+                      className={`px-4 py-3 text-center font-mono num ${
                         h.sm_direction === "YES"
-                          ? "text-emerald-400"
-                          : "text-red-400"
+                          ? "text-scope-400"
+                          : "text-alert-500"
                       }`}
                     >
                       {h.sm_direction}
                     </td>
-                    <td className="p-3 text-center text-sm text-gray-400">
-                      {(h.market_price * 100).toFixed(0)}% YES
+                    <td className="px-4 py-3 text-center font-mono num text-ink-300">
+                      {(h.market_price * 100).toFixed(0)}%
                     </td>
-                    <td className="p-3 text-center text-lg">
-                      {h.outcome_correct === 1
-                        ? "\u2705"
-                        : h.outcome_correct === 0
-                          ? "\u274c"
-                          : "\u2014"}
+                    <td className="px-4 py-3 text-center font-mono">
+                      {h.outcome_correct === 1 ? (
+                        <span className="text-scope-500">✓</span>
+                      ) : h.outcome_correct === 0 ? (
+                        <span className="text-alert-500">✗</span>
+                      ) : (
+                        <span className="text-ink-600">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -335,53 +338,75 @@ export default function SmartMoneyPage() {
         </section>
       )}
 
-      {/* Leaderboard */}
+      {/* Leaderboard by profit */}
       <section>
-        <h2 className="text-xl font-semibold text-white mb-4">
-          Top Traders by Profit
-        </h2>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-          <table className="w-full">
+        <div className="mb-5 pb-3 border-b border-ink-800">
+          <div className="eyebrow mb-2">supporting · by p&amp;l</div>
+          <h2 className="text-h3 text-ink-100 tracking-tight">
+            top traders · profit
+          </h2>
+          <p className="text-caption text-ink-400 mt-1">
+            Polymarket&apos;s native ranking. Not what we rank by — see the{" "}
+            <a
+              href="/traders"
+              className="text-scope-500 hover:text-scope-400 underline underline-offset-2"
+            >
+              predictive leaderboard
+            </a>{" "}
+            for accuracy-ranked.
+          </p>
+        </div>
+        <div className="surface rounded-lg overflow-x-auto">
+          <table className="w-full text-body-sm">
             <thead>
-              <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
-                <th className="text-left p-3">Rank</th>
-                <th className="text-left p-3">Trader</th>
-                <th className="text-right p-3">Profit</th>
-                <th className="text-right p-3">Volume</th>
-                <th className="text-right p-3">Alpha</th>
+              <tr className="border-b border-ink-800">
+                <th className="eyebrow text-left px-4 py-3">rank</th>
+                <th className="eyebrow text-left px-4 py-3">trader</th>
+                <th className="eyebrow text-right px-4 py-3">profit</th>
+                <th className="eyebrow text-right px-4 py-3">volume</th>
+                <th className="eyebrow text-right px-4 py-3">alpha</th>
               </tr>
             </thead>
             <tbody>
               {traders.slice(0, 50).map((t) => {
                 const alpha = (t.alpha_ratio || 0) * 100;
-                const alphaColor =
+                const alphaClass =
                   alpha > 5
-                    ? "text-emerald-400"
+                    ? "text-scope-400"
                     : alpha > 1
-                      ? "text-amber-400"
-                      : "text-gray-500";
+                      ? "text-fade-500"
+                      : "text-ink-500";
                 return (
                   <tr
                     key={t.address}
-                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                    className="border-b border-ink-800/60 last:border-0 row-hover"
                   >
-                    <td className="p-3 text-gray-400 text-sm">#{t.rank}</td>
-                    <td className="p-3">
-                      <p className="text-white text-sm font-medium">
-                        {t.name || `${t.address.slice(0, 6)}...${t.address.slice(-4)}`}
-                      </p>
+                    <td className="px-4 py-3 text-ink-500 num font-mono">
+                      #{t.rank}
+                    </td>
+                    <td className="px-4 py-3 text-ink-100 font-medium">
+                      {t.name ||
+                        `${t.address.slice(0, 6)}…${t.address.slice(-4)}`}
                     </td>
                     <td
-                      className={`p-3 text-right text-sm font-medium ${
-                        t.profit >= 0 ? "text-emerald-400" : "text-red-400"
+                      className={`px-4 py-3 text-right font-mono num ${
+                        t.profit >= 0 ? "text-scope-400" : "text-alert-500"
                       }`}
                     >
-                      ${t.profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      $
+                      {t.profit.toLocaleString(undefined, {
+                        maximumFractionDigits: 0,
+                      })}
                     </td>
-                    <td className="p-3 text-right text-sm text-gray-400">
-                      ${t.volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    <td className="px-4 py-3 text-right font-mono num text-ink-300">
+                      $
+                      {t.volume.toLocaleString(undefined, {
+                        maximumFractionDigits: 0,
+                      })}
                     </td>
-                    <td className={`p-3 text-right text-sm font-medium ${alphaColor}`}>
+                    <td
+                      className={`px-4 py-3 text-right font-mono num font-medium ${alphaClass}`}
+                    >
                       {alpha.toFixed(1)}%
                     </td>
                   </tr>
@@ -393,6 +418,35 @@ export default function SmartMoneyPage() {
       </section>
 
       <Disclaimer />
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="eyebrow">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-background border border-ink-700 text-ink-100 text-body-sm font-mono rounded-md px-2 py-1 focus:outline-none focus:border-scope-500/50 cursor-pointer"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
