@@ -101,13 +101,6 @@ interface FollowAlert {
   total_divergent_signals: number | null;
 }
 
-function colorForWinRate(pct: number | null) {
-  if (pct === null) return "text-ink-500";
-  if (pct >= 60) return "text-scope-400";
-  if (pct >= 50) return "text-fade-500";
-  return "text-alert-500";
-}
-
 function directionColor(dir: string | null) {
   if (!dir) return "text-ink-400";
   return dir === "YES" ? "text-scope-400" : "text-alert-500";

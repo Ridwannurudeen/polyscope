@@ -38,6 +38,16 @@ const nextConfig = {
           process: "process/browser",
         }),
       );
+      // Silence optional deps pulled in by @metamask/sdk and pino /
+      // walletconnect logger. The libraries gracefully degrade when these
+      // can't be required; webpack only complains because it tries to
+      // resolve every static import path. IgnorePlugin makes them missing
+      // at bundle time, matching what the libraries already expect.
+      config.plugins.push(
+        new webpack.IgnorePlugin({
+          resourceRegExp: /^(pino-pretty|@react-native-async-storage\/async-storage)$/,
+        }),
+      );
     }
     return config;
   },
