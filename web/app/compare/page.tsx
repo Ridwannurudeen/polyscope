@@ -41,21 +41,24 @@ function shortAddr(addr: string) {
 }
 
 function colorForAccuracy(pct: number) {
-  if (pct >= 70) return "text-emerald-400";
-  if (pct >= 50) return "text-amber-400";
-  return "text-red-400";
+  if (pct >= 70) return "text-scope-400";
+  if (pct >= 50) return "text-fade-500";
+  return "text-alert-500";
 }
 
 export default function ComparePage() {
   const { data, loading } = usePollingFetch<CompareResponse>(
     "/api/leaderboards/compare?limit=25&min_signals=5",
-    120_000
+    120_000,
   );
 
   if (loading) {
     return (
       <div>
-        <div className="h-8 w-72 bg-gray-800 rounded animate-pulse mb-6" />
+        <div className="mb-10 pb-10 border-b border-ink-800">
+          <div className="h-3 w-24 bg-ink-800 rounded-sm mb-3 animate-pulse-subtle" />
+          <div className="h-9 w-72 bg-ink-800 rounded-sm animate-pulse-subtle" />
+        </div>
         <TableSkeleton rows={10} />
       </div>
     );
@@ -63,114 +66,117 @@ export default function ComparePage() {
 
   if (!data) {
     return (
-      <div className="text-gray-400">Comparison data unavailable.</div>
+      <div className="text-body-sm text-ink-400 font-mono py-16 text-center">
+        comparison data unavailable
+      </div>
     );
   }
 
   const overlapAddresses = new Set(
-    data.overlap.addresses.map((a) => a.toLowerCase())
+    data.overlap.addresses.map((a) => a.toLowerCase()),
   );
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white mb-2">
-          P&amp;L vs Accuracy
+      <section className="mb-10 pb-10 border-b border-ink-800">
+        <div className="eyebrow mb-3">compare · two ranks</div>
+        <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight">
+          p&amp;l vs accuracy
         </h1>
-        <p className="text-gray-400 max-w-3xl">
-          Polymarket ranks traders by profit. PolyScope ranks them by how often
-          their positions match resolved outcomes when they diverge from the
-          crowd. These are not the same thing.
+        <p className="text-body-lg text-ink-300 mt-3 max-w-2xl leading-relaxed">
+          Polymarket ranks traders by profit. PolyScope ranks them by how
+          often their positions match resolved outcomes when they diverge from
+          the crowd. These are not the same thing.
         </p>
-      </div>
+      </section>
 
-      {/* Headline stats */}
-      <section className="mb-8">
+      <section className="mb-10">
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <p className="text-xs text-gray-500 uppercase mb-1">
-              P&amp;L top {data.limit}
-            </p>
-            <p className="text-2xl font-semibold text-white">
+          <div className="surface rounded-md p-4">
+            <div className="eyebrow mb-2">
+              p&amp;l top {data.limit}
+            </div>
+            <p className="num text-h3 text-ink-100 tracking-tight">
               {data.pl_leaderboard.length}
             </p>
-            <p className="text-xs text-gray-500 mt-1">addresses ranked</p>
-          </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <p className="text-xs text-gray-500 uppercase mb-1">
-              Accuracy top {data.limit}
+            <p className="text-micro text-ink-500 font-mono mt-1.5">
+              addresses ranked
             </p>
-            <p className="text-2xl font-semibold text-white">
+          </div>
+          <div className="surface rounded-md p-4">
+            <div className="eyebrow mb-2">
+              accuracy top {data.limit}
+            </div>
+            <p className="num text-h3 text-ink-100 tracking-tight">
               {data.accuracy_top.length}
             </p>
-            <p className="text-xs text-gray-500 mt-1">
-              with ≥{data.min_signals} signals
+            <p className="text-micro text-ink-500 font-mono mt-1.5">
+              with ≥<span className="num">{data.min_signals}</span> signals
             </p>
           </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <p className="text-xs text-gray-500 uppercase mb-1">
-              Overlap
-            </p>
-            <p className="text-2xl font-semibold text-amber-400">
+          <div className="surface rounded-md p-4">
+            <div className="eyebrow mb-2">overlap</div>
+            <p className="num text-h3 text-fade-500 tracking-tight">
               {data.overlap.count}
-              <span className="text-sm text-gray-400 ml-2 font-normal">
-                {data.overlap.overlap_pct_of_accuracy_top != null
-                  ? `(${data.overlap.overlap_pct_of_accuracy_top.toFixed(0)}% of accuracy top)`
-                  : ""}
-              </span>
+              {data.overlap.overlap_pct_of_accuracy_top != null && (
+                <span className="text-caption text-ink-400 ml-2 font-normal num">
+                  ({data.overlap.overlap_pct_of_accuracy_top.toFixed(0)}%)
+                </span>
+              )}
             </p>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-micro text-ink-500 font-mono mt-1.5">
               addresses on both lists
             </p>
           </div>
         </div>
       </section>
 
-      {/* Side-by-side */}
-      <section className="mb-10 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* P&L side */}
+      <section className="mb-12 grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
-          <h2 className="text-lg font-semibold text-white mb-1">
-            Polymarket P&amp;L Leaderboard
-          </h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Ranked by total profit
+          <div className="eyebrow mb-1.5">polymarket · profit</div>
+          <p className="text-caption text-ink-400 mb-3">
+            ranked by total profit
           </p>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="surface rounded-lg overflow-x-auto">
+            <table className="w-full text-body-sm">
               <thead>
-                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
-                  <th className="text-left p-3">#</th>
-                  <th className="text-left p-3">Trader</th>
-                  <th className="text-right p-3">Profit</th>
+                <tr className="border-b border-ink-800">
+                  <th className="eyebrow text-left px-3 py-3">#</th>
+                  <th className="eyebrow text-left px-3 py-3">trader</th>
+                  <th className="eyebrow text-right px-3 py-3">profit</th>
                 </tr>
               </thead>
               <tbody>
                 {data.pl_leaderboard.map((t) => {
                   const isOverlap = overlapAddresses.has(
-                    t.address.toLowerCase()
+                    t.address.toLowerCase(),
                   );
                   return (
                     <tr
                       key={t.address}
-                      className={`border-b border-gray-800/50 hover:bg-gray-800/30 ${isOverlap ? "bg-emerald-500/5" : ""}`}
+                      className={`border-b border-ink-800/60 last:border-0 row-hover ${isOverlap ? "bg-scope-500/5" : ""}`}
                     >
-                      <td className="p-3 text-gray-500 w-8">{t.rank}</td>
-                      <td className="p-3">
+                      <td className="px-3 py-3 text-ink-500 font-mono num w-8">
+                        {t.rank}
+                      </td>
+                      <td className="px-3 py-3">
                         <Link
                           href={`/traders/${t.address}`}
-                          className={`font-mono text-xs hover:text-emerald-400 ${isOverlap ? "text-emerald-400" : "text-white"}`}
+                          className={`font-mono num text-body-sm hover:text-scope-400 transition-colors ${isOverlap ? "text-scope-400" : "text-ink-100"}`}
                         >
                           {t.name || shortAddr(t.address)}
                         </Link>
                         {isOverlap && (
-                          <span className="ml-2 text-xs text-emerald-400">
-                            ★
+                          <span className="ml-2 text-eyebrow font-mono text-scope-500 uppercase tracking-wider">
+                            ✓
                           </span>
                         )}
                       </td>
-                      <td className="p-3 text-right text-emerald-400 font-medium">
-                        ${t.profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      <td className="px-3 py-3 text-right text-scope-400 font-mono num font-medium">
+                        $
+                        {t.profit.toLocaleString(undefined, {
+                          maximumFractionDigits: 0,
+                        })}
                       </td>
                     </tr>
                   );
@@ -180,59 +186,61 @@ export default function ComparePage() {
           </div>
         </div>
 
-        {/* Accuracy side */}
         <div>
-          <h2 className="text-lg font-semibold text-white mb-1">
-            PolyScope Accuracy Leaderboard
-          </h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Ranked by hit rate when diverging from market
+          <div className="eyebrow mb-1.5">polyscope · accuracy</div>
+          <p className="text-caption text-ink-400 mb-3">
+            ranked by hit rate when diverging from market
           </p>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="surface rounded-lg overflow-x-auto">
+            <table className="w-full text-body-sm">
               <thead>
-                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
-                  <th className="text-left p-3">#</th>
-                  <th className="text-left p-3">Trader</th>
-                  <th className="text-right p-3">Accuracy</th>
+                <tr className="border-b border-ink-800">
+                  <th className="eyebrow text-left px-3 py-3">#</th>
+                  <th className="eyebrow text-left px-3 py-3">trader</th>
+                  <th className="eyebrow text-right px-3 py-3">accuracy</th>
                 </tr>
               </thead>
               <tbody>
                 {data.accuracy_top.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="p-4 text-sm text-gray-500">
-                      Building leaderboard — needs more resolved signals.
+                    <td
+                      colSpan={3}
+                      className="px-3 py-4 text-body-sm text-ink-500 font-mono"
+                    >
+                      building leaderboard · needs more resolved signals
                     </td>
                   </tr>
                 ) : (
                   data.accuracy_top.map((t, i) => {
                     const isOverlap = overlapAddresses.has(
-                      t.trader_address.toLowerCase()
+                      t.trader_address.toLowerCase(),
                     );
                     return (
                       <tr
                         key={t.trader_address}
-                        className={`border-b border-gray-800/50 hover:bg-gray-800/30 ${isOverlap ? "bg-emerald-500/5" : ""}`}
+                        className={`border-b border-ink-800/60 last:border-0 row-hover ${isOverlap ? "bg-scope-500/5" : ""}`}
                       >
-                        <td className="p-3 text-gray-500 w-8">{i + 1}</td>
-                        <td className="p-3">
+                        <td className="px-3 py-3 text-ink-500 font-mono num w-8">
+                          {String(i + 1).padStart(2, "0")}
+                        </td>
+                        <td className="px-3 py-3">
                           <Link
                             href={`/traders/${t.trader_address}`}
-                            className={`font-mono text-xs hover:text-emerald-400 ${isOverlap ? "text-emerald-400" : "text-white"}`}
+                            className={`font-mono num text-body-sm hover:text-scope-400 transition-colors ${isOverlap ? "text-scope-400" : "text-ink-100"}`}
                           >
                             {shortAddr(t.trader_address)}
                           </Link>
                           {isOverlap && (
-                            <span className="ml-2 text-xs text-emerald-400">
-                              ★
+                            <span className="ml-2 text-eyebrow font-mono text-scope-500 uppercase tracking-wider">
+                              ✓
                             </span>
                           )}
                         </td>
                         <td
-                          className={`p-3 text-right font-medium ${colorForAccuracy(t.accuracy_pct)}`}
+                          className={`px-3 py-3 text-right font-mono num font-medium ${colorForAccuracy(t.accuracy_pct)}`}
                         >
                           {t.accuracy_pct.toFixed(0)}%
-                          <span className="text-xs text-gray-500 ml-1">
+                          <span className="text-micro text-ink-500 ml-1.5 font-normal">
                             ({t.correct_predictions}/{t.total_divergent_signals})
                           </span>
                         </td>
@@ -246,39 +254,38 @@ export default function ComparePage() {
         </div>
       </section>
 
-      {/* Receipts */}
-      <section className="mb-10 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <section className="mb-12 grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
-          <h2 className="text-lg font-semibold text-white mb-1">
-            P&amp;L Top That Are Anti-Predictive
-          </h2>
-          <p className="text-xs text-gray-500 mb-3">
-            High-profit traders whose divergent positions are wrong more often
+          <div className="eyebrow mb-1.5">divergence · profitable but wrong</div>
+          <p className="text-caption text-ink-400 mb-3">
+            high-profit traders whose divergent positions are wrong more often
             than right
           </p>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl">
+          <div className="surface rounded-lg">
             {data.pl_top_in_fade_list.length === 0 ? (
-              <p className="p-4 text-sm text-gray-500">
-                No overlap with the fade list yet.
+              <p className="px-4 py-4 text-body-sm text-ink-500 font-mono">
+                no overlap with the fade list yet
               </p>
             ) : (
-              <table className="w-full text-sm">
+              <table className="w-full text-body-sm">
                 <tbody>
                   {data.pl_top_in_fade_list.map((t) => (
                     <tr
                       key={t.address}
-                      className="border-b border-gray-800/50 last:border-0"
+                      className="border-b border-ink-800/60 last:border-0 row-hover"
                     >
-                      <td className="p-3 text-gray-500 w-8">#{t.rank}</td>
-                      <td className="p-3">
+                      <td className="px-3 py-3 text-ink-500 font-mono num w-12">
+                        #{t.rank}
+                      </td>
+                      <td className="px-3 py-3">
                         <Link
                           href={`/traders/${t.address}`}
-                          className="text-white font-mono text-xs hover:text-red-400"
+                          className="text-ink-100 font-mono num hover:text-alert-500 transition-colors"
                         >
                           {t.name || shortAddr(t.address)}
                         </Link>
                       </td>
-                      <td className="p-3 text-right text-red-400 text-xs">
+                      <td className="px-3 py-3 text-right text-alert-500 font-mono text-eyebrow uppercase tracking-wider">
                         on fade list
                       </td>
                     </tr>
@@ -290,38 +297,36 @@ export default function ComparePage() {
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-white mb-1">
-            Accuracy Leaders Missing From P&amp;L Top
-          </h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Predictive traders the P&amp;L ranking overlooks
+          <div className="eyebrow mb-1.5">overlooked · accuracy + invisible</div>
+          <p className="text-caption text-ink-400 mb-3">
+            predictive traders the p&amp;l ranking misses
           </p>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl">
+          <div className="surface rounded-lg">
             {data.accuracy_top_missing_from_pl.length === 0 ? (
-              <p className="p-4 text-sm text-gray-500">
-                Nothing missing — the two rankings align here.
+              <p className="px-4 py-4 text-body-sm text-ink-500 font-mono">
+                nothing missing · the two rankings align here
               </p>
             ) : (
-              <table className="w-full text-sm">
+              <table className="w-full text-body-sm">
                 <tbody>
                   {data.accuracy_top_missing_from_pl.map((t) => (
                     <tr
                       key={t.trader_address}
-                      className="border-b border-gray-800/50 last:border-0"
+                      className="border-b border-ink-800/60 last:border-0 row-hover"
                     >
-                      <td className="p-3">
+                      <td className="px-3 py-3">
                         <Link
                           href={`/traders/${t.trader_address}`}
-                          className="text-white font-mono text-xs hover:text-emerald-400"
+                          className="text-ink-100 font-mono num hover:text-scope-400 transition-colors"
                         >
                           {shortAddr(t.trader_address)}
                         </Link>
                       </td>
                       <td
-                        className={`p-3 text-right font-medium ${colorForAccuracy(t.accuracy_pct)}`}
+                        className={`px-3 py-3 text-right font-mono num font-medium ${colorForAccuracy(t.accuracy_pct)}`}
                       >
                         {t.accuracy_pct.toFixed(0)}%
-                        <span className="text-xs text-gray-500 ml-1">
+                        <span className="text-micro text-ink-500 ml-1.5 font-normal">
                           ({t.correct_predictions}/{t.total_divergent_signals})
                         </span>
                       </td>
@@ -334,17 +339,17 @@ export default function ComparePage() {
         </div>
       </section>
 
-      <section className="mb-10 bg-gray-900 border border-gray-800 rounded-xl p-5">
-        <p className="text-sm text-gray-300 leading-relaxed">
-          <span className="text-white font-semibold">Why this matters:</span>{" "}
+      <section className="mb-12 surface rounded-lg p-5">
+        <p className="text-body-sm text-ink-300 leading-relaxed">
+          <span className="text-ink-100 font-medium">why this matters.</span>{" "}
           P&amp;L can be driven by a handful of oversized wins or by trading
           high-volume markets with thin edges. Predictive accuracy is the
           orthogonal question — does this trader&apos;s direction match how
-          markets actually resolve? When you&apos;re looking for signal, that
-          second question is the one that matters. See the{" "}
+          markets actually resolve? When you&apos;re looking for signal,
+          that&apos;s the question that matters. See the{" "}
           <Link
             href="/methodology"
-            className="text-emerald-400 hover:underline"
+            className="text-scope-500 hover:text-scope-400 underline underline-offset-2"
           >
             full methodology
           </Link>{" "}

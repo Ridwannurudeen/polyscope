@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
 import Link from "next/link";
+import { useMemo, useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { LastUpdated } from "@/components/last-updated";
 import { SkeletonRow } from "@/components/skeleton";
@@ -35,14 +35,17 @@ export default function MarketsPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const { data, loading, error, lastUpdated, retry } =
-    usePollingFetch<MarketsResponse>(`/api/markets?limit=200&offset=0`, 300_000);
+    usePollingFetch<MarketsResponse>(
+      `/api/markets?limit=200&offset=0`,
+      300_000,
+    );
 
   const markets = data?.markets || [];
   const total = data?.total || 0;
 
   const categorized = useMemo(
     () => markets.map((m) => ({ ...m, _cat: autoCategory(m.question) })),
-    [markets]
+    [markets],
   );
 
   const categories = useMemo(() => {
@@ -50,7 +53,10 @@ export default function MarketsPage() {
     for (const m of categorized) {
       counts[m._cat] = (counts[m._cat] || 0) + 1;
     }
-    return ["", ...Object.keys(counts).sort((a, b) => (counts[b] || 0) - (counts[a] || 0))];
+    return [
+      "",
+      ...Object.keys(counts).sort((a, b) => (counts[b] || 0) - (counts[a] || 0)),
+    ];
   }, [categorized]);
 
   const filtered = useMemo(() => {
@@ -65,41 +71,58 @@ export default function MarketsPage() {
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-2">
-        <h1 className="text-3xl font-bold text-white">Markets</h1>
-        <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
-      </div>
-      <p className="text-gray-400 mb-6">
-        Browse {total} active prediction markets.{category && ` Showing ${filtered.length} in ${category}.`}
-      </p>
+      <section className="mb-8 pb-8 border-b border-ink-800">
+        <div className="flex items-start justify-between gap-6 mb-3">
+          <div>
+            <div className="eyebrow mb-3">browse · all active</div>
+            <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight">
+              markets
+            </h1>
+            <p className="text-body-lg text-ink-300 mt-3 max-w-2xl">
+              <span className="num text-ink-100">{total}</span> active
+              prediction markets.
+              {category && (
+                <>
+                  {" "}showing <span className="num text-ink-100">{filtered.length}</span> in{" "}
+                  <span className="text-ink-200">{category}</span>.
+                </>
+              )}
+            </p>
+          </div>
+          <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
+        </div>
+      </section>
 
-      <div className="flex gap-2 mb-4 flex-wrap">
+      <div className="flex gap-1.5 mb-4 flex-wrap">
         {categories.map((cat) => (
           <button
             key={cat}
             onClick={() => setCategory(cat)}
-            className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+            className={`btn ${
               category === cat
-                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                : "bg-gray-900 text-gray-400 border border-gray-800 hover:border-gray-700"
+                ? "bg-scope-500/15 border border-scope-500/45 text-scope-300"
+                : "border border-ink-700 text-ink-400 hover:text-ink-100 hover:border-ink-600"
             }`}
           >
-            {cat || "All"}
+            {cat || "all"}
           </button>
         ))}
       </div>
 
       <input
         type="text"
-        placeholder="Search markets..."
+        placeholder="search markets…"
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
-        className="w-full px-4 py-2.5 mb-4 bg-gray-900 border border-gray-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-gray-600"
+        spellCheck={false}
+        className="w-full px-4 h-10 mb-4 bg-surface border border-ink-700 rounded-md text-ink-100 placeholder:text-ink-500 font-mono text-body-sm focus:outline-none focus:border-scope-500/50"
       />
 
       {searchQuery && (
-        <p className="text-sm text-gray-500 mb-3">
-          {filtered.length} of {markets.length} markets matching &ldquo;{searchQuery}&rdquo;
+        <p className="text-caption text-ink-400 font-mono mb-3">
+          <span className="num text-ink-200">{filtered.length}</span> of{" "}
+          <span className="num text-ink-200">{markets.length}</span> matching
+          “{searchQuery}”
         </p>
       )}
 
@@ -111,35 +134,48 @@ export default function MarketsPage() {
         </div>
       ) : error && !data ? (
         <div className="text-center py-12">
-          <p className="text-red-400 mb-3">Failed to load markets.</p>
-          <button
-            onClick={retry}
-            className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
-          >
-            Retry
+          <p className="text-alert-500 font-mono text-body-sm mb-4">
+            failed to load markets
+          </p>
+          <button onClick={retry} className="btn-secondary">
+            retry
           </button>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="surface rounded-lg overflow-hidden divide-y divide-ink-800">
           {filtered.map((m) => (
             <Link
               key={m.condition_id}
               href={`/market/${m.condition_id}`}
-              className="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-gray-700 transition-colors"
+              className="flex items-center justify-between px-5 py-4 row-hover"
             >
-              <div className="flex-1 min-w-0 mr-4">
-                <p className="text-white font-medium truncate">{m.question}</p>
-                <div className="flex gap-3 mt-1 text-xs text-gray-500">
+              <div className="flex-1 min-w-0 pr-6">
+                <p className="text-body text-ink-100 truncate font-medium">
+                  {m.question}
+                </p>
+                <div className="flex gap-4 mt-1.5 text-caption font-mono text-ink-500">
                   {m.category && <span>{m.category}</span>}
-                  <span>Vol 24h: ${m.volume_24h.toLocaleString()}</span>
-                  <span>OI: ${m.open_interest.toLocaleString()}</span>
+                  <span>
+                    vol 24h ·{" "}
+                    <span className="num text-ink-300">
+                      ${m.volume_24h.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </span>
+                  </span>
+                  <span>
+                    oi ·{" "}
+                    <span className="num text-ink-300">
+                      ${m.open_interest.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </span>
+                  </span>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-lg font-bold text-white">
+                <p className="num text-h4 text-ink-100 tracking-tight">
                   {(m.price_yes * 100).toFixed(0)}%
                 </p>
-                <p className="text-xs text-gray-500">YES</p>
+                <p className="text-micro text-ink-500 font-mono uppercase tracking-wider">
+                  yes
+                </p>
               </div>
             </Link>
           ))}

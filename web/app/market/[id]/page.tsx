@@ -64,29 +64,28 @@ export default function MarketPage() {
   if (loading) {
     return (
       <div>
-        <div className="mb-6">
-          <div className="h-3 w-16 bg-gray-800 rounded animate-pulse mb-2" />
-          <div className="h-7 w-3/4 bg-gray-800 rounded animate-pulse" />
+        <div className="mb-10 pb-10 border-b border-ink-800">
+          <div className="h-3 w-24 bg-ink-800 rounded-sm mb-3 animate-pulse-subtle" />
+          <div className="h-9 w-3/4 bg-ink-800 rounded-sm animate-pulse-subtle" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-10">
           {Array.from({ length: 4 }).map((_, i) => (
             <SkeletonCard key={i} />
           ))}
         </div>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl h-[300px] animate-pulse" />
+        <div className="surface rounded-lg h-[300px] animate-pulse-subtle" />
       </div>
     );
   }
 
   if (error && !data) {
     return (
-      <div className="text-center py-12">
-        <p className="text-red-400 mb-3">Failed to load market data.</p>
-        <button
-          onClick={retry}
-          className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
-        >
-          Retry
+      <div className="text-center py-16">
+        <p className="text-alert-500 font-mono text-body-sm mb-4">
+          failed to load market data
+        </p>
+        <button onClick={retry} className="btn-secondary">
+          retry
         </button>
       </div>
     );
@@ -94,122 +93,175 @@ export default function MarketPage() {
 
   if (!data?.market) {
     return (
-      <div className="text-center py-12">
-        <p className="text-gray-400">Market not found.</p>
+      <div className="text-center py-16">
+        <p className="text-ink-400 font-mono text-body-sm">market not found</p>
       </div>
     );
   }
 
   const { market, divergence, price_history, signal_history } = data;
 
-  const chartData = (price_history || []).map(
-    (p: { t: number; p: number }) => ({
-      time: new Date(p.t * 1000).toLocaleDateString(),
-      price: (p.p * 100).toFixed(1),
-    })
-  );
+  const chartData = (price_history || []).map((p: { t: number; p: number }) => ({
+    time: new Date(p.t * 1000).toLocaleDateString(),
+    price: parseFloat((p.p * 100).toFixed(1)),
+  }));
 
   return (
     <div>
-      <div className="mb-6 flex items-start justify-between">
-        <div>
-          {market.category && (
-            <span className="text-xs text-gray-500 uppercase tracking-wide">
-              {market.category}
-            </span>
-          )}
-          <h1 className="text-2xl font-bold text-white mt-1">
-            {market.question}
-          </h1>
+      {/* Hero */}
+      <section className="mb-10 pb-10 border-b border-ink-800">
+        <div className="flex items-start justify-between gap-6">
+          <div className="min-w-0">
+            {market.category && (
+              <div className="eyebrow mb-3">
+                category · {market.category}
+              </div>
+            )}
+            <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight max-w-3xl">
+              {market.question}
+            </h1>
+          </div>
+          <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
         </div>
-        <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      {/* Stat tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-12">
         <StatCard
-          title="Current Price"
-          value={`${(market.price_yes * 100).toFixed(0)}% YES`}
+          title="current price"
+          value={`${(market.price_yes * 100).toFixed(0)}%`}
+          subtitle="yes"
         />
         <StatCard
-          title="Volume (24h)"
-          value={`$${market.volume_24h.toLocaleString()}`}
+          title="volume · 24h"
+          value={`$${market.volume_24h.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
         />
         <StatCard
-          title="Open Interest"
-          value={`$${market.open_interest.toLocaleString()}`}
+          title="open interest"
+          value={`$${market.open_interest.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
         />
         <StatCard
-          title="Liquidity"
-          value={`$${market.liquidity.toLocaleString()}`}
+          title="liquidity"
+          value={`$${market.liquidity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
         />
       </div>
 
       {/* Divergence Alert */}
       {divergence && (
-        <div className="mb-8">
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-amber-400 font-semibold text-sm uppercase tracking-wide">
-                  Counter-Consensus Signal
-                </h3>
-                <p className="text-white mt-2">
-                  PolyScope view ({divergence.sm_trader_count} top traders
-                  positioned){" "}
+        <div className="mb-10">
+          <div className="border border-fade-500/30 bg-fade-500/5 rounded-lg p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="eyebrow text-fade-500 mb-3">
+                  counter-consensus signal
+                </div>
+                <p className="text-body-lg text-ink-100 leading-relaxed">
+                  PolyScope view ·{" "}
+                  <span className="num text-ink-300">
+                    {divergence.sm_trader_count}
+                  </span>{" "}
+                  top traders positioned{" "}
                   <span
-                    className={
+                    className={`num font-medium ${
                       divergence.sm_direction === "YES"
-                        ? "text-emerald-400 font-bold"
-                        : "text-red-400 font-bold"
-                    }
+                        ? "text-scope-400"
+                        : "text-alert-500"
+                    }`}
                   >
                     {divergence.sm_direction}
                   </span>{" "}
-                  at {(divergence.sm_consensus * 100).toFixed(0)}%, while the
-                  market says {(divergence.market_price * 100).toFixed(0)}%.
+                  at{" "}
+                  <span className="num text-ink-100">
+                    {(divergence.sm_consensus * 100).toFixed(0)}%
+                  </span>
+                  , while market prices{" "}
+                  <span className="num text-ink-100">
+                    {(divergence.market_price * 100).toFixed(0)}%
+                  </span>
+                  .
                 </p>
-                <p className="text-gray-400 text-sm mt-1">
-                  Divergence: {(divergence.divergence_pct * 100).toFixed(0)}%
+                <p className="text-caption text-ink-400 mt-2 font-mono">
+                  divergence ·{" "}
+                  <span className="num text-fade-500">
+                    {(divergence.divergence_pct * 100).toFixed(0)}%
+                  </span>
                 </p>
               </div>
-              <ScoreBadge score={divergence.score} label="Score" />
+              <div className="shrink-0 pt-1">
+                <ScoreBadge score={divergence.score} label="score" />
+              </div>
             </div>
           </div>
-          <SignalEvidence marketId={id} />
+          <div className="mt-3">
+            <SignalEvidence marketId={id} />
+          </div>
         </div>
       )}
 
-      {/* Price Chart */}
-      <section className="mb-10">
-        <h2 className="text-xl font-semibold text-white mb-4">Price History</h2>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      {/* Price History */}
+      <section className="mb-12">
+        <div className="mb-5 pb-3 border-b border-ink-800">
+          <div className="eyebrow mb-2">price · history</div>
+          <h2 className="text-h3 text-ink-100 tracking-tight">price history</h2>
+        </div>
+        <div className="surface rounded-lg p-6">
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis dataKey="time" stroke="#6b7280" fontSize={12} />
-                <YAxis stroke="#6b7280" fontSize={12} domain={[0, 100]} />
+              <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="scopeGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#00E5A0" stopOpacity={0.32} />
+                    <stop offset="100%" stopColor="#00E5A0" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  strokeDasharray="2 4"
+                  stroke="#1E232D"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="time"
+                  stroke="#4D5566"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  fontFamily="var(--font-geist-mono)"
+                />
+                <YAxis
+                  stroke="#4D5566"
+                  fontSize={11}
+                  domain={[0, 100]}
+                  tickLine={false}
+                  axisLine={false}
+                  fontFamily="var(--font-geist-mono)"
+                  unit="%"
+                />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "#111827",
-                    border: "1px solid #1f2937",
-                    borderRadius: "8px",
+                    backgroundColor: "#0F1218",
+                    border: "1px solid #2A303D",
+                    borderRadius: "6px",
+                    fontFamily: "var(--font-geist-mono)",
+                    fontSize: "12px",
+                    color: "#ECEEF2",
                   }}
+                  itemStyle={{ color: "#00E5A0" }}
+                  labelStyle={{ color: "#7A8496" }}
+                  formatter={(v: number) => [`${v}%`, "yes"]}
                 />
                 <Area
                   type="monotone"
                   dataKey="price"
-                  stroke="#10b981"
-                  fill="#10b981"
-                  fillOpacity={0.1}
-                  strokeWidth={2}
-                  name="YES %"
+                  stroke="#00E5A0"
+                  fill="url(#scopeGrad)"
+                  strokeWidth={1.75}
+                  name="yes"
                 />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-gray-500 text-center py-12">
-              Price history not available yet.
+            <p className="text-body-sm text-ink-400 font-mono text-center py-12">
+              price history not available yet.
             </p>
           )}
         </div>
@@ -217,59 +269,64 @@ export default function MarketPage() {
 
       {/* Signal History */}
       {signal_history && signal_history.length > 0 && (
-        <section className="mb-10">
-          <h2 className="text-xl font-semibold text-white mb-4">
-            Signal History
-          </h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-            <table className="w-full">
+        <section className="mb-12">
+          <div className="mb-5 pb-3 border-b border-ink-800">
+            <div className="eyebrow mb-2">log · per-scan</div>
+            <h2 className="text-h3 text-ink-100 tracking-tight">signal history</h2>
+          </div>
+          <div className="surface rounded-lg overflow-x-auto">
+            <table className="w-full text-body-sm">
               <thead>
-                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
-                  <th className="text-left p-3">Date</th>
-                  <th className="text-center p-3">SM Direction</th>
-                  <th className="text-center p-3">Market</th>
-                  <th className="text-center p-3">SM Consensus</th>
-                  <th className="text-center p-3">Divergence</th>
-                  <th className="text-center p-3">Score</th>
-                  <th className="text-center p-3">Result</th>
+                <tr className="border-b border-ink-800">
+                  <th className="eyebrow text-left px-3 py-3">date</th>
+                  <th className="eyebrow text-center px-3 py-3">sm dir</th>
+                  <th className="eyebrow text-center px-3 py-3">market</th>
+                  <th className="eyebrow text-center px-3 py-3">sm consensus</th>
+                  <th className="eyebrow text-center px-3 py-3">divergence</th>
+                  <th className="eyebrow text-center px-3 py-3">score</th>
+                  <th className="eyebrow text-center px-3 py-3">result</th>
                 </tr>
               </thead>
               <tbody>
                 {signal_history.map((s, i) => (
                   <tr
                     key={s.timestamp + i}
-                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                    className="border-b border-ink-800/60 last:border-0 row-hover"
                   >
-                    <td className="p-3 text-gray-400 text-xs whitespace-nowrap">
+                    <td className="px-3 py-3 text-caption text-ink-400 font-mono num whitespace-nowrap">
                       {new Date(s.timestamp).toLocaleDateString()}
                     </td>
                     <td
-                      className={`p-3 text-center text-sm font-medium ${
+                      className={`px-3 py-3 text-center font-mono num ${
                         s.sm_direction === "YES"
-                          ? "text-emerald-400"
-                          : "text-red-400"
+                          ? "text-scope-400"
+                          : "text-alert-500"
                       }`}
                     >
                       {s.sm_direction}
                     </td>
-                    <td className="p-3 text-center text-sm text-gray-400">
+                    <td className="px-3 py-3 text-center text-caption text-ink-300 font-mono num">
                       {(s.market_price * 100).toFixed(0)}%
                     </td>
-                    <td className="p-3 text-center text-sm text-gray-400">
+                    <td className="px-3 py-3 text-center text-caption text-ink-300 font-mono num">
                       {(s.sm_consensus * 100).toFixed(0)}%
                     </td>
-                    <td className="p-3 text-center text-sm text-amber-400">
+                    <td className="px-3 py-3 text-center text-fade-500 font-mono num">
                       {(s.divergence_pct * 100).toFixed(0)}%
                     </td>
-                    <td className="p-3 text-center text-sm text-white">
+                    <td className="px-3 py-3 text-center text-ink-100 font-mono num">
                       {s.signal_strength.toFixed(0)}
                     </td>
-                    <td className="p-3 text-center text-lg">
-                      {s.resolved
-                        ? s.outcome_correct === 1
-                          ? "\u2705"
-                          : "\u274c"
-                        : "\u2014"}
+                    <td className="px-3 py-3 text-center font-mono">
+                      {s.resolved ? (
+                        s.outcome_correct === 1 ? (
+                          <span className="text-scope-500">✓</span>
+                        ) : (
+                          <span className="text-alert-500">✗</span>
+                        )
+                      ) : (
+                        <span className="text-ink-600">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
