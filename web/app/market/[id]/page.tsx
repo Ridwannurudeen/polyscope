@@ -247,7 +247,7 @@ export default function MarketPage() {
                   }}
                   itemStyle={{ color: "#00E5A0" }}
                   labelStyle={{ color: "#7A8496" }}
-                  formatter={(v: number) => [`${v}%`, "yes"]}
+                  formatter={(value) => [`${value}%`, "yes"]}
                 />
                 <Area
                   type="monotone"
