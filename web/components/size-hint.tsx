@@ -30,7 +30,7 @@ export function SizeHint({
   const { bankroll, setBankroll } = useBankroll();
   const [editing, setEditing] = useState(false);
   const [custom, setCustom] = useState<string>(
-    bankroll ? String(bankroll) : ""
+    bankroll ? String(bankroll) : "",
   );
 
   const band = skewBand(marketPrice);
@@ -38,9 +38,10 @@ export function SizeHint({
 
   if (!stat || stat.total < 10) {
     return (
-      <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-500">
-        <span className="uppercase text-gray-500">Sizing</span> — not enough
-        resolved signals in the {BAND_LABEL[band]} band yet to suggest a size.
+      <div className="border border-ink-800 bg-background rounded-md px-3 py-2.5 text-caption text-ink-400 font-mono">
+        <span className="eyebrow mr-2">sizing</span>
+        not enough resolved signals in the {BAND_LABEL[band]} band yet to
+        suggest a size.
       </div>
     );
   }
@@ -58,48 +59,46 @@ export function SizeHint({
 
   return (
     <div
-      className={`rounded-lg border p-3 ${
+      className={`rounded-md border px-3.5 py-3 ${
         edgeNegative
-          ? "bg-gray-950 border-gray-800"
-          : "bg-emerald-500/5 border-emerald-500/20"
+          ? "border-ink-800 bg-background"
+          : "border-scope-500/25 bg-scope-500/5"
       }`}
     >
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-baseline gap-3 text-xs">
-          <span className="uppercase text-gray-500">Sizing</span>
-          <span
-            className={
-              edgeNegative ? "text-gray-400" : "text-emerald-300 font-semibold"
-            }
-          >
-            Edge {k.edge_pct >= 0 ? "+" : ""}
-            {k.edge_pct.toFixed(1)}%
-          </span>
-          <span className="text-gray-500">
-            Buy {smDirection} @ {k.buy_price.toFixed(2)}
-          </span>
-          <span className="text-gray-500">
-            p={(k.p * 100).toFixed(0)}% · CI [{(k.ci_low * 100).toFixed(0)}–
-            {(k.ci_high * 100).toFixed(0)}%] · n={k.sample_total}
-          </span>
-        </div>
+      <div className="flex items-baseline gap-3 flex-wrap text-caption font-mono">
+        <span className="eyebrow">sizing</span>
+        <span
+          className={`num font-medium ${
+            edgeNegative ? "text-ink-400" : "text-scope-300"
+          }`}
+        >
+          edge {k.edge_pct >= 0 ? "+" : ""}
+          {k.edge_pct.toFixed(1)}%
+        </span>
+        <span className="text-ink-400">
+          buy <span className="num text-ink-200">{smDirection}</span> @{" "}
+          <span className="num text-ink-200">{k.buy_price.toFixed(2)}</span>
+        </span>
+        <span className="text-ink-500">
+          p=<span className="num">{(k.p * 100).toFixed(0)}%</span> · CI [
+          <span className="num">{(k.ci_low * 100).toFixed(0)}–{(k.ci_high * 100).toFixed(0)}%</span>
+          ] · n=<span className="num">{k.sample_total}</span>
+        </span>
       </div>
 
       {edgeNegative ? (
-        <p className="text-[11px] text-gray-500 mt-2">
-          Conservative-CI Kelly is zero. Pass on this one.
+        <p className="text-micro text-ink-500 font-mono mt-2">
+          conservative-CI Kelly is zero · pass.
         </p>
       ) : (
-        <div className="flex items-center gap-3 mt-2 flex-wrap">
-          <div className="text-sm">
-            <span className="text-gray-500 text-xs uppercase mr-2">
-              ¼-Kelly
-            </span>
-            <span className="text-white font-semibold">
+        <div className="flex items-center gap-3 mt-2.5 flex-wrap">
+          <div className="flex items-baseline gap-2 text-body-sm">
+            <span className="eyebrow">¼-kelly</span>
+            <span className="num text-ink-100 font-medium">
               {(k.quarter_kelly * 100).toFixed(2)}%
             </span>
             {bankroll && (
-              <span className="text-emerald-400 font-semibold ml-2">
+              <span className="num text-scope-400 font-medium">
                 ≈ $
                 {stake.toLocaleString(undefined, {
                   maximumFractionDigits: 0,
@@ -111,9 +110,9 @@ export function SizeHint({
           {!bankroll && !editing && (
             <button
               onClick={() => setEditing(true)}
-              className="text-xs text-emerald-400 hover:text-emerald-300 underline"
+              className="text-body-sm text-scope-500 hover:text-scope-400 font-mono underline underline-offset-2"
             >
-              Set bankroll to see $ stake
+              set bankroll →
             </button>
           )}
           {bankroll && !editing && (
@@ -122,7 +121,7 @@ export function SizeHint({
                 setCustom(String(bankroll));
                 setEditing(true);
               }}
-              className="text-xs text-gray-500 hover:text-gray-300"
+              className="text-body-sm text-ink-500 hover:text-ink-300 font-mono"
               title={`Bankroll: $${bankroll}`}
             >
               edit bankroll
@@ -130,7 +129,7 @@ export function SizeHint({
           )}
 
           {editing && (
-            <div className="flex items-center gap-1 text-xs">
+            <div className="flex items-center gap-1.5 text-eyebrow font-mono">
               {PRESETS.map((n) => (
                 <button
                   key={n}
@@ -138,9 +137,9 @@ export function SizeHint({
                     setBankroll(n);
                     setEditing(false);
                   }}
-                  className="px-1.5 py-0.5 bg-gray-800 border border-gray-700 text-gray-300 rounded hover:bg-gray-700"
+                  className="px-2 py-1 border border-ink-700 text-ink-300 rounded-sm hover:text-ink-100 hover:border-ink-600 num"
                 >
-                  ${n >= 1000 ? `${n / 1000}K` : n}
+                  ${n >= 1000 ? `${n / 1000}k` : n}
                 </button>
               ))}
               <input
@@ -148,20 +147,20 @@ export function SizeHint({
                 value={custom}
                 onChange={(e) => setCustom(e.target.value)}
                 placeholder="custom"
-                className="w-20 bg-gray-950 border border-gray-700 text-white rounded px-1.5 py-0.5 text-xs"
+                className="w-20 bg-background border border-ink-700 text-ink-100 rounded-sm px-2 py-1 text-body-sm font-mono focus:outline-none focus:border-scope-500/50"
               />
               <button
                 onClick={saveCustom}
-                className="px-1.5 py-0.5 bg-emerald-600 text-white rounded"
+                className="btn-primary h-6 px-2"
               >
-                OK
+                ok
               </button>
               <button
                 onClick={() => {
                   setBankroll(null);
                   setEditing(false);
                 }}
-                className="text-gray-500 hover:text-gray-300"
+                className="text-ink-500 hover:text-ink-300 px-1.5"
                 title="Clear bankroll"
               >
                 clear

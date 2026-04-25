@@ -4,12 +4,18 @@ interface StatCardProps {
   subtitle?: string;
 }
 
+/**
+ * StatCard — terminal-style stat. Eyebrow label, big tabular numeral.
+ * Used in older surfaces; new pages use the inline StatCell pattern.
+ */
 export function StatCard({ title, value, subtitle }: StatCardProps) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-      <p className="text-sm text-gray-400">{title}</p>
-      <p className="text-2xl font-bold text-white mt-1">{value}</p>
-      {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+    <div className="surface rounded-md p-4">
+      <div className="eyebrow mb-2">{title}</div>
+      <p className="num text-h3 text-ink-100 tracking-tight">{value}</p>
+      {subtitle && (
+        <p className="text-caption text-ink-400 font-mono mt-1.5">{subtitle}</p>
+      )}
     </div>
   );
 }

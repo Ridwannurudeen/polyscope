@@ -19,7 +19,7 @@ export function LogTrade({
   const [direction, setDirection] = useState<string>(defaultDirection || "YES");
   const [size, setSize] = useState<string>("100");
   const [price, setPrice] = useState<string>(
-    defaultPrice ? defaultPrice.toFixed(2) : "0.50"
+    defaultPrice ? defaultPrice.toFixed(2) : "0.50",
   );
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -32,11 +32,11 @@ export function LogTrade({
       const sizeNum = parseFloat(size);
       const priceNum = parseFloat(price);
       if (!Number.isFinite(sizeNum) || sizeNum <= 0) {
-        setError("Size must be positive");
+        setError("size > 0");
         return;
       }
       if (!Number.isFinite(priceNum) || priceNum <= 0 || priceNum >= 1) {
-        setError("Price must be between 0 and 1");
+        setError("price 0–1");
         return;
       }
       const r = await fetch("/api/portfolio/act", {
@@ -52,7 +52,7 @@ export function LogTrade({
         }),
       });
       if (!r.ok) {
-        setError("Failed to save");
+        setError("failed");
         return;
       }
       trackEvent("trade_logged", {
@@ -73,24 +73,21 @@ export function LogTrade({
 
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="text-xs px-2.5 py-1 bg-gray-800 text-gray-300 border border-gray-700 rounded-md hover:bg-gray-700"
-      >
-        Log trade
+      <button onClick={() => setOpen(true)} className="btn-secondary">
+        log trade
       </button>
     );
   }
 
   return (
-    <div className="flex items-center gap-1 bg-gray-950 border border-gray-700 rounded-md px-2 py-1">
+    <div className="flex items-center gap-1.5 surface-elevated border-ink-700 rounded-md px-2 py-1">
       <select
         value={direction}
         onChange={(e) => setDirection(e.target.value)}
-        className="bg-transparent text-xs text-white border border-gray-700 rounded px-1 py-0.5"
+        className="bg-transparent text-body-sm font-mono text-ink-100 border border-ink-700 rounded px-1.5 py-0.5 focus:outline-none focus:border-scope-500/50"
       >
-        <option value="YES">YES</option>
-        <option value="NO">NO</option>
+        <option value="YES">yes</option>
+        <option value="NO">no</option>
       </select>
       <input
         type="number"
@@ -99,9 +96,9 @@ export function LogTrade({
         placeholder="size"
         step="10"
         min="0"
-        className="w-16 bg-transparent text-xs text-white border border-gray-700 rounded px-1 py-0.5"
+        className="w-16 bg-transparent text-body-sm font-mono num text-ink-100 border border-ink-700 rounded px-1.5 py-0.5 focus:outline-none focus:border-scope-500/50"
       />
-      <span className="text-xs text-gray-500">@</span>
+      <span className="text-micro text-ink-500 font-mono">@</span>
       <input
         type="number"
         value={price}
@@ -110,22 +107,26 @@ export function LogTrade({
         step="0.01"
         min="0.01"
         max="0.99"
-        className="w-14 bg-transparent text-xs text-white border border-gray-700 rounded px-1 py-0.5"
+        className="w-14 bg-transparent text-body-sm font-mono num text-ink-100 border border-ink-700 rounded px-1.5 py-0.5 focus:outline-none focus:border-scope-500/50"
       />
       <button
         onClick={submit}
         disabled={submitting}
-        className="text-xs px-2 py-0.5 bg-emerald-600 text-white rounded hover:bg-emerald-500 disabled:opacity-50"
+        className="btn-primary h-7 px-2"
       >
-        {saved ? "✓" : submitting ? "…" : "Save"}
+        {saved ? "saved" : submitting ? "…" : "save"}
       </button>
       <button
         onClick={() => setOpen(false)}
-        className="text-xs px-1.5 py-0.5 text-gray-500 hover:text-gray-300"
+        className="text-eyebrow font-mono px-1.5 py-0.5 text-ink-500 hover:text-ink-300 uppercase tracking-wider"
       >
-        ✕
+        cancel
       </button>
-      {error && <span className="text-xs text-red-400">{error}</span>}
+      {error && (
+        <span className="text-eyebrow font-mono text-alert-500 uppercase tracking-wider">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

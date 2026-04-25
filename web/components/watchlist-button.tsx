@@ -20,7 +20,6 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
   const [watchedId, setWatchedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Initial check: is this market already on the watchlist?
   useEffect(() => {
     const clientId = getClientId();
     if (!clientId) return;
@@ -63,7 +62,7 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
     try {
       const r = await fetch(
         `/api/watchlist/${watchedId}?client_id=${encodeURIComponent(getClientId())}`,
-        { method: "DELETE" }
+        { method: "DELETE" },
       );
       if (r.ok) {
         setWatchedId(null);
@@ -79,20 +78,16 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
       <button
         onClick={remove}
         disabled={loading}
-        className="text-xs px-2.5 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-md hover:bg-emerald-500/30 disabled:opacity-50"
+        className="btn bg-scope-500/12 border border-scope-500/40 text-scope-300 hover:bg-scope-500/20 disabled:opacity-40"
       >
-        {loading ? "…" : "★ Watching"}
+        {loading ? "…" : "watching"}
       </button>
     );
   }
 
   return (
-    <button
-      onClick={add}
-      disabled={loading}
-      className="text-xs px-2.5 py-1 bg-gray-800 text-gray-300 border border-gray-700 rounded-md hover:bg-gray-700 disabled:opacity-50"
-    >
-      {loading ? "…" : "☆ Watch"}
+    <button onClick={add} disabled={loading} className="btn-secondary">
+      {loading ? "…" : "watch"}
     </button>
   );
 }

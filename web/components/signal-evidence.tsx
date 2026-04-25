@@ -47,14 +47,14 @@ interface EvidenceResponse {
 }
 
 function formatAddress(addr: string) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
 function accuracyColor(pct: number | null) {
-  if (pct === null) return "text-gray-500";
-  if (pct >= 70) return "text-emerald-400";
-  if (pct >= 50) return "text-amber-400";
-  return "text-red-400";
+  if (pct === null) return "text-ink-500";
+  if (pct >= 70) return "text-scope-400";
+  if (pct >= 50) return "text-fade-500";
+  return "text-alert-500";
 }
 
 function freshnessLabel(timestamp: string): string {
@@ -100,129 +100,161 @@ export function SignalEvidence({ marketId }: { marketId: string }) {
 
   if (loading) {
     return (
-      <div className="mt-3 p-4 bg-gray-950 border border-gray-800 rounded-lg">
-        <div className="h-4 w-32 bg-gray-800 rounded animate-pulse mb-3" />
-        <div className="h-3 w-full bg-gray-800/60 rounded animate-pulse mb-2" />
-        <div className="h-3 w-3/4 bg-gray-800/60 rounded animate-pulse" />
+      <div className="border border-ink-800 bg-background rounded-md p-4 animate-pulse-subtle">
+        <div className="h-3 w-32 bg-ink-800 rounded-sm mb-3" />
+        <div className="h-2.5 w-full bg-ink-800/70 rounded-sm mb-2" />
+        <div className="h-2.5 w-3/4 bg-ink-800/70 rounded-sm" />
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="mt-3 p-3 bg-gray-950 border border-gray-800 rounded-lg text-sm text-gray-500">
-        Evidence unavailable: {error || "no data"}
+      <div className="border border-ink-800 bg-background rounded-md p-3 text-body-sm text-ink-500 font-mono">
+        evidence unavailable · {error || "no data"}
       </div>
     );
   }
 
   return (
-    <div className="mt-3 p-4 bg-gray-950 border border-gray-800 rounded-lg space-y-4">
+    <div className="border border-ink-800 bg-background rounded-md p-4 space-y-4">
       {/* Signal metadata strip */}
-      <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
-        <span className="text-gray-500">
-          Source:{" "}
-          <span className={data.signal.signal_source === "trades" ? "text-emerald-400" : "text-gray-300"}>
+      <div className="flex flex-wrap gap-x-5 gap-y-2 text-caption font-mono">
+        <span className="text-ink-500">
+          source ·{" "}
+          <span
+            className={
+              data.signal.signal_source === "trades"
+                ? "text-scope-400"
+                : "text-ink-300"
+            }
+          >
             {data.signal.signal_source}
           </span>
         </span>
-        <span className="text-gray-500">
-          Fresh: <span className="text-gray-300">{freshnessLabel(data.signal.timestamp)}</span>
+        <span className="text-ink-500">
+          fresh ·{" "}
+          <span className="text-ink-300">
+            {freshnessLabel(data.signal.timestamp)}
+          </span>
         </span>
-        <span className="text-gray-500">
-          Divergence:{" "}
-          <span className="text-gray-300">
+        <span className="text-ink-500">
+          divergence ·{" "}
+          <span className="text-ink-300 num">
             {(data.signal.divergence_pct * 100).toFixed(1)}%
           </span>
         </span>
-        <span className="text-gray-500">
-          Score: <span className="text-gray-300">{data.signal.signal_strength.toFixed(0)}</span>
+        <span className="text-ink-500">
+          score ·{" "}
+          <span className="text-ink-300 num">
+            {data.signal.signal_strength.toFixed(0)}
+          </span>
         </span>
       </div>
 
       {/* Historical context */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="p-3 bg-gray-900 rounded border border-gray-800">
-          <p className="text-xs text-gray-500 uppercase mb-1">Skew Band</p>
-          <p className="text-sm text-white">{data.skew.label}</p>
+        <div className="surface rounded-md p-3">
+          <div className="eyebrow mb-1.5">skew band</div>
+          <p className="text-body-sm text-ink-100">{data.skew.label}</p>
           {data.skew.hit_rate_pct !== null ? (
-            <p className="text-xs text-gray-400 mt-1">
-              Historical hit rate:{" "}
-              <span className={accuracyColor(data.skew.hit_rate_pct)}>
+            <p className="text-caption text-ink-400 font-mono mt-1">
+              hit rate ·{" "}
+              <span className={`num ${accuracyColor(data.skew.hit_rate_pct)}`}>
                 {data.skew.hit_rate_pct.toFixed(1)}%
               </span>{" "}
-              ({data.skew.correct}/{data.skew.total_resolved})
+              <span className="text-ink-500 num">
+                ({data.skew.correct}/{data.skew.total_resolved})
+              </span>
             </p>
           ) : (
-            <p className="text-xs text-gray-500 mt-1">No resolved data yet</p>
+            <p className="text-caption text-ink-500 font-mono mt-1">
+              no resolved data yet
+            </p>
           )}
         </div>
-        <div className="p-3 bg-gray-900 rounded border border-gray-800">
-          <p className="text-xs text-gray-500 uppercase mb-1">Category</p>
-          <p className="text-sm text-white">{data.category.name || "uncategorized"}</p>
+        <div className="surface rounded-md p-3">
+          <div className="eyebrow mb-1.5">category</div>
+          <p className="text-body-sm text-ink-100">
+            {data.category.name || "uncategorized"}
+          </p>
           {data.category.hit_rate_pct !== null ? (
-            <p className="text-xs text-gray-400 mt-1">
-              Historical hit rate:{" "}
-              <span className={accuracyColor(data.category.hit_rate_pct)}>
+            <p className="text-caption text-ink-400 font-mono mt-1">
+              hit rate ·{" "}
+              <span
+                className={`num ${accuracyColor(data.category.hit_rate_pct)}`}
+              >
                 {data.category.hit_rate_pct.toFixed(1)}%
               </span>{" "}
-              ({data.category.correct}/{data.category.total_resolved})
+              <span className="text-ink-500 num">
+                ({data.category.correct}/{data.category.total_resolved})
+              </span>
             </p>
           ) : (
-            <p className="text-xs text-gray-500 mt-1">No resolved data yet</p>
+            <p className="text-caption text-ink-500 font-mono mt-1">
+              no resolved data yet
+            </p>
           )}
         </div>
       </div>
 
       {/* Contributors */}
       <div>
-        <p className="text-xs text-gray-500 uppercase mb-2">
-          Contributing Traders ({data.contributors.length})
-        </p>
+        <div className="eyebrow mb-2.5">
+          contributing traders ·{" "}
+          <span className="num">{data.contributors.length}</span>
+        </div>
         {data.contributors.length === 0 ? (
-          <p className="text-sm text-gray-500">No per-trader data available yet.</p>
+          <p className="text-body-sm text-ink-500 font-mono">
+            no per-trader data available yet.
+          </p>
         ) : (
-          <div className="bg-gray-900 rounded border border-gray-800 overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="surface rounded-md overflow-x-auto">
+            <table className="w-full text-body-sm">
               <thead>
-                <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
-                  <th className="text-left p-2">Trader</th>
-                  <th className="text-center p-2">Rank</th>
-                  <th className="text-center p-2">Dir</th>
-                  <th className="text-right p-2">Size</th>
-                  <th className="text-right p-2">Accuracy</th>
+                <tr className="border-b border-ink-800">
+                  <th className="eyebrow text-left px-3 py-2">trader</th>
+                  <th className="eyebrow text-center px-3 py-2">rank</th>
+                  <th className="eyebrow text-center px-3 py-2">dir</th>
+                  <th className="eyebrow text-right px-3 py-2">size</th>
+                  <th className="eyebrow text-right px-3 py-2">accuracy</th>
                 </tr>
               </thead>
               <tbody>
                 {data.contributors.map((c) => (
                   <tr
                     key={c.trader_address}
-                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                    className="border-b border-ink-800/60 last:border-0 row-hover"
                   >
-                    <td className="p-2">
+                    <td className="px-3 py-2.5">
                       <Link
                         href={`/traders/${c.trader_address}`}
-                        className="text-white font-mono text-xs hover:text-emerald-400"
+                        className="text-ink-100 font-mono num hover:text-scope-400 transition-colors"
                       >
                         {formatAddress(c.trader_address)}
                       </Link>
                     </td>
-                    <td className="p-2 text-center text-xs text-gray-400">
+                    <td className="px-3 py-2.5 text-center text-caption text-ink-500 font-mono num">
                       {c.trader_rank ? `#${c.trader_rank}` : "—"}
                     </td>
                     <td
-                      className={`p-2 text-center text-xs font-medium ${
+                      className={`px-3 py-2.5 text-center font-mono num ${
                         c.position_direction === "YES"
-                          ? "text-emerald-400"
-                          : "text-red-400"
+                          ? "text-scope-400"
+                          : "text-alert-500"
                       }`}
                     >
                       {c.position_direction}
                     </td>
-                    <td className="p-2 text-right text-xs text-gray-400">
-                      ${c.position_size.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    <td className="px-3 py-2.5 text-right text-caption text-ink-300 font-mono num">
+                      $
+                      {c.position_size.toLocaleString(undefined, {
+                        maximumFractionDigits: 0,
+                      })}
                     </td>
-                    <td className={`p-2 text-right text-xs ${accuracyColor(c.accuracy_pct)}`}>
+                    <td
+                      className={`px-3 py-2.5 text-right text-caption font-mono num ${accuracyColor(c.accuracy_pct)}`}
+                    >
                       {c.accuracy_pct !== null
                         ? `${c.accuracy_pct.toFixed(0)}% (${c.correct_predictions}/${c.total_divergent_signals})`
                         : "—"}

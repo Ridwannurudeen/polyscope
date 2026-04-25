@@ -27,10 +27,7 @@ export function FollowButton({
       .catch(() => setFollowing(false));
   }, [traderAddress, walletAddress]);
 
-  const sizeClass =
-    size === "sm"
-      ? "text-xs px-2.5 py-1"
-      : "text-sm px-3 py-1.5";
+  const sizeClass = size === "sm" ? "h-7 px-2 text-eyebrow" : "h-8 px-3 text-eyebrow";
 
   const toggle = async () => {
     setLoading(true);
@@ -40,7 +37,7 @@ export function FollowButton({
         if (walletAddress) qs.set("wallet_address", walletAddress);
         const r = await fetch(
           `/api/follow/trader/${traderAddress}?${qs.toString()}`,
-          { method: "DELETE" }
+          { method: "DELETE" },
         );
         if (r.ok) {
           setFollowing(false);
@@ -70,7 +67,7 @@ export function FollowButton({
     return (
       <button
         disabled
-        className={`${sizeClass} bg-gray-800/50 text-gray-600 border border-gray-800 rounded-md`}
+        className={`${sizeClass} font-mono uppercase tracking-wider inline-flex items-center justify-center bg-ink-800/40 text-ink-600 border border-ink-800 rounded-md`}
       >
         …
       </button>
@@ -82,9 +79,9 @@ export function FollowButton({
       <button
         onClick={toggle}
         disabled={loading}
-        className={`${sizeClass} bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-md hover:bg-emerald-500/30 disabled:opacity-50 font-medium`}
+        className={`${sizeClass} font-mono uppercase tracking-wider inline-flex items-center justify-center bg-scope-500/14 text-scope-300 border border-scope-500/40 rounded-md hover:bg-scope-500/20 disabled:opacity-40 transition-colors duration-120`}
       >
-        {loading ? "…" : "✓ Following"}
+        {loading ? "…" : "following"}
       </button>
     );
   }
@@ -93,9 +90,9 @@ export function FollowButton({
     <button
       onClick={toggle}
       disabled={loading}
-      className={`${sizeClass} bg-gray-800 text-gray-200 border border-gray-700 rounded-md hover:bg-gray-700 hover:border-emerald-500/40 disabled:opacity-50 font-medium`}
+      className={`${sizeClass} font-mono uppercase tracking-wider inline-flex items-center justify-center bg-transparent text-ink-300 border border-ink-700 rounded-md hover:text-ink-100 hover:border-ink-600 disabled:opacity-40 transition-colors duration-120`}
     >
-      {loading ? "…" : "+ Follow"}
+      {loading ? "…" : "follow"}
     </button>
   );
 }

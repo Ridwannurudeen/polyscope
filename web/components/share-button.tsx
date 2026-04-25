@@ -54,19 +54,15 @@ export function ShareButton({
 
   return (
     <div className="flex items-center gap-1">
-      <button
-        onClick={tweet}
-        className="text-xs px-2.5 py-1 bg-gray-800 text-gray-300 border border-gray-700 rounded-md hover:bg-gray-700"
-        title="Share on X"
-      >
-        Share
+      <button onClick={tweet} className="btn-secondary" title="Share on X">
+        share
       </button>
       <button
         onClick={copyLink}
-        className="text-xs px-2 py-1 bg-gray-800 text-gray-300 border border-gray-700 rounded-md hover:bg-gray-700"
+        className="btn-secondary"
         title="Copy link"
       >
-        {copied ? "✓" : "⧉"}
+        {copied ? "copied" : "copy"}
       </button>
     </div>
   );

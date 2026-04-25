@@ -10,7 +10,12 @@ import { getClientId } from "@/lib/client-id";
 import { shortAddress, useIdentity } from "@/lib/identity";
 
 interface Invalidation {
-  reason: "converged" | "direction_flipped" | "resolved_right" | "resolved_wrong" | "expired";
+  reason:
+    | "converged"
+    | "direction_flipped"
+    | "resolved_right"
+    | "resolved_wrong"
+    | "expired";
   label: string;
   severity: "info" | "warn";
 }
@@ -97,15 +102,63 @@ interface FollowAlert {
 }
 
 function colorForWinRate(pct: number | null) {
-  if (pct === null) return "text-gray-500";
-  if (pct >= 60) return "text-emerald-400";
-  if (pct >= 50) return "text-amber-400";
-  return "text-red-400";
+  if (pct === null) return "text-ink-500";
+  if (pct >= 60) return "text-scope-400";
+  if (pct >= 50) return "text-fade-500";
+  return "text-alert-500";
 }
 
 function directionColor(dir: string | null) {
-  if (!dir) return "text-gray-400";
-  return dir === "YES" ? "text-emerald-400" : "text-red-400";
+  if (!dir) return "text-ink-400";
+  return dir === "YES" ? "text-scope-400" : "text-alert-500";
+}
+
+function SectionHeader({
+  eyebrow,
+  title,
+  sub,
+  right,
+}: {
+  eyebrow: string;
+  title: string;
+  sub?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-end justify-between mb-5 pb-3 border-b border-ink-800 gap-3 flex-wrap">
+      <div>
+        <div className="eyebrow mb-2">{eyebrow}</div>
+        <h2 className="text-h3 text-ink-100 tracking-tight">{title}</h2>
+        {sub && (
+          <p className="text-caption text-ink-400 mt-1 max-w-2xl">{sub}</p>
+        )}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  tone = "ink",
+}: {
+  label: string;
+  value: string;
+  tone?: "ink" | "scope" | "alert" | "fade";
+}) {
+  const colorClass = {
+    ink: "text-ink-100",
+    scope: "text-scope-400",
+    fade: "text-fade-500",
+    alert: "text-alert-500",
+  }[tone];
+  return (
+    <div className="surface rounded-md p-4">
+      <div className="eyebrow mb-2">{label}</div>
+      <p className={`num text-h3 tracking-tight ${colorClass}`}>{value}</p>
+    </div>
+  );
 }
 
 export default function PortfolioPage() {
@@ -129,7 +182,9 @@ export default function PortfolioPage() {
       fetch(`/api/watchlist?${qs.toString()}`).then((r) => r.json()),
       fetch(`/api/portfolio?${qs.toString()}`).then((r) => r.json()),
       fetch(`/api/follow/list?${qs.toString()}`).then((r) => r.json()),
-      fetch(`/api/follow/alerts?${qs.toString()}&limit=20`).then((r) => r.json()),
+      fetch(`/api/follow/alerts?${qs.toString()}&limit=20`).then((r) =>
+        r.json(),
+      ),
     ])
       .then(([w, p, f, a]) => {
         setWatchlist(w.items || []);
@@ -147,13 +202,22 @@ export default function PortfolioPage() {
     await fetch(`/api/follow/alerts/mark-seen?${qs.toString()}`, {
       method: "POST",
     });
-    setAlerts((prev) => prev.map((a) => ({ ...a, seen_at: a.seen_at || new Date().toISOString() })));
+    setAlerts((prev) =>
+      prev.map((a) => ({
+        ...a,
+        seen_at: a.seen_at || new Date().toISOString(),
+      })),
+    );
   };
 
   if (loading) {
     return (
       <div>
-        <div className="h-8 w-48 bg-gray-800 rounded animate-pulse mb-6" />
+        <div className="mb-10 pb-10 border-b border-ink-800">
+          <div className="h-3 w-24 bg-ink-800 rounded-sm mb-5 animate-pulse-subtle" />
+          <div className="h-10 w-48 bg-ink-800 rounded-sm mb-3 animate-pulse-subtle" />
+          <div className="h-4 w-96 bg-ink-800/70 rounded-sm animate-pulse-subtle" />
+        </div>
         <TableSkeleton rows={8} />
       </div>
     );
@@ -162,7 +226,7 @@ export default function PortfolioPage() {
   const removeFromWatchlist = async (id: number) => {
     const r = await fetch(
       `/api/watchlist/${id}?client_id=${encodeURIComponent(clientId)}`,
-      { method: "DELETE" }
+      { method: "DELETE" },
     );
     if (r.ok) {
       setWatchlist((prev) => prev.filter((x) => x.id !== id));
@@ -178,35 +242,39 @@ export default function PortfolioPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white mb-2">Portfolio</h1>
-        <p className="text-gray-400">
-          Your watched signals and logged trades. Scored once markets resolve.{" "}
+      {/* Hero */}
+      <section className="mb-10 pb-10 border-b border-ink-800">
+        <div className="eyebrow mb-3">your view</div>
+        <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight mb-3">
+          portfolio
+        </h1>
+        <p className="text-body-lg text-ink-300 leading-relaxed max-w-2xl">
+          Watched signals and logged trades. Scored once markets resolve.{" "}
           {walletAddress ? (
-            <span className="text-emerald-400">
-              Linked to wallet {shortAddress(walletAddress)} — follows you
-              across devices.
+            <span className="text-scope-400 font-mono">
+              · linked to {shortAddress(walletAddress)} (cross-device sync)
             </span>
           ) : (
-            <>
-              <span>Stored anonymously on this browser.</span>{" "}
-              <span className="text-gray-500">
-                Link a wallet (top-right) to sync across devices.
-              </span>
-            </>
+            <span className="text-ink-400">
+              · stored anonymously on this browser. link a wallet to sync.
+            </span>
           )}
         </p>
-      </div>
+      </section>
 
       {noData ? (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
-          <p className="text-gray-300 mb-2">Nothing here yet.</p>
-          <p className="text-gray-500 text-sm mb-4">
-            Watch signals from the{" "}
-            <Link href="/smart-money" className="text-emerald-400 hover:underline">
-              Smart Money
-            </Link>{" "}
-            page or log trades on any decision card.
+        <div className="surface rounded-lg p-10 text-center">
+          <div className="eyebrow mb-3">empty</div>
+          <p className="text-body text-ink-300 mb-2">nothing here yet</p>
+          <p className="text-caption text-ink-400 font-mono">
+            watch signals from{" "}
+            <Link
+              href="/smart-money"
+              className="text-scope-500 hover:text-scope-400 underline underline-offset-2"
+            >
+              /smart-money
+            </Link>
+            , or log trades from any decision card
           </p>
         </div>
       ) : (
@@ -215,69 +283,76 @@ export default function PortfolioPage() {
 
           {/* New positions from followed traders */}
           {alerts.length > 0 && (
-            <section className="mb-10">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-xl font-semibold text-white">
-                    New positions from followed traders
-                  </h2>
-                  {unseenCount > 0 && (
-                    <p className="text-xs text-emerald-400 mt-0.5">
-                      {unseenCount} new alert{unseenCount === 1 ? "" : "s"}
-                    </p>
-                  )}
-                </div>
-                {unseenCount > 0 && (
-                  <button
-                    onClick={markAlertsSeen}
-                    className="text-xs text-gray-400 hover:text-white"
-                  >
-                    Mark all read
-                  </button>
-                )}
-              </div>
+            <section className="mb-12">
+              <SectionHeader
+                eyebrow="alerts · followed traders"
+                title="new positions"
+                sub={
+                  unseenCount > 0
+                    ? `${unseenCount} new alert${unseenCount === 1 ? "" : "s"}`
+                    : undefined
+                }
+                right={
+                  unseenCount > 0 ? (
+                    <button
+                      onClick={markAlertsSeen}
+                      className="btn-ghost"
+                    >
+                      mark all read
+                    </button>
+                  ) : undefined
+                }
+              />
               <div className="space-y-2">
                 {alerts.slice(0, 10).map((a) => (
                   <Link
                     key={a.id}
                     href={`/market/${a.market_id}`}
-                    className={`block bg-gray-900 border rounded-xl p-3 hover:border-gray-700 transition-colors ${
-                      a.seen_at ? "border-gray-800" : "border-emerald-500/30 ring-1 ring-emerald-500/10"
+                    className={`block surface rounded-md p-3 hover:border-ink-600 transition-colors duration-120 ${
+                      a.seen_at ? "" : "ring-1 ring-scope-500/20 border-scope-500/30"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-medium truncate">
+                        <p className="text-body-sm text-ink-100 truncate font-medium">
                           {a.question || a.market_id.slice(0, 20)}
                         </p>
-                        <div className="flex items-center gap-3 mt-1 text-xs">
-                          <span className="font-mono text-gray-500">
+                        <div className="flex items-center gap-4 mt-1.5 text-caption font-mono">
+                          <span className="text-ink-500 num">
                             {shortAddress(a.trader_address)}
                           </span>
                           {a.accuracy_pct !== null &&
                             a.total_divergent_signals !== null && (
-                              <span className="text-gray-500">
-                                {a.accuracy_pct.toFixed(0)}% on{" "}
-                                {a.total_divergent_signals} markets
+                              <span className="text-ink-500">
+                                <span className="num text-ink-300">
+                                  {a.accuracy_pct.toFixed(0)}%
+                                </span>{" "}
+                                on{" "}
+                                <span className="num text-ink-300">
+                                  {a.total_divergent_signals}
+                                </span>
                               </span>
                             )}
                           <span
-                            className={
+                            className={`num ${
                               a.position_direction === "YES"
-                                ? "text-emerald-400 font-medium"
-                                : "text-red-400 font-medium"
-                            }
+                                ? "text-scope-400"
+                                : "text-alert-500"
+                            }`}
                           >
                             → {a.position_direction}
                           </span>
                           {a.market_price !== null && (
-                            <span className="text-gray-500">
-                              Market: {(a.market_price * 100).toFixed(0)}%
+                            <span className="text-ink-500">
+                              market{" "}
+                              <span className="num text-ink-300">
+                                {(a.market_price * 100).toFixed(0)}%
+                              </span>
                             </span>
                           )}
                         </div>
                       </div>
-                      <div className="text-xs text-gray-500 shrink-0">
+                      <div className="text-micro text-ink-500 font-mono num shrink-0">
                         {new Date(a.created_at).toLocaleDateString()}
                       </div>
                     </div>
@@ -287,20 +362,21 @@ export default function PortfolioPage() {
             </section>
           )}
 
-          {/* Traders you follow */}
+          {/* Followed traders */}
           {followed.length > 0 && (
-            <section className="mb-10">
-              <h2 className="text-xl font-semibold text-white mb-4">
-                Traders you follow
-              </h2>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-                <table className="w-full text-sm">
+            <section className="mb-12">
+              <SectionHeader
+                eyebrow="follow list · trader"
+                title="traders you follow"
+              />
+              <div className="surface rounded-lg overflow-x-auto">
+                <table className="w-full text-body-sm">
                   <thead>
-                    <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
-                      <th className="text-left p-3">Trader</th>
-                      <th className="text-right p-3">Accuracy</th>
-                      <th className="text-right p-3">Signals</th>
-                      <th className="text-right p-3"></th>
+                    <tr className="border-b border-ink-800">
+                      <th className="eyebrow text-left px-3 py-3">trader</th>
+                      <th className="eyebrow text-right px-3 py-3">accuracy</th>
+                      <th className="eyebrow text-right px-3 py-3">signals</th>
+                      <th className="eyebrow text-right px-3 py-3"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -309,55 +385,57 @@ export default function PortfolioPage() {
                         f.accuracy_pct !== null &&
                         f.total_divergent_signals !== null &&
                         f.total_divergent_signals > 0;
+                      const accClass =
+                        (f.accuracy_pct ?? 0) >= 60
+                          ? "text-scope-400"
+                          : (f.accuracy_pct ?? 0) >= 50
+                            ? "text-fade-500"
+                            : "text-alert-500";
                       return (
                         <tr
                           key={f.trader_address}
-                          className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                          className="border-b border-ink-800/60 last:border-0 row-hover"
                         >
-                          <td className="p-3">
+                          <td className="px-3 py-3">
                             <Link
                               href={`/traders/${f.trader_address}`}
-                              className="text-white font-mono text-xs hover:text-emerald-400"
+                              className="text-ink-100 font-mono num hover:text-scope-400 transition-colors"
                             >
                               {shortAddress(f.trader_address)}
                             </Link>
                           </td>
-                          <td className="p-3 text-right">
+                          <td className="px-3 py-3 text-right">
                             {hasData ? (
                               <>
                                 <div
-                                  className={`text-sm font-semibold ${
-                                    (f.accuracy_pct ?? 0) >= 60
-                                      ? "text-emerald-400"
-                                      : (f.accuracy_pct ?? 0) >= 50
-                                        ? "text-amber-400"
-                                        : "text-red-400"
-                                  }`}
+                                  className={`num font-medium ${accClass}`}
                                 >
                                   {(f.accuracy_pct ?? 0).toFixed(0)}%
                                 </div>
                                 {f.ci && (
-                                  <div className="text-[10px] text-gray-500">
-                                    [{f.ci.lo.toFixed(0)}–{f.ci.hi.toFixed(0)}%]
+                                  <div className="text-micro text-ink-500 num mt-0.5">
+                                    [{f.ci.lo.toFixed(0)}–{f.ci.hi.toFixed(0)}]
                                     {!f.ci.sufficient && (
                                       <span
-                                        className="ml-1 text-amber-500/70"
-                                        title="Small sample (<30)"
+                                        className="ml-1 text-fade-500/70"
+                                        title="small sample (n<30)"
                                       >
-                                        ⚠
+                                        ·
                                       </span>
                                     )}
                                   </div>
                                 )}
                               </>
                             ) : (
-                              <span className="text-xs text-gray-500">—</span>
+                              <span className="text-caption text-ink-500 font-mono">
+                                —
+                              </span>
                             )}
                           </td>
-                          <td className="p-3 text-right text-xs text-gray-400">
+                          <td className="px-3 py-3 text-right text-caption text-ink-400 font-mono num">
                             {f.total_divergent_signals || 0}
                           </td>
-                          <td className="p-3 text-right">
+                          <td className="px-3 py-3 text-right">
                             <FollowButton
                               traderAddress={f.trader_address}
                               size="sm"
@@ -372,105 +450,107 @@ export default function PortfolioPage() {
             </section>
           )}
 
-          {/* Stats summary */}
+          {/* Performance stats */}
           {portfolio && portfolio.stats.total_actions > 0 && (
-            <section className="mb-10">
-              <h2 className="text-xl font-semibold text-white mb-4">Performance</h2>
+            <section className="mb-12">
+              <SectionHeader
+                eyebrow="results · trade log"
+                title="performance"
+              />
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase mb-1">Total Trades</p>
-                  <p className="text-xl font-semibold text-white">
-                    {portfolio.stats.total_actions}
-                  </p>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase mb-1">Resolved</p>
-                  <p className="text-xl font-semibold text-white">
-                    {portfolio.stats.resolved_actions}
-                  </p>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase mb-1">Correct</p>
-                  <p className="text-xl font-semibold text-emerald-400">
-                    {portfolio.stats.correct}
-                  </p>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase mb-1">Win Rate</p>
-                  <p
-                    className={`text-xl font-semibold ${colorForWinRate(portfolio.stats.win_rate_pct)}`}
-                  >
-                    {portfolio.stats.win_rate_pct !== null
+                <StatTile
+                  label="total trades"
+                  value={String(portfolio.stats.total_actions)}
+                />
+                <StatTile
+                  label="resolved"
+                  value={String(portfolio.stats.resolved_actions)}
+                />
+                <StatTile
+                  label="correct"
+                  value={String(portfolio.stats.correct)}
+                  tone="scope"
+                />
+                <StatTile
+                  label="win rate"
+                  value={
+                    portfolio.stats.win_rate_pct !== null
                       ? `${portfolio.stats.win_rate_pct.toFixed(1)}%`
-                      : "—"}
-                  </p>
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 uppercase mb-1">PnL (est)</p>
-                  <p
-                    className={`text-xl font-semibold ${
-                      portfolio.stats.pnl_estimate_usd >= 0
-                        ? "text-emerald-400"
-                        : "text-red-400"
-                    }`}
-                  >
-                    ${portfolio.stats.pnl_estimate_usd.toFixed(0)}
-                  </p>
-                </div>
+                      : "—"
+                  }
+                  tone={
+                    portfolio.stats.win_rate_pct === null
+                      ? "ink"
+                      : portfolio.stats.win_rate_pct >= 60
+                        ? "scope"
+                        : portfolio.stats.win_rate_pct >= 50
+                          ? "fade"
+                          : "alert"
+                  }
+                />
+                <StatTile
+                  label="pnl · est"
+                  value={`$${portfolio.stats.pnl_estimate_usd.toFixed(0)}`}
+                  tone={
+                    portfolio.stats.pnl_estimate_usd >= 0 ? "scope" : "alert"
+                  }
+                />
               </div>
             </section>
           )}
 
           {/* Trade log */}
           {portfolio && portfolio.actions.length > 0 && (
-            <section className="mb-10">
-              <h2 className="text-xl font-semibold text-white mb-4">Trade Log</h2>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
-                <table className="w-full">
+            <section className="mb-12">
+              <SectionHeader eyebrow="ledger · all" title="trade log" />
+              <div className="surface rounded-lg overflow-x-auto">
+                <table className="w-full text-body-sm">
                   <thead>
-                    <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
-                      <th className="text-left p-3">When</th>
-                      <th className="text-left p-3">Market</th>
-                      <th className="text-center p-3">Direction</th>
-                      <th className="text-right p-3">Size</th>
-                      <th className="text-right p-3">Price</th>
-                      <th className="text-center p-3">Outcome</th>
+                    <tr className="border-b border-ink-800">
+                      <th className="eyebrow text-left px-3 py-3">when</th>
+                      <th className="eyebrow text-left px-3 py-3">market</th>
+                      <th className="eyebrow text-center px-3 py-3">dir</th>
+                      <th className="eyebrow text-right px-3 py-3">size</th>
+                      <th className="eyebrow text-right px-3 py-3">price</th>
+                      <th className="eyebrow text-center px-3 py-3">outcome</th>
                     </tr>
                   </thead>
                   <tbody>
                     {portfolio.actions.map((a) => (
                       <tr
                         key={a.id}
-                        className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                        className="border-b border-ink-800/60 last:border-0 row-hover"
                       >
-                        <td className="p-3 text-xs text-gray-400 whitespace-nowrap">
+                        <td className="px-3 py-3 text-caption text-ink-400 font-mono num whitespace-nowrap">
                           {new Date(a.acted_at).toLocaleDateString()}
                         </td>
-                        <td className="p-3">
+                        <td className="px-3 py-3">
                           <Link
                             href={`/market/${a.market_id}`}
-                            className="text-white text-sm hover:text-emerald-400 line-clamp-1 max-w-[300px]"
+                            className="text-ink-100 hover:text-scope-400 line-clamp-1 max-w-[300px] transition-colors"
                           >
                             {a.question || a.market_id.slice(0, 12)}
                           </Link>
                         </td>
                         <td
-                          className={`p-3 text-center text-sm font-medium ${directionColor(a.action_direction)}`}
+                          className={`px-3 py-3 text-center font-mono num ${directionColor(a.action_direction)}`}
                         >
                           {a.action_direction}
                         </td>
-                        <td className="p-3 text-right text-sm text-gray-400">
+                        <td className="px-3 py-3 text-right text-caption text-ink-300 font-mono num">
                           ${a.size.toLocaleString()}
                         </td>
-                        <td className="p-3 text-right text-sm text-gray-400">
+                        <td className="px-3 py-3 text-right text-caption text-ink-300 font-mono num">
                           {a.price.toFixed(2)}
                         </td>
-                        <td className="p-3 text-center text-lg">
-                          {a.action_correct === true
-                            ? "✅"
-                            : a.action_correct === false
-                              ? "❌"
-                              : "—"}
+                        <td className="px-3 py-3 text-center font-mono">
+                          {a.action_correct === true ? (
+                            <span className="text-scope-500">✓</span>
+                          ) : a.action_correct === false ? (
+                            <span className="text-alert-500">✗</span>
+                          ) : (
+                            <span className="text-ink-600">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -480,68 +560,66 @@ export default function PortfolioPage() {
             </section>
           )}
 
-          {/* Watchlist — split by invalidation state */}
+          {/* Watchlist */}
           {watchlist.length > 0 &&
             (() => {
               const active = watchlist.filter((w) => w.invalidation === null);
               const invalidated = watchlist.filter(
-                (w) => w.invalidation !== null
+                (w) => w.invalidation !== null,
               );
               const renderItem = (w: WatchlistItem) => (
                 <div
                   key={w.id}
-                  className={`bg-gray-900 border rounded-xl p-3 flex items-start justify-between gap-3 ${
+                  className={`surface rounded-md p-3 flex items-start justify-between gap-3 ${
                     w.invalidation?.severity === "warn"
-                      ? "border-amber-500/30"
-                      : "border-gray-800"
+                      ? "border-fade-500/30"
+                      : ""
                   }`}
                 >
                   <div className="flex-1 min-w-0">
                     <Link
                       href={`/market/${w.market_id}`}
-                      className="text-white text-sm font-medium hover:text-emerald-400 line-clamp-1"
+                      className="text-body-sm text-ink-100 hover:text-scope-400 line-clamp-1 font-medium transition-colors"
                     >
                       {w.question || w.market_id.slice(0, 20)}
                     </Link>
                     {w.invalidation && (
                       <p
-                        className={`text-xs mt-1 ${
+                        className={`text-caption font-mono mt-1.5 ${
                           w.invalidation.severity === "warn"
-                            ? "text-amber-300"
-                            : "text-emerald-300"
+                            ? "text-fade-400"
+                            : "text-scope-300"
                         }`}
                       >
-                        ⚠ {w.invalidation.label}
+                        {w.invalidation.label}
                       </p>
                     )}
-                    <div className="flex gap-4 mt-1 text-xs flex-wrap">
-                      <span className="text-gray-500">
-                        At add: crowd{" "}
-                        <span className="text-gray-300">
+                    <div className="flex gap-4 mt-1.5 text-caption font-mono flex-wrap">
+                      <span className="text-ink-500">
+                        at-add · crowd{" "}
+                        <span className="num text-ink-300">
                           {w.market_price_at_add !== null
                             ? `${(w.market_price_at_add * 100).toFixed(0)}%`
                             : "—"}
                         </span>{" "}
                         · view{" "}
-                        <span className={directionColor(w.sm_direction_at_add)}>
+                        <span className={`num ${directionColor(w.sm_direction_at_add)}`}>
                           {w.sm_direction_at_add || "—"}
                         </span>
                       </span>
                       {w.current_market_price !== null && (
-                        <span className="text-gray-500">
-                          Now:{" "}
-                          <span className="text-gray-300">
+                        <span className="text-ink-500">
+                          now ·{" "}
+                          <span className="num text-ink-300">
                             {(w.current_market_price * 100).toFixed(0)}%
                           </span>
                           {w.current_sm_direction &&
                             w.current_sm_direction !==
                               w.sm_direction_at_add && (
                               <>
-                                {" · SM now "}
+                                {" · sm "}
                                 <span
-                                  className={directionColor(
-                                    w.current_sm_direction
-                                  )}
+                                  className={`num ${directionColor(w.current_sm_direction)}`}
                                 >
                                   {w.current_sm_direction}
                                 </span>
@@ -551,24 +629,26 @@ export default function PortfolioPage() {
                       )}
                       {w.resolved_outcome !== null && (
                         <span
-                          className={
+                          className={`num ${
                             w.outcome_matched_direction
-                              ? "text-emerald-400"
-                              : "text-red-400"
-                          }
+                              ? "text-scope-400"
+                              : "text-alert-500"
+                          }`}
                         >
-                          Resolved {w.resolved_outcome === 1 ? "YES" : "NO"} —{" "}
-                          {w.outcome_matched_direction ? "called it" : "wrong"}
+                          resolved {w.resolved_outcome === 1 ? "YES" : "NO"} ·{" "}
+                          {w.outcome_matched_direction
+                            ? "called it"
+                            : "wrong"}
                         </span>
                       )}
                     </div>
                   </div>
                   <button
                     onClick={() => removeFromWatchlist(w.id)}
-                    className="text-xs text-gray-500 hover:text-red-400 shrink-0"
-                    aria-label="Remove"
+                    className="text-eyebrow font-mono px-2 py-1 text-ink-500 hover:text-alert-500 uppercase tracking-wider transition-colors shrink-0"
+                    aria-label="remove"
                   >
-                    ✕
+                    remove
                   </button>
                 </div>
               );
@@ -576,22 +656,21 @@ export default function PortfolioPage() {
               return (
                 <>
                   {active.length > 0 && (
-                    <section className="mb-10">
-                      <h2 className="text-xl font-semibold text-white mb-4">
-                        Watchlist — active ({active.length})
-                      </h2>
+                    <section className="mb-12">
+                      <SectionHeader
+                        eyebrow={`watch · ${active.length} active`}
+                        title="watchlist"
+                      />
                       <div className="space-y-2">{active.map(renderItem)}</div>
                     </section>
                   )}
                   {invalidated.length > 0 && (
-                    <section className="mb-10">
-                      <h2 className="text-xl font-semibold text-white mb-1">
-                        Thesis invalidated ({invalidated.length})
-                      </h2>
-                      <p className="text-xs text-gray-500 mb-4">
-                        Watched signals that have converged, flipped side, or
-                        resolved. Review and act, or remove.
-                      </p>
+                    <section className="mb-12">
+                      <SectionHeader
+                        eyebrow={`invalidated · ${invalidated.length}`}
+                        title="thesis invalidated"
+                        sub="signals that have converged, flipped side, or resolved · review and act, or remove"
+                      />
                       <div className="space-y-2">
                         {invalidated.map(renderItem)}
                       </div>
