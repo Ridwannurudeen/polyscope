@@ -1594,6 +1594,169 @@ async def get_leaderboard_comparison(
     }
 
 
+async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
+    """Backtested performance of the predictive-contributor filter on resolved
+    signals. Mirrors the gates and ROI math in src/polyscope/backtest.py:
+    qualifies if at least one contributor on the signal has total>=30,
+    accuracy_pct>=50, and Wilson-95% lower bound>=40.
+
+    Returns:
+        {qualifying_traders, signals, hits, win_pct, roi_pct, by_band}
+    """
+    # Resolved signals (best per market by signal_strength to mirror backtest)
+    cursor = await db.execute(
+        """SELECT ds.id, ds.market_id, ds.market_price, ds.sm_direction,
+                  ds.outcome_correct, ds.signal_strength
+           FROM divergence_signals ds
+           WHERE ds.resolved = 1 AND ds.outcome_correct IS NOT NULL
+                 AND (ds.expired = 0 OR ds.expired IS NULL)"""
+    )
+    raw = await cursor.fetchall()
+    if not raw:
+        return {
+            "qualifying_traders": 0,
+            "signals": 0,
+            "hits": 0,
+            "win_pct": None,
+            "roi_pct": None,
+            "by_band": {},
+            "baseline": {
+                "signals": 0,
+                "hits": 0,
+                "win_pct": None,
+                "roi_pct": None,
+            },
+        }
+
+    best: dict[str, dict] = {}
+    for r in raw:
+        d = dict(r)
+        mid = d["market_id"]
+        cur = best.get(mid)
+        if cur is None or (d["signal_strength"] or 0) > (cur["signal_strength"] or 0):
+            best[mid] = d
+
+    # First-observed (trader, market) → trader_accuracy join, applying the gates
+    cursor = await db.execute(
+        f"""
+        WITH first_pos AS (
+            SELECT stp.signal_id, stp.trader_address
+            FROM signal_trader_positions stp
+            JOIN (
+                SELECT trader_address, market_id, MIN(id) AS first_id
+                FROM signal_trader_positions
+                GROUP BY trader_address, market_id
+            ) f ON f.first_id = stp.id
+        )
+        SELECT fp.signal_id, ta.accuracy_pct, ta.correct_predictions,
+               ta.total_divergent_signals
+        FROM first_pos fp
+        JOIN trader_accuracy ta ON ta.trader_address = fp.trader_address
+        WHERE ta.total_divergent_signals >= ?
+              AND ta.accuracy_pct >= ?
+        """,
+        (PREDICTIVE_MIN_N, PREDICTIVE_MIN_PCT),
+    )
+    contrib_rows = await cursor.fetchall()
+
+    qualifying_signal_ids: set[int] = set()
+    for r in contrib_rows:
+        lo = _wilson_lower_pct(int(r[2] or 0), int(r[3] or 0))
+        if lo >= PREDICTIVE_MIN_WILSON_LO:
+            qualifying_signal_ids.add(int(r[0]))
+
+    # Qualifying-trader population
+    cursor = await db.execute(
+        """SELECT correct_predictions, total_divergent_signals, accuracy_pct
+           FROM trader_accuracy
+           WHERE total_divergent_signals >= ? AND accuracy_pct >= ?""",
+        (PREDICTIVE_MIN_N, PREDICTIVE_MIN_PCT),
+    )
+    qualifying_traders = 0
+    for r in await cursor.fetchall():
+        if _wilson_lower_pct(int(r[0] or 0), int(r[1] or 0)) >= PREDICTIVE_MIN_WILSON_LO:
+            qualifying_traders += 1
+
+    by_band: dict[str, dict[str, float]] = {
+        b: {"n": 0, "hits": 0, "wagered": 0.0, "returned": 0.0}
+        for b in ("very_lopsided", "lopsided", "moderate", "tight")
+    }
+    total_n = 0
+    total_hits = 0
+    total_wagered = 0.0
+    total_returned = 0.0
+    base_n = 0
+    base_hits = 0
+    base_wagered = 0.0
+    base_returned = 0.0
+    for s in best.values():
+        price = s["market_price"] or 0.0
+        if price >= 0.9 or price <= 0.1:
+            band = "very_lopsided"
+        elif price >= 0.75 or price <= 0.25:
+            band = "lopsided"
+        elif price >= 0.6 or price <= 0.4:
+            band = "moderate"
+        else:
+            band = "tight"
+        hit = 1 if s["outcome_correct"] == 1 else 0
+        buy_price = (1 - price) if s["sm_direction"] == "YES" else price
+        returned = (100.0 / buy_price) if (hit and buy_price > 0) else 0.0
+        base_n += 1
+        base_hits += hit
+        base_wagered += 100.0
+        base_returned += returned
+        if s["id"] not in qualifying_signal_ids:
+            continue
+        total_n += 1
+        total_hits += hit
+        total_wagered += 100.0
+        total_returned += returned
+        b = by_band[band]
+        b["n"] += 1
+        b["hits"] += hit
+        b["wagered"] += 100.0
+        b["returned"] += returned
+
+    band_summary = {}
+    for band, b in by_band.items():
+        if b["n"] == 0:
+            continue
+        band_summary[band] = {
+            "n": int(b["n"]),
+            "hits": int(b["hits"]),
+            "win_pct": round(b["hits"] / b["n"] * 100, 1),
+            "roi_pct": round(
+                (b["returned"] - b["wagered"]) / max(b["wagered"], 1) * 100, 1
+            ),
+        }
+
+    return {
+        "qualifying_traders": qualifying_traders,
+        "signals": total_n,
+        "hits": total_hits,
+        "win_pct": round(total_hits / total_n * 100, 1) if total_n else None,
+        "roi_pct": (
+            round((total_returned - total_wagered) / max(total_wagered, 1) * 100, 1)
+            if total_n
+            else None
+        ),
+        "by_band": band_summary,
+        "baseline": {
+            "signals": base_n,
+            "hits": base_hits,
+            "win_pct": round(base_hits / base_n * 100, 1) if base_n else None,
+            "roi_pct": (
+                round(
+                    (base_returned - base_wagered) / max(base_wagered, 1) * 100, 1
+                )
+                if base_n
+                else None
+            ),
+        },
+    }
+
+
 async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
     """Live dataset stats for the public methodology page."""
     # Signal counts and time range
@@ -1655,6 +1818,8 @@ async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
     cursor = await db.execute("SELECT COUNT(*) FROM signal_trader_positions")
     trader_records = (await cursor.fetchone())[0] or 0
 
+    predictive_filter = await _compute_predictive_filter_stats(db)
+
     return {
         "signals": {
             "total": total or 0,
@@ -1671,6 +1836,7 @@ async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
             "traders_scored": traders_scored,
             "avg_accuracy_pct": avg_trader_accuracy,
         },
+        "predictive_filter": predictive_filter,
     }
 
 

@@ -5,6 +5,7 @@ import pytest
 import aiosqlite
 
 from api.database import (
+    _compute_predictive_filter_stats,
     add_to_watchlist,
     emit_follow_alerts_for_signal,
     expire_converged_signals,
@@ -12,6 +13,7 @@ from api.database import (
     get_expired_signal_count,
     get_follow_alerts,
     get_followed_traders,
+    get_methodology_stats,
     get_metrics_summary,
     get_portfolio,
     get_signal_accuracy,
@@ -1300,3 +1302,145 @@ async def test_bot_identity_link_by_wallet(db):
     pending = await get_pending_follow_alerts_with_chat(db)
     assert len(pending) == 1
     assert pending[0]["chat_id"] == chat_id
+
+
+async def _insert_resolved_signal(
+    db,
+    market_id: str,
+    market_price: float,
+    sm_direction: str,
+    outcome_correct: int,
+    score: float = 75.0,
+    trader_addresses: list[str] | None = None,
+):
+    """Insert one resolved divergence signal + (optional) trader positions."""
+    cursor = await db.execute(
+        """INSERT INTO divergence_signals
+           (market_id, timestamp, market_price, sm_consensus, divergence_pct,
+            signal_strength, sm_trader_count, sm_direction, question, category,
+            resolved, outcome_correct, expired, signal_source)
+           VALUES (?, datetime('now'), ?, 0.7, 0.2, ?, 3, ?, 'Q', 'crypto',
+                   1, ?, 0, 'positions')""",
+        (market_id, market_price, score, sm_direction, outcome_correct),
+    )
+    signal_id = cursor.lastrowid
+    if trader_addresses:
+        await save_signal_trader_positions(
+            db,
+            [
+                {
+                    "signal_id": signal_id,
+                    "market_id": market_id,
+                    "trader_address": addr,
+                    "trader_rank": i + 1,
+                    "position_direction": "YES",
+                    "position_size": 5000.0,
+                    "avg_price": 0.5,
+                    "weight_in_consensus": 1.0,
+                    "timestamp": "2026-04-12T00:00:00+00:00",
+                }
+                for i, addr in enumerate(trader_addresses)
+            ],
+        )
+    return signal_id
+
+
+async def _seed_trader_accuracy(db, address: str, correct: int, total: int):
+    """Insert a precomputed trader_accuracy row, bypassing rebuild."""
+    pct = (correct / total * 100) if total else 0.0
+    await db.execute(
+        """INSERT OR REPLACE INTO trader_accuracy
+           (trader_address, total_divergent_signals, correct_predictions,
+            wrong_predictions, accuracy_pct, accuracy_by_skew,
+            accuracy_by_category, last_updated)
+           VALUES (?, ?, ?, ?, ?, '{}', '{}', datetime('now'))""",
+        (address, total, correct, total - correct, pct),
+    )
+
+
+@pytest.mark.anyio
+async def test_predictive_filter_stats_empty(db):
+    """No signals → all zeros, no exception."""
+    stats = await _compute_predictive_filter_stats(db)
+    assert stats["qualifying_traders"] == 0
+    assert stats["signals"] == 0
+    assert stats["hits"] == 0
+    assert stats["win_pct"] is None
+    assert stats["roi_pct"] is None
+    assert stats["by_band"] == {}
+    assert stats["baseline"]["signals"] == 0
+
+
+@pytest.mark.anyio
+async def test_predictive_filter_stats_baseline_only(db):
+    """Resolved signals exist but no qualifying contributor → filtered=0,
+    baseline populated."""
+    await _insert_resolved_signal(db, "m1", 0.5, "YES", 1)
+    await _insert_resolved_signal(db, "m2", 0.5, "YES", 0)
+    await db.commit()
+
+    stats = await _compute_predictive_filter_stats(db)
+    assert stats["qualifying_traders"] == 0
+    assert stats["signals"] == 0
+    assert stats["win_pct"] is None
+    assert stats["roi_pct"] is None
+    assert stats["baseline"]["signals"] == 2
+    assert stats["baseline"]["hits"] == 1
+    assert stats["baseline"]["win_pct"] == 50.0
+
+
+@pytest.mark.anyio
+async def test_predictive_filter_stats_filters_and_computes_roi(db):
+    """A qualifying trader on one signal → filtered surfaces it; ROI uses
+    contrarian buy_price = (1 - price) when sm_direction == YES."""
+    good = "0x" + "a" * 40
+    await _seed_trader_accuracy(db, good, correct=80, total=100)  # 80%, ci_lo>40
+    # Hit: tight, sm=YES, price=0.45. buy_price=0.55, return=100/0.55≈181.82
+    await _insert_resolved_signal(
+        db, "m_hit", 0.45, "YES", 1, trader_addresses=[good]
+    )
+    # Miss in tight band
+    await _insert_resolved_signal(
+        db, "m_miss", 0.55, "YES", 0, trader_addresses=[good]
+    )
+    # No qualifying trader
+    await _insert_resolved_signal(db, "m_unrelated", 0.5, "YES", 1)
+    await db.commit()
+
+    stats = await _compute_predictive_filter_stats(db)
+    assert stats["qualifying_traders"] == 1
+    assert stats["signals"] == 2
+    assert stats["hits"] == 1
+    assert stats["win_pct"] == 50.0
+    # wagered=$200, returned≈100/0.55=$181.82 → ROI≈-9.1%
+    assert stats["roi_pct"] is not None and abs(stats["roi_pct"] + 9.1) < 0.5
+    assert stats["baseline"]["signals"] == 3
+    assert stats["baseline"]["hits"] == 2
+    assert "tight" in stats["by_band"]
+    assert stats["by_band"]["tight"]["n"] == 2
+
+
+@pytest.mark.anyio
+async def test_predictive_filter_stats_excludes_low_n_traders(db):
+    """Trader with high acc but n<30 should NOT qualify."""
+    weak = "0x" + "c" * 40
+    await _seed_trader_accuracy(db, weak, correct=20, total=25)
+    await _insert_resolved_signal(
+        db, "m1", 0.5, "YES", 1, trader_addresses=[weak]
+    )
+    await db.commit()
+
+    stats = await _compute_predictive_filter_stats(db)
+    assert stats["qualifying_traders"] == 0
+    assert stats["signals"] == 0
+
+
+@pytest.mark.anyio
+async def test_methodology_stats_includes_predictive_filter(db):
+    """Top-level helper exposes the new block."""
+    stats = await get_methodology_stats(db)
+    assert "predictive_filter" in stats
+    pf = stats["predictive_filter"]
+    assert {"qualifying_traders", "signals", "hits", "by_band", "baseline"}.issubset(
+        pf.keys()
+    )

@@ -11,6 +11,28 @@ interface SkewStat {
   win_rate_pct: number | null;
 }
 
+interface BandStat {
+  n: number;
+  hits: number;
+  win_pct: number | null;
+  roi_pct: number | null;
+}
+
+interface PredictiveFilter {
+  qualifying_traders: number;
+  signals: number;
+  hits: number;
+  win_pct: number | null;
+  roi_pct: number | null;
+  by_band: Record<string, BandStat>;
+  baseline: {
+    signals: number;
+    hits: number;
+    win_pct: number | null;
+    roi_pct: number | null;
+  };
+}
+
 interface MethodologyStats {
   signals: {
     total: number;
@@ -27,6 +49,7 @@ interface MethodologyStats {
     traders_scored: number;
     avg_accuracy_pct: number | null;
   };
+  predictive_filter?: PredictiveFilter;
 }
 
 interface BuilderIdentity {
@@ -59,6 +82,27 @@ function colorForAccuracy(pct: number | null) {
   if (pct >= 50) return "text-fade-500";
   return "text-alert-500";
 }
+
+function fmtRoi(pct: number | null | undefined): string {
+  if (pct == null) return "—";
+  const sign = pct >= 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function pluralTraders(n: number): string {
+  if (n === 0) return "none yet";
+  if (n === 1) return "one trader";
+  return `${n} traders`;
+}
+
+const PRED_BAND_LABELS: Record<string, string> = {
+  tight: "tight · 40–60",
+  moderate: "moderate",
+  lopsided: "lopsided",
+  very_lopsided: "very-lopsided",
+};
+
+const PRED_BAND_ORDER = ["tight", "moderate", "lopsided", "very_lopsided"];
 
 function Section({
   num,
@@ -276,44 +320,63 @@ export default function MethodologyPage() {
           observations, point accuracy above 50% (genuinely above coin flip),
           and a Wilson-95%-CI lower bound ≥ 40% (not purely noise).
         </p>
+        {data?.predictive_filter ? (
+          <p>
+            On{" "}
+            <span className="text-ink-100 font-medium num">
+              {data.predictive_filter.baseline.signals.toLocaleString()}
+            </span>{" "}
+            backtested signals, restricting to signals backed by at least one
+            predictive contributor leaves{" "}
+            <span className="text-ink-100 font-medium num">
+              {data.predictive_filter.signals.toLocaleString()} signals at{" "}
+              {data.predictive_filter.win_pct?.toFixed(1) ?? "—"}% hit rate
+              and {fmtRoi(data.predictive_filter.roi_pct)} simulated ROI
+            </span>
+            {" "}— compared to {fmtRoi(data.predictive_filter.baseline.roi_pct)}{" "}
+            ROI on the unfiltered set.
+          </p>
+        ) : (
+          <p className="text-ink-500">Computing live filter performance…</p>
+        )}
         <p>
-          On 1,592 backtested signals, restricting to signals backed by at least
-          one predictive contributor left{" "}
-          <span className="text-ink-100 font-medium">
-            33 signals at 97.0% hit rate and +14.9% simulated ROI
-          </span>
-          {" "}— compared to +4.2% ROI on the unfiltered set. Same hit rate;{" "}
-          <span className="text-ink-100 font-medium">roughly 3.5× the return</span>.
-        </p>
-        <p>
-          An earlier version used only the CI-lower gate and misreported 75
-          signals at +17.7% ROI. The issue: high-volume anti-predictive traders
+          An earlier version used only the CI-lower gate and misreported a
+          much rosier ROI. The issue: high-volume anti-predictive traders
           (47.5% accuracy on 1,000+ observations) have a Wilson-CI lower bound
           that still crosses 40%, so they cleared the gate and appeared on
           nearly every signal. Requiring the point estimate itself to be above
           50% restores the filter&apos;s meaning.
         </p>
+        {data?.predictive_filter?.by_band &&
+        Object.keys(data.predictive_filter.by_band).length > 0 ? (
+          <>
+            <p>
+              The filter concentrates into tight and moderate markets where
+              aggregation is weakest and individual conviction matters most:
+            </p>
+            <ul className="space-y-1 list-disc list-inside marker:text-ink-500 text-body-sm font-mono">
+              {PRED_BAND_ORDER.map((band) => {
+                const b = data.predictive_filter!.by_band[band];
+                if (!b) return null;
+                return (
+                  <li key={band}>
+                    <span className="num text-ink-100">
+                      {PRED_BAND_LABELS[band]}
+                    </span>{" "}
+                    — {b.hits}/{b.n}, {fmtRoi(b.roi_pct)} ROI
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        ) : null}
         <p>
-          The filter concentrates into tight and moderate markets where
-          aggregation is weakest and individual conviction matters most:
-        </p>
-        <ul className="space-y-1 list-disc list-inside marker:text-ink-500 text-body-sm font-mono">
-          <li>
-            <span className="num text-ink-100">tight · 40–60</span> — 1/1,
-            +113% ROI
-          </li>
-          <li>
-            <span className="num text-ink-100">moderate</span> — 3/3, +156% ROI
-          </li>
-          <li>
-            <span className="num text-ink-100">very-lopsided</span> — 28/29,
-            −3% ROI (composition-bound)
-          </li>
-        </ul>
-        <p>
-          Caveats: the eligible-contributor list is currently very short (two
-          traders cleared the 40% Wilson-lower threshold at time of writing).
-          The filter&apos;s value grows as per-trader observations accumulate.
+          Caveats: the eligible-contributor list is currently short —{" "}
+          <span className="text-ink-100 font-medium num">
+            {pluralTraders(data?.predictive_filter?.qualifying_traders ?? 0)}
+          </span>{" "}
+          cleared the 40% Wilson-lower threshold at time of writing. The
+          filter&apos;s value grows as per-trader observations accumulate.
           Signals are tagged{" "}
           <span className="inline-block px-1.5 py-[2px] border border-scope-500/35 bg-scope-500/8 text-scope-300 text-eyebrow font-mono rounded-sm uppercase tracking-wider">
             predictive-backed
@@ -341,9 +404,14 @@ export default function MethodologyPage() {
             <span className="text-ink-100 font-medium">
               A handful of individuals clear a meaningful edge.
             </span>{" "}
-            Two addresses currently have Wilson-CI lower bounds above 40% on
-            30+ resolved observations. This is the population the predictive
-            filter surfaces.
+            <span className="num text-ink-100">
+              {pluralTraders(
+                data?.predictive_filter?.qualifying_traders ?? 0,
+              )}
+            </span>{" "}
+            currently have Wilson-CI lower bounds above 40% on 30+ resolved
+            observations. This is the population the predictive filter
+            surfaces.
           </li>
           <li>
             <span className="text-ink-100 font-medium">

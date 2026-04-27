@@ -382,11 +382,16 @@ async def traders_accuracy_leaderboard(
 @app.get("/api/methodology/stats")
 async def methodology_stats():
     """Live dataset statistics for the public methodology page."""
+    cached = cache.get("methodology_stats")
+    if cached is not None:
+        return cached
     db = await get_db()
     try:
-        return await get_methodology_stats(db)
+        result = await get_methodology_stats(db)
     finally:
         await db.close()
+    cache.set("methodology_stats", result, ttl_seconds=600)
+    return result
 
 
 @app.get("/api/search")
