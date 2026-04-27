@@ -1312,8 +1312,14 @@ async def _insert_resolved_signal(
     outcome_correct: int,
     score: float = 75.0,
     trader_addresses: list[str] | None = None,
+    open_interest: float = 100_000.0,
+    volume_24h: float = 50_000.0,
 ):
-    """Insert one resolved divergence signal + (optional) trader positions."""
+    """Insert one resolved divergence signal + (optional) trader positions.
+
+    Defaults pass the predictive-filter quality gate (max(OI,vol)>=50K,
+    vol>=10K). Override to test gate behavior.
+    """
     cursor = await db.execute(
         """INSERT INTO divergence_signals
            (market_id, timestamp, market_price, sm_consensus, divergence_pct,
@@ -1324,6 +1330,13 @@ async def _insert_resolved_signal(
         (market_id, market_price, score, sm_direction, outcome_correct),
     )
     signal_id = cursor.lastrowid
+    await db.execute(
+        """INSERT INTO market_snapshots
+           (market_id, timestamp, question, category, price_yes, volume_24h,
+            open_interest, sm_yes_pct, sm_trader_count, divergence_score)
+           VALUES (?, datetime('now'), 'Q', 'crypto', ?, ?, ?, 0.7, 3, 0.2)""",
+        (market_id, market_price, volume_24h, open_interest),
+    )
     if trader_addresses:
         await save_signal_trader_positions(
             db,

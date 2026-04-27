@@ -1603,11 +1603,23 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
     Returns:
         {qualifying_traders, signals, hits, win_pct, roi_pct, by_band}
     """
-    # Resolved signals (best per market by signal_strength to mirror backtest)
+    # Resolved signals (best per market by signal_strength to mirror backtest).
+    # Joins market_snapshots so we can apply the same OI/volume gate the
+    # backtest uses — without it, thin markets with prices near 0 pollute
+    # the ROI tally with returns that wouldn't be fillable in reality.
     cursor = await db.execute(
         """SELECT ds.id, ds.market_id, ds.market_price, ds.sm_direction,
-                  ds.outcome_correct, ds.signal_strength
+                  ds.outcome_correct, ds.signal_strength,
+                  COALESCE(ms.open_interest, 0) AS open_interest,
+                  COALESCE(ms.volume_24h, 0) AS volume_24h
            FROM divergence_signals ds
+           LEFT JOIN (
+               SELECT market_id,
+                      MAX(open_interest) AS open_interest,
+                      MAX(volume_24h) AS volume_24h
+               FROM market_snapshots
+               GROUP BY market_id
+           ) ms ON ms.market_id = ds.market_id
            WHERE ds.resolved = 1 AND ds.outcome_correct IS NOT NULL
                  AND (ds.expired = 0 OR ds.expired IS NULL)"""
     )
@@ -1628,9 +1640,18 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
             },
         }
 
+    # Match backtest "New defaults" gate: max(OI, 24h vol) >= $50K and
+    # 24h vol >= $10K. Citation parity with the backtest matters more than
+    # surfacing every resolved signal.
+    MIN_QUALITY = 50_000.0
+    MIN_VOLUME_24H = 10_000.0
     best: dict[str, dict] = {}
     for r in raw:
         d = dict(r)
+        oi = d["open_interest"] or 0
+        vol = d["volume_24h"] or 0
+        if max(oi, vol) < MIN_QUALITY or vol < MIN_VOLUME_24H:
+            continue
         mid = d["market_id"]
         cur = best.get(mid)
         if cur is None or (d["signal_strength"] or 0) > (cur["signal_strength"] or 0):
