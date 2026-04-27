@@ -79,8 +79,52 @@ function saveCachedCreds(address: string, creds: ApiKeyCreds) {
   );
 }
 
+function clearCachedCreds(address: string) {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(`${CREDS_KEY_PREFIX}${address.toLowerCase()}`);
+}
+
+// User-facing error mapping. Raw axios dumps from clob-client-v2 leak the
+// funder address, partial signed payloads, and request URLs into the UI
+// (and any analytics that captures the message). We translate the small
+// set of failure modes the user can act on; everything else collapses to
+// a generic message so screenshots stay safe.
+function userFacingError(raw: unknown): string {
+  const msg = raw instanceof Error ? raw.message : String(raw);
+  const lower = msg.toLowerCase();
+  if (/could not create api key/.test(lower)) {
+    return "This wallet has no Polymarket account. Sign up at polymarket.com with this wallet, then reconnect.";
+  }
+  if (/user (rejected|denied)/.test(lower) || /signature.*rejected/.test(lower)) {
+    return "Signature rejected in wallet.";
+  }
+  if (/insufficient.*allowance/.test(lower) || /not enough allowance/.test(lower)) {
+    return "Allowance too low. Approve and try again.";
+  }
+  if (/insufficient.*balance/.test(lower) || /not enough balance/.test(lower)) {
+    return "Insufficient balance for this order.";
+  }
+  if (/tick.*size/.test(lower)) {
+    return "Price doesn't match this market's tick size. Adjust and retry.";
+  }
+  if (/min(imum)?.*(order|size)/.test(lower)) {
+    return "Order is below this market's minimum size.";
+  }
+  if (/neg.*risk/.test(lower)) {
+    return "Market is a multi-outcome (neg-risk) market — refresh and retry.";
+  }
+  if (/network|fetch failed|econn/.test(lower)) {
+    return "Network error reaching Polymarket. Try again.";
+  }
+  // Fallback — short, opaque, no leak.
+  return "Order could not be placed. Refresh the page and try again.";
+}
+
 export type TradeSide = "BUY" | "SELL";
-export type TradeOrderType = "GTC" | "GTD" | "FOK" | "FAK";
+// PolyScope only uses limit orders. createAndPostOrder accepts GTC/GTD;
+// FOK/FAK live on createAndPostMarketOrder which we don't expose. Don't
+// widen this back without also branching the SDK call.
+export type TradeOrderType = "GTC" | "GTD";
 
 export interface SubmitOrderInput {
   tokenId: string;
@@ -116,8 +160,13 @@ export function usePolymarketTrade() {
   const onWrongChain = isConnected && chainId !== polygon.id;
 
   const connectInjected = useCallback(() => {
-    const injected = connectors.find((c) => c.type === "injected") ?? connectors[0];
-    if (injected) connect({ connector: injected });
+    const injected = connectors.find((c) => c.type === "injected");
+    if (!injected) {
+      throw new Error(
+        "No injected wallet found. Install MetaMask or another browser wallet.",
+      );
+    }
+    connect({ connector: injected });
   }, [connect, connectors]);
 
   // When the connected EOA has a cached Safe funder, trades route
@@ -145,16 +194,11 @@ export function usePolymarketTrade() {
         saveCachedCreds(addr, creds);
         return creds;
       } catch (err) {
-        // /auth/api-key returns 400 "Could not create api key" when the
-        // signer EOA has no Polymarket account. Translate into a clear
-        // user-facing message; the raw SDK error is an opaque axios dump.
-        const msg = err instanceof Error ? err.message : String(err);
-        if (/could not create api key/i.test(msg)) {
-          throw new Error(
-            "This wallet has no Polymarket account. Sign up at polymarket.com with this wallet, then reconnect.",
-          );
-        }
-        throw err;
+        // Map the /auth/api-key 400 ("Could not create api key" when the
+        // signer EOA has no Polymarket account) and other axios noise to
+        // a user-facing message. userFacingError keeps the no-Polymarket
+        // hint specific.
+        throw new Error(userFacingError(err));
       }
     },
     [walletClient]
@@ -195,13 +239,32 @@ export function usePolymarketTrade() {
       const creds = await deriveOrLoadCreds(address);
       const client = await buildClient(creds);
 
+      // Polymarket returns balance/allowance as raw integer strings in
+      // token base units. USDC and outcome shares both use 6 decimals on
+      // Polygon. Comparing a human-units `price * size` against a raw
+      // 1e6-scaled allowance is a sign-error (`100 USDC` shows up as
+      // `100000000`, vacuously larger than any need expressed in floats).
+      // After updateBalanceAllowance the allowance is 2^256-1 — well past
+      // 53-bit Number precision — so we use BigInt throughout.
+      const toBaseUnits = (human: number) =>
+        BigInt(Math.ceil(human * 1_000_000));
+      const ZERO = BigInt(0);
+      const safeBigInt = (s: string | undefined) => {
+        if (!s) return ZERO;
+        try {
+          return BigInt(s);
+        } catch {
+          return ZERO;
+        }
+      };
+
       if (input.side === "BUY") {
         const resp = await client.getBalanceAllowance({
           asset_type: AssetType.COLLATERAL,
         });
-        const allowance = Number(resp.allowance || "0");
-        const balance = Number(resp.balance || "0");
-        const need = input.price * input.size;
+        const allowance = safeBigInt(resp.allowance);
+        const balance = safeBigInt(resp.balance);
+        const need = toBaseUnits(input.price * input.size);
         if (balance < need) {
           return { ok: false, reason: "insufficient_balance", response: resp };
         }
@@ -215,12 +278,13 @@ export function usePolymarketTrade() {
         asset_type: AssetType.CONDITIONAL,
         token_id: input.tokenId,
       });
-      const allowance = Number(resp.allowance || "0");
-      const balance = Number(resp.balance || "0");
-      if (balance < input.size) {
+      const allowance = safeBigInt(resp.allowance);
+      const balance = safeBigInt(resp.balance);
+      const need = toBaseUnits(input.size);
+      if (balance < need) {
         return { ok: false, reason: "insufficient_balance", response: resp };
       }
-      if (allowance < input.size) {
+      if (allowance < need) {
         return { ok: false, reason: "needs_approval", response: resp };
       }
       return { ok: true, response: resp };
@@ -247,8 +311,7 @@ export function usePolymarketTrade() {
           });
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setSubmitError(`Approval failed: ${msg}`);
+        setSubmitError(`Approval failed: ${userFacingError(err)}`);
         throw err;
       } finally {
         setIsApproving(false);
@@ -271,12 +334,29 @@ export function usePolymarketTrade() {
         throw new Error("Builder code not configured on this deployment.");
       }
 
+      // If the user switches MetaMask accounts mid-flight, every async
+      // step below would silently rebind to the new EOA — producing a
+      // signed order from wallet B funded by Safe A's cached funder.
+      // Capture the EOA at start and abort if it changes after any await.
+      const addrAtStart = address.toLowerCase();
+      const guardAccount = () => {
+        if ((address ?? "").toLowerCase() !== addrAtStart) {
+          throw new Error("Wallet account changed mid-trade — re-open the dialog.");
+        }
+      };
+
       setIsSubmitting(true);
       try {
-        const creds = await deriveOrLoadCreds(address);
+        const creds = await deriveOrLoadCreds(addrAtStart);
+        guardAccount();
         const client = await buildClient(creds);
+        guardAccount();
 
-        const orderType = (input.orderType ?? "GTC") as OrderType;
+        // Map the string TradeOrderType to the SDK enum at runtime.
+        // Public TradeOrderType is restricted to "GTC" | "GTD" — both
+        // are accepted by createAndPostOrder.
+        const orderTypeEnum =
+          input.orderType === "GTD" ? OrderType.GTD : OrderType.GTC;
         const sideEnum = input.side === "BUY" ? Side.BUY : Side.SELL;
 
         const resp = await client.createAndPostOrder(
@@ -291,14 +371,14 @@ export function usePolymarketTrade() {
             tickSize: input.tickSize ?? "0.01",
             negRisk: input.negRisk ?? false,
           },
-          orderType as OrderType.GTC | OrderType.GTD,
+          orderTypeEnum,
         );
 
         const result: SubmitOrderResult = {
           orderID: resp?.orderID ?? "",
           status: resp?.status ?? "unknown",
           success: resp?.success ?? false,
-          errorMsg: resp?.errorMsg,
+          errorMsg: resp?.errorMsg ? userFacingError(resp.errorMsg) : undefined,
           transactionsHashes: resp?.transactionsHashes,
           raw: resp,
         };
@@ -308,8 +388,7 @@ export function usePolymarketTrade() {
         }
         return result;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setSubmitError(msg);
+        setSubmitError(userFacingError(err));
         throw err;
       } finally {
         setIsSubmitting(false);
@@ -329,13 +408,19 @@ export function usePolymarketTrade() {
     return "ready";
   }, [isConnected, isSubmitting, onWrongChain]);
 
-  // Clear last result/error on disconnect
+  // Clear last result/error AND any cached L2 creds on disconnect.
+  // Without this, derived API keys for the previously-connected EOA
+  // linger in sessionStorage until the tab closes — letting any
+  // same-origin script that runs after the user signs out still hit
+  // the L2 endpoints (cancel order, balance/allowance, history) on
+  // their behalf without a wallet popup.
   useEffect(() => {
     if (!isConnected) {
       setLastResult(null);
       setSubmitError(null);
+      if (address) clearCachedCreds(address);
     }
-  }, [isConnected]);
+  }, [isConnected, address]);
 
   return {
     address,

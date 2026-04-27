@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getAddress, isAddress } from "viem";
+import { usePublicClient } from "wagmi";
 import {
   usePolymarketTrade,
   type TradeSide,
@@ -9,6 +11,19 @@ import {
   clearSafeFunder,
 } from "@/lib/use-polymarket-trade";
 import { trackEvent } from "@/lib/analytics";
+
+// Minimal Gnosis Safe ABI — only the bits we need to verify ownership
+// before letting a user link a Safe as funder. `getOwners()` is the
+// canonical read on every Safe variant since v1.0.
+const SAFE_ABI = [
+  {
+    type: "function",
+    name: "getOwners",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address[]" }],
+  },
+] as const;
 
 interface TradeModalProps {
   open: boolean;
@@ -67,15 +82,26 @@ export function TradeModal(props: TradeModalProps) {
   const [funderInput, setFunderInput] = useState<string>("");
   const [funderMode, setFunderMode] = useState<"eoa" | "safe">("eoa");
   const [funderError, setFunderError] = useState<string | null>(null);
+  const [funderVerifying, setFunderVerifying] = useState(false);
+  const publicClient = usePublicClient();
+
+  // Number of decimals to display for the suggested price, matching the
+  // market's tick size. Without this, `toFixed(2)` on a 0.001-tick
+  // market truncates 0.0345 to "0.03" — a 13% suggestion change and a
+  // value the CLOB will reject as off-tick on submit.
+  const priceDecimals =
+    tickSize === "0.001" ? 3 : tickSize === "0.1" ? 1 : 2;
+  const tickFloor = Number(tickSize);
+  const tickCeil = 1 - tickFloor;
 
   useEffect(() => {
     if (open) {
       setSide(suggestedSide);
-      setPrice(suggestedPrice.toFixed(2));
+      setPrice(suggestedPrice.toFixed(priceDecimals));
       setNeedsApproval(false);
       setAllowanceError(null);
     }
-  }, [open, suggestedPrice, suggestedSide]);
+  }, [open, suggestedPrice, suggestedSide, priceDecimals]);
 
   // Load any cached Safe funder whenever the connected wallet changes.
   useEffect(() => {
@@ -92,12 +118,31 @@ export function TradeModal(props: TradeModalProps) {
     setFunderError(null);
   }, [address]);
 
-  const handleSaveFunder = () => {
-    const clean = funderInput.trim().toLowerCase();
-    if (!/^0x[0-9a-f]{40}$/.test(clean)) {
+  const handleSaveFunder = async () => {
+    const raw = funderInput.trim();
+    setFunderError(null);
+
+    // 1. Loose shape — accept either lowercase or EIP-55 input.
+    if (!isAddress(raw)) {
       setFunderError("Paste a valid 0x… address (40 hex chars after 0x).");
       return;
     }
+
+    // 2. EIP-55 checksum — only enforce when the input is mixed-case,
+    //    so users pasting all-lowercase from explorers aren't blocked.
+    const looksChecksummed = raw !== raw.toLowerCase() && raw !== raw.toUpperCase();
+    if (looksChecksummed) {
+      try {
+        getAddress(raw); // throws on bad checksum
+      } catch {
+        setFunderError(
+          "Address checksum is invalid. Re-copy from Polymarket or polygonscan.",
+        );
+        return;
+      }
+    }
+
+    const clean = raw.toLowerCase();
     if (address && clean === address.toLowerCase()) {
       setFunderError(
         "That's your wallet address — use 'My wallet (EOA)' mode instead, or paste your Polymarket Safe address.",
@@ -105,6 +150,52 @@ export function TradeModal(props: TradeModalProps) {
       return;
     }
     if (!address) return;
+    if (!publicClient) {
+      setFunderError("Network not ready. Reconnect your wallet.");
+      return;
+    }
+
+    // 3. Verify on-chain that this is a Gnosis Safe whose owner set
+    //    includes the connected EOA. Without this, a clipboard hijack
+    //    or phishing site can swap the Safe with one the attacker
+    //    controls — every subsequent approve/submit signs against
+    //    their funder.
+    setFunderVerifying(true);
+    try {
+      const code = await publicClient.getCode({ address: clean as `0x${string}` });
+      if (!code || code === "0x") {
+        setFunderError(
+          "No contract at that address on Polygon. This isn't a Gnosis Safe.",
+        );
+        return;
+      }
+      const owners = (await publicClient.readContract({
+        address: clean as `0x${string}`,
+        abi: SAFE_ABI,
+        functionName: "getOwners",
+      })) as readonly string[];
+      const ownerSet = new Set(owners.map((a) => a.toLowerCase()));
+      if (!ownerSet.has(address.toLowerCase())) {
+        setFunderError(
+          "Your wallet isn't listed as an owner of that Safe. Double-check the address.",
+        );
+        return;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // ABI mismatch = not a Safe; network failure = transient.
+      if (/getOwners|abi|reverted/i.test(msg)) {
+        setFunderError(
+          "That contract isn't a Gnosis Safe (no getOwners). Paste your Polymarket Safe.",
+        );
+      } else {
+        setFunderError("Couldn't verify Safe ownership — network issue. Try again.");
+      }
+      return;
+    } finally {
+      setFunderVerifying(false);
+    }
+
     saveSafeFunder(address, clean);
     setFunder(clean);
     setFunderMode("safe");
@@ -133,8 +224,8 @@ export function TradeModal(props: TradeModalProps) {
     isConnected &&
     !onWrongChain &&
     !isSubmitting &&
-    priceNum > 0 &&
-    priceNum < 1 &&
+    priceNum >= tickFloor &&
+    priceNum <= tickCeil &&
     sizeNum > 0 &&
     builderCodeConfigured;
 
@@ -248,8 +339,8 @@ export function TradeModal(props: TradeModalProps) {
             <input
               type="number"
               step={tickSize}
-              min="0.01"
-              max="0.99"
+              min={tickFloor}
+              max={tickCeil}
               value={price}
               onChange={(e) => setPrice(e.target.value)}
               className="w-full px-3 py-2 bg-gray-900 border border-gray-800 text-white rounded-lg focus:outline-none focus:border-emerald-500/50"
@@ -352,15 +443,16 @@ export function TradeModal(props: TradeModalProps) {
                 />
                 <button
                   onClick={handleSaveFunder}
-                  disabled={!funderInput.trim()}
+                  disabled={!funderInput.trim() || funderVerifying}
                   className="w-full py-1.5 text-xs bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 rounded hover:bg-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  Link Safe
+                  {funderVerifying ? "Verifying ownership…" : "Link Safe"}
                 </button>
                 <p className="text-[11px] text-gray-600 leading-snug">
                   Polymarket deposits live in a Safe proxy controlled by your
                   wallet. Copy it from polymarket.com → Profile (under your
-                  avatar — NOT your wallet address).
+                  avatar — NOT your wallet address). PolyScope verifies on-chain
+                  that your wallet is an owner before linking.
                 </p>
               </div>
             )}
