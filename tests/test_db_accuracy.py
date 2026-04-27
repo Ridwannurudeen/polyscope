@@ -1408,7 +1408,8 @@ async def test_predictive_filter_stats_filters_and_computes_roi(db):
     contrarian buy_price = (1 - price) when sm_direction == YES."""
     good = "0x" + "a" * 40
     await _seed_trader_accuracy(db, good, correct=80, total=100)  # 80%, ci_lo>40
-    # Hit: tight, sm=YES, price=0.45. buy_price=0.55, return=100/0.55≈181.82
+    # Hit: tight, bet=YES at price=0.45. Buy YES costs $0.45,
+    # return=100/0.45≈222.22.
     await _insert_resolved_signal(
         db, "m_hit", 0.45, "YES", 1, trader_addresses=[good]
     )
@@ -1425,8 +1426,8 @@ async def test_predictive_filter_stats_filters_and_computes_roi(db):
     assert stats["signals"] == 2
     assert stats["hits"] == 1
     assert stats["win_pct"] == 50.0
-    # wagered=$200, returned≈100/0.55=$181.82 → ROI≈-9.1%
-    assert stats["roi_pct"] is not None and abs(stats["roi_pct"] + 9.1) < 0.5
+    # wagered=$200, returned≈100/0.45=$222.22 → ROI≈+11.1%
+    assert stats["roi_pct"] is not None and abs(stats["roi_pct"] - 11.1) < 0.5
     assert stats["baseline"]["signals"] == 3
     assert stats["baseline"]["hits"] == 2
     assert "tight" in stats["by_band"]
@@ -1446,6 +1447,25 @@ async def test_predictive_filter_stats_excludes_low_n_traders(db):
     stats = await _compute_predictive_filter_stats(db)
     assert stats["qualifying_traders"] == 0
     assert stats["signals"] == 0
+
+
+@pytest.mark.anyio
+async def test_predictive_filter_stats_clamps_buy_price(db):
+    """Tiny buy_price (near-resolved sports markets at 0.999) is clamped
+    at $0.01 so a single hit can't return $200K and explode ROI."""
+    good = "0x" + "d" * 40
+    await _seed_trader_accuracy(db, good, correct=80, total=100)
+    # bet=YES on a 0.9995-priced market. Without clamp, return=100/0.9995≈100.05.
+    # With clamp ineffective here (price>0.01), return is sane.
+    # Use bet=NO on price=0.9995 to hit the clamp on (1-0.9995)=0.0005.
+    await _insert_resolved_signal(
+        db, "m_extreme", 0.9995, "NO", 1, trader_addresses=[good]
+    )
+    await db.commit()
+
+    stats = await _compute_predictive_filter_stats(db)
+    # buy_price clamped at 0.01 → return=100/0.01=10000 → ROI=9900% (sane upper)
+    assert stats["roi_pct"] is not None and stats["roi_pct"] <= 9900.0
 
 
 @pytest.mark.anyio

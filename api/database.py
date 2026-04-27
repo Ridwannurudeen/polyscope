@@ -1721,8 +1721,15 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
         else:
             band = "tight"
         hit = 1 if s["outcome_correct"] == 1 else 0
-        buy_price = (1 - price) if s["sm_direction"] == "YES" else price
-        returned = (100.0 / buy_price) if (hit and buy_price > 0) else 0.0
+        # sm_direction in DB is the bet direction (post-flip strategy).
+        # Buying YES costs `price`; buying NO costs `1 - price`. Clamp at
+        # $0.01 to match backtest convention (avoids ROI explosion on
+        # near-resolved sports markets at 0.001/0.999).
+        if s["sm_direction"] == "YES":
+            buy_price = max(price, 0.01)
+        else:
+            buy_price = max(1.0 - price, 0.01)
+        returned = (100.0 / buy_price) if hit else 0.0
         base_n += 1
         base_hits += hit
         base_wagered += 100.0
