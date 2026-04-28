@@ -5,7 +5,6 @@ import { AccBar } from "@/components/acc-bar";
 import { Disclaimer } from "@/components/disclaimer";
 import { DivergenceBar } from "@/components/divergence-bar";
 import { HeroSignature } from "@/components/hero-signature";
-import { LastUpdated } from "@/components/last-updated";
 import { LiveTicker } from "@/components/live-ticker";
 import { ScoreBadge } from "@/components/score-badge";
 import { SignalTrackRecord } from "@/components/signal-track-record";
@@ -51,72 +50,34 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-function formatNum(n: number | string | null | undefined, digits = 0) {
-  if (n === null || n === undefined || n === "") return "—";
-  const num = typeof n === "string" ? Number(n) : n;
-  if (!Number.isFinite(num)) return "—";
-  return num.toLocaleString(undefined, { maximumFractionDigits: digits });
-}
 
-/* ── Stat card — framed surface with eyebrow + h2 number. The dashboard
-   summary row uses these instead of bare cells so each fact reads as a
-   discrete, scannable unit. Accent variant gets a left-edge scope bar
-   when the value is currently "live" (active signal). ── */
-function StatCard({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  accent?: boolean;
-}) {
-  return (
-    <div
-      className={`relative surface rounded-lg p-4 transition-colors duration-180 hover:border-ink-600 ${
-        accent ? "before:absolute before:left-0 before:top-3 before:bottom-3 before:w-0.5 before:bg-scope-500 before:rounded-r" : ""
-      }`}
-    >
-      <div className="eyebrow mb-2">{label}</div>
-      <div className="num text-h2 text-ink-100 leading-none tracking-tight">
-        {value}
-      </div>
-      {sub && (
-        <div className="text-micro text-ink-500 mt-2 font-mono truncate">
-          {sub}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── Section header — consistent spacing + right-side link ── */
+/* ── Section header ──
+   Restrained: title at h3, optional one-line sub, optional small cta.
+   No eyebrow chrome on every section — that's a spreadsheet feel. The
+   border-bottom is the only structural divider; nothing else needed. */
 function SectionHead({
-  eyebrow,
   title,
   sub,
   href,
   cta,
 }: {
-  eyebrow: string;
   title: string;
   sub?: string;
   href?: string;
   cta?: string;
 }) {
   return (
-    <div className="flex items-end justify-between mb-5 pb-3 border-b border-ink-800">
-      <div>
-        <div className="eyebrow mb-2">{eyebrow}</div>
+    <div className="flex items-end justify-between mb-5 pb-2 border-b border-ink-800">
+      <div className="min-w-0">
         <h2 className="text-h3 text-ink-100 tracking-tight">{title}</h2>
-        {sub && <p className="text-caption text-ink-400 mt-1 max-w-2xl">{sub}</p>}
+        {sub && (
+          <p className="text-caption text-ink-500 mt-1 max-w-2xl">{sub}</p>
+        )}
       </div>
       {href && cta && (
         <Link
           href={href}
-          className="text-body-sm text-scope-500 hover:text-scope-400 font-mono transition-colors"
+          className="text-body-sm text-ink-400 hover:text-ink-100 font-mono transition-colors shrink-0 ml-4"
         >
           {cta} →
         </Link>
@@ -176,103 +137,41 @@ export default function Dashboard() {
     fadeStrict.length > 0 ? fadeStrict : fadeFallback?.traders || [];
   const strictLeaderboardReady = predictiveStrict.length > 0;
 
-  const topDivergence =
-    divergences.length > 0
-      ? `${(divergences[0].divergence_pct * 100).toFixed(0)}%`
-      : "—";
-  const topMover =
-    movers.length > 0
-      ? `${movers[0].change_pct > 0 ? "+" : ""}${(movers[0].change_pct * 100).toFixed(0)}%`
-      : "—";
-
   return (
     <div>
-      {/* ── HERO — signature stat + supporting copy ── */}
+      {/* ── HERO — one declarative line + status strip ── */}
       <HeroSignature />
 
       {/* ── LIVE TICKER — pulse of activity, edge-to-edge ── */}
       <LiveTicker />
 
-      {/* ── DASHBOARD STATS — compact summary row ── */}
-      <section className="mb-12">
-        <div className="flex items-center justify-between mb-5">
-          <div className="eyebrow text-ink-500">terminal · live counts</div>
-          <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard
-            label="active markets"
-            value={formatNum(data?.total_markets)}
-            sub="polymarket gamma"
-          />
-          <StatCard
-            label="divergence signals"
-            value={formatNum(data?.total_divergences)}
-            sub="top-trader vs market"
-          />
-          <StatCard
-            label="strongest divergence"
-            value={topDivergence}
-            sub={divergences.length > 0 ? "active signal" : "no signal"}
-            accent={divergences.length > 0}
-          />
-          <StatCard
-            label="top mover · 24h"
-            value={topMover}
-            sub={
-              movers.length > 0
-                ? movers[0].question.slice(0, 28) + "…"
-                : "—"
-            }
-          />
-        </div>
-      </section>
-
-      {/* ── TRACK RECORD — validated headline claim ── */}
-      <section className="mb-12">
-        <SectionHead
-          eyebrow="validated · backtest"
-          title="signal quality vs resolved outcomes"
-          sub="Headline numbers rebuild on every hour from the resolved-market ledger. See methodology for the skew-band breakdown that decomposes the composition effect."
-          href="/methodology"
-          cta="methodology"
-        />
-        <SignalTrackRecord />
-      </section>
-
-      {/* ── PREDICTIVE LEADERBOARD ── */}
+      {/* ── LEADERBOARD — the signature thing this product does. First. ── */}
       {(predictive.length > 0 || fade.length > 0) && (
-        <section className="mb-12">
+        <section className="mb-14">
           <SectionHead
-            eyebrow="core · rank by accuracy"
-            title="predictive leaderboard"
+            title="leaderboard"
             sub={
               strictLeaderboardReady
-                ? "Traders with n ≥ 30 resolved predictions. Accuracy computed on counter-consensus positions only — not total P&L."
-                : "Early preview — small samples, accuracy is provisional until n ≥ 30."
+                ? "Top-100 traders scored on resolved counter-consensus positions, n ≥ 30."
+                : "Early preview — accuracy provisional until n ≥ 30 per address."
             }
             href="/traders"
-            cta="full leaderboard"
+            cta="full"
           />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <TraderBoard
-              side="predictive"
-              title="predictive · follow"
-              rows={predictive}
-            />
-            <TraderBoard side="fade" title="anti-predictive · fade" rows={fade} />
+            <TraderBoard side="predictive" title="follow" rows={predictive} />
+            <TraderBoard side="fade" title="fade" rows={fade} />
           </div>
         </section>
       )}
 
-      {/* ── ACTIVE SIGNALS ── */}
-      <section className="mb-12">
+      {/* ── SIGNALS — the operational layer ── */}
+      <section className="mb-14">
         <SectionHead
-          eyebrow="realtime · divergence feed"
           title="active signals"
-          sub="Top traders (aggregated, size + rank + category-weighted) currently disagree with market price. Each row links to the full decision card with evidence."
+          sub="Top traders disagree with market price. Click for evidence."
           href="/smart-money"
-          cta="all decision cards"
+          cta="all"
         />
         {divergences.length === 0 ? (
           <div className="surface rounded-lg p-10 text-center">
@@ -335,19 +234,24 @@ export default function Dashboard() {
         )}
       </section>
 
+      {/* ── TRACK RECORD — compact band, after signals ── */}
+      <section className="mb-14">
+        <SectionHead title="track record" href="/methodology" cta="how" />
+        <SignalTrackRecord />
+      </section>
+
       {/* ── WHALE FLOW ── */}
-      <section className="mb-12">
+      <section className="mb-14">
         <WhaleFlow />
       </section>
 
       {/* ── MOVERS ── */}
-      <section className="mb-12">
+      <section className="mb-14">
         <SectionHead
-          eyebrow="delta · 24h window"
-          title="biggest movers"
-          sub="Price change over the last 24 hours across tracked markets."
+          title="movers"
+          sub="24h price change across tracked markets."
           href="/markets"
-          cta="all markets"
+          cta="all"
         />
         {movers.length === 0 ? (
           <div className="surface rounded-lg p-10 text-center">
@@ -390,12 +294,8 @@ export default function Dashboard() {
 
       {/* ── EVENT CLUSTERS ── */}
       {eventsData && eventsData.events.length > 0 && (
-        <section className="mb-12">
-          <SectionHead
-            eyebrow="grouped · by theme"
-            title="event clusters"
-            sub="Markets that resolve off the same underlying event, grouped."
-          />
+        <section className="mb-14">
+          <SectionHead title="event clusters" />
           <div className="surface rounded-lg overflow-hidden divide-y divide-ink-800">
             {eventsData.events.map((e) => (
               <div
@@ -413,7 +313,7 @@ export default function Dashboard() {
                     <span className="text-ink-400">
                       vol{" "}
                       <span className="text-ink-100 num">
-                        ${formatNum(e.total_volume)}
+                        ${e.total_volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </span>
                     </span>
                     {e.divergence_signals > 0 && (
