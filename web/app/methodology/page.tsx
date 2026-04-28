@@ -229,11 +229,14 @@ export default function MethodologyPage() {
         title="the honest findings"
       >
         <p>
-          On our first 98K+ resolved signals we flipped the aggregate SM
-          direction universally (after finding the raw consensus was
-          anti-predictive at 8.3%). The flipped strategy hit 96% at the headline
-          level — but a follow-up per-skew backtest showed that was almost
-          entirely a composition effect from heavily lopsided markets.
+          The first ~98K resolved signals were where the original strategy
+          was finalized: we flipped the aggregate SM direction universally
+          (after finding raw consensus was anti-predictive at 8.3%). The
+          flipped strategy hit 96% at the headline level — but a follow-up
+          per-skew backtest showed that was almost entirely a composition
+          effect from heavily lopsided markets. (Capture has since grown
+          past 139K resolved signals; the live numbers above always reflect
+          the current dataset.)
         </p>
         <p>
           The per-skew breakdown forced a correction. On{" "}
@@ -250,8 +253,9 @@ export default function MethodologyPage() {
             fade SM on very-lopsided (composition play), follow SM everywhere
             else (real alpha).
           </span>{" "}
-          On the same 1,556-market backtest this flips net ROI from −2.6% to
-          +3.9% at the same 97% headline hit rate.
+          On the 1,556-market backtest at finalization, this flipped net ROI
+          from −2.6% to +3.9% at the same 97% headline hit rate. §4 below
+          shows live filter performance against the current dataset.
         </p>
         <p className="mt-4">The per-band breakdown after correction:</p>
 

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { LastUpdated } from "@/components/last-updated";
 import { SkeletonRow } from "@/components/skeleton";
+import { useViewMode, ViewToggle } from "@/components/view-toggle";
 import { usePollingFetch } from "@/lib/hooks";
 import type { Market } from "@/lib/api";
 
@@ -33,6 +34,7 @@ function autoCategory(question: string): string {
 export default function MarketsPage() {
   const [category, setCategory] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const { mode: viewMode, setMode: setViewMode } = useViewMode("markets", "list");
 
   const { data, loading, error, lastUpdated, retry } =
     usePollingFetch<MarketsResponse>(
@@ -109,14 +111,17 @@ export default function MarketsPage() {
         ))}
       </div>
 
-      <input
-        type="text"
-        placeholder="search markets…"
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        spellCheck={false}
-        className="w-full px-4 h-10 mb-4 bg-surface border border-ink-700 rounded-md text-ink-100 placeholder:text-ink-500 font-mono text-body-sm focus:outline-none focus:border-scope-500/50"
-      />
+      <div className="flex items-center gap-2 mb-4">
+        <input
+          type="text"
+          placeholder="search markets…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          spellCheck={false}
+          className="flex-1 px-4 h-10 bg-surface border border-ink-700 rounded-md text-ink-100 placeholder:text-ink-500 font-mono text-body-sm focus:outline-none focus:border-scope-500/50"
+        />
+        <ViewToggle mode={viewMode} onChange={setViewMode} />
+      </div>
 
       {searchQuery && (
         <p className="text-caption text-ink-400 font-mono mb-3">
@@ -141,13 +146,51 @@ export default function MarketsPage() {
             retry
           </button>
         </div>
+      ) : viewMode === "grid" ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {filtered.map((m) => (
+            <Link
+              key={m.condition_id}
+              href={`/market/${m.condition_id}`}
+              className="surface rounded-lg p-4 flex flex-col justify-between min-h-[140px] hover:border-ink-600 transition-colors"
+            >
+              <p className="text-body text-ink-100 font-medium leading-snug line-clamp-3">
+                {m.question}
+              </p>
+              <div className="flex items-end justify-between mt-4 pt-3 border-t border-ink-800">
+                <div className="text-caption font-mono text-ink-500 space-y-0.5 min-w-0">
+                  {m.category && (
+                    <div className="text-ink-400 truncate">{m.category}</div>
+                  )}
+                  <div>
+                    vol{" "}
+                    <span className="num text-ink-300">
+                      $
+                      {m.volume_24h.toLocaleString(undefined, {
+                        maximumFractionDigits: 0,
+                      })}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  <div className="num text-h3 text-ink-100 tracking-tight leading-none">
+                    {(m.price_yes * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-micro text-ink-500 font-mono uppercase tracking-wider mt-1">
+                    yes
+                  </div>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
       ) : (
         <div className="surface rounded-lg overflow-hidden divide-y divide-ink-800">
           {filtered.map((m) => (
             <Link
               key={m.condition_id}
               href={`/market/${m.condition_id}`}
-              className="flex items-center justify-between px-5 py-4 row-hover"
+              className="flex items-center justify-between px-5 py-4 row-hover-reveal"
             >
               <div className="flex-1 min-w-0 pr-6">
                 <p className="text-body text-ink-100 truncate font-medium">
@@ -169,7 +212,7 @@ export default function MarketsPage() {
                   </span>
                 </div>
               </div>
-              <div className="text-right">
+              <div className="text-right pr-6">
                 <p className="num text-h4 text-ink-100 tracking-tight">
                   {(m.price_yes * 100).toFixed(0)}%
                 </p>

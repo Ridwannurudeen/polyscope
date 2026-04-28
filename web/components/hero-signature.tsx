@@ -96,9 +96,9 @@ export function HeroSignature() {
             </span>
           </h1>
           <p className="text-body-lg text-ink-300 mt-7 max-w-xl leading-relaxed text-pretty">
-            Every top-100 Polymarket trader is scored on their own
-            counter-consensus positions against resolved outcomes. The
-            handful who clear a Wilson 95% lower bound on real
+            Top-100 Polymarket traders are scored on their own
+            counter-consensus positions as resolved data accumulates.
+            The handful who clear a Wilson 95% lower bound on real
             predictive accuracy — that&apos;s the leaderboard you should
             care about.
           </p>

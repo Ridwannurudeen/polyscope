@@ -27,7 +27,11 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-export function SearchBar() {
+export function SearchBar({
+  onAfterNavigate,
+}: {
+  onAfterNavigate?: () => void;
+} = {}) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -72,10 +76,11 @@ export function SearchBar() {
     setOpen(false);
     setQ("");
     setResults(null);
+    onAfterNavigate?.();
   };
 
   return (
-    <div ref={containerRef} className="relative w-56">
+    <div ref={containerRef} className="relative w-full lg:w-56">
       <div className="relative">
         <span
           aria-hidden="true"

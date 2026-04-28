@@ -88,7 +88,7 @@ A signal fires when `|market_price - sm_consensus| ≥ 10%` AND the composite sc
 
 ### Contrarian direction
 
-Empirically validated on 98K+ resolved signals: SM consensus at the aggregate level is **anti-predictive** when it diverges from market price. The signal direction is explicitly the opposite of SM consensus. See [/methodology](https://polyscope.gudman.xyz/methodology) for the honest breakdown with market-skew caveats.
+Empirically validated on 139K+ resolved signals: SM consensus at the aggregate level is **anti-predictive** when it diverges from market price. The signal direction is explicitly the opposite of SM consensus. See [/methodology](https://polyscope.gudman.xyz/methodology) for the honest breakdown with market-skew caveats.
 
 ### Per-trader accuracy (live since Apr 12, 2026)
 
@@ -152,23 +152,26 @@ Copy `.env.example` to `.env` — see the bot container env for Telegram alert c
 
 ## Status
 
-- **Signals tracked**: 160K+ divergence signals, 12+ days
+- **Signals tracked**: 340K+ divergence signals, 28+ days of capture
 - **Markets watched**: 500 active per scan cycle
-- **Resolved outcomes**: 7K+ markets scored
-- **Tests**: 118 passing
+- **Resolved outcomes**: 10K+ markets scored, 139K+ resolved signals
+- **Tests**: 196 passing
 - **Stack**: containerized, deployed on dedicated VPS, TLS via Let's Encrypt webroot
 
 ---
 
 ## Roadmap
 
-Current focus is converting PolyScope from read-only analytics into an **execution-native intelligence terminal** for Polymarket's Builder Program. Near-term milestones:
+PolyScope has converted from read-only analytics into an **execution-native intelligence terminal** for Polymarket's Builder Program. Status:
 
 - **Evidence Layer** ✓ — per-signal attribution with contributor accuracy
-- **Methodology Page** ✓ — honest public documentation of findings
-- **Decision Cards** — workflow-grade signal display with thesis, invalidators, confidence tier
-- **Portfolio Layer** — save signals, track outcomes, measure per-user hit rate
-- **Builder Integration** — CLOB order routing with attributed volume, gasless onboarding via Safe relayer, one-click trade from signal cards
+- **Methodology Page** ✓ — honest public documentation of findings, dynamic stats
+- **Decision Cards** ✓ — workflow-grade signal display with thesis, invalidators, confidence tier
+- **Portfolio Layer** ✓ — anonymous client_id watchlist + trade log, PnL estimate, outcome scoring
+- **Builder Integration** ✓ — Builder Code attribution live, CLOB order routing via browser wallet-connect (POLY_GNOSIS_SAFE + EOA paths), on-chain Safe-owner verification, Gamma token cross-validation, attributed-trade sync job
+- **Predictive-contributor filter** ✓ — Wilson-95% gated trader leaderboard surfaces signals backed by genuinely predictive addresses
+
+Next: per-trader data continues accumulating — qualifying-trader pool grows over time, backtest reruns hourly.
 
 ---
 
