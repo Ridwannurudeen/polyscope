@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PolymarketLogo } from "@/components/polymarket-logo";
 import { usePollingFetch } from "@/lib/hooks";
 import type { ScanResult } from "@/lib/api";
 
@@ -102,6 +103,20 @@ export function HeroSignature() {
         >
           methodology →
         </Link>
+        <a
+          href="https://polymarket.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 text-ink-500 hover:text-ink-200 transition-colors group pl-3 sm:border-l sm:border-ink-800"
+          title="Markets, prices, positions and resolutions sourced from Polymarket"
+        >
+          <span className="eyebrow">data via</span>
+          <PolymarketLogo
+            variant="full"
+            height={12}
+            className="opacity-75 group-hover:opacity-100 transition-opacity"
+          />
+        </a>
       </div>
     </section>
   );

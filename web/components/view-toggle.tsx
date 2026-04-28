@@ -36,9 +36,12 @@ export function useViewMode(scope: string, fallback: ViewMode = "list") {
 }
 
 /**
- * Two-button list/grid switch. Sized for both desktop (compact) and
- * touch (40×40 hit area). Keyboard accessible: Tab to focus, Enter to
- * activate, ArrowLeft/Right to switch between modes inline.
+ * List ↔ grid switch. Two buttons in a framed group, with explicit text
+ * labels on desktop so users don't have to interpret the icons. Sized
+ * h-9 (36px) — comfortable for both pointer and touch — and hit areas
+ * extend to the full button bounds.
+ *
+ * Keyboard: Tab focuses, Enter activates, ArrowLeft/Right switches modes.
  */
 export function ViewToggle({
   mode,
@@ -53,7 +56,7 @@ export function ViewToggle({
     <div
       role="radiogroup"
       aria-label="View mode"
-      className={`inline-flex items-center surface rounded-md p-0.5 ${className}`}
+      className={`inline-flex items-stretch surface rounded-md p-0.5 ${className}`}
       onKeyDown={(e) => {
         if (e.key === "ArrowLeft") onChange("list");
         else if (e.key === "ArrowRight") onChange("grid");
@@ -65,7 +68,7 @@ export function ViewToggle({
         aria-checked={mode === "list"}
         aria-label="List view"
         onClick={() => onChange("list")}
-        className={`w-9 h-7 inline-flex items-center justify-center rounded-sm transition-colors ${
+        className={`inline-flex items-center gap-1.5 px-2.5 h-9 rounded-sm text-eyebrow font-mono uppercase tracking-wider transition-colors ${
           mode === "list"
             ? "bg-ink-700 text-ink-100"
             : "text-ink-500 hover:text-ink-300"
@@ -81,6 +84,7 @@ export function ViewToggle({
           <rect x="2" y="7.25" width="12" height="1.5" rx="0.5" fill="currentColor" />
           <rect x="2" y="11.5" width="12" height="1.5" rx="0.5" fill="currentColor" />
         </svg>
+        <span className="hidden sm:inline">list</span>
       </button>
       <button
         type="button"
@@ -88,7 +92,7 @@ export function ViewToggle({
         aria-checked={mode === "grid"}
         aria-label="Grid view"
         onClick={() => onChange("grid")}
-        className={`w-9 h-7 inline-flex items-center justify-center rounded-sm transition-colors ${
+        className={`inline-flex items-center gap-1.5 px-2.5 h-9 rounded-sm text-eyebrow font-mono uppercase tracking-wider transition-colors ${
           mode === "grid"
             ? "bg-ink-700 text-ink-100"
             : "text-ink-500 hover:text-ink-300"
@@ -105,6 +109,7 @@ export function ViewToggle({
           <rect x="2" y="8.5" width="5.5" height="5.5" rx="0.75" fill="currentColor" />
           <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="0.75" fill="currentColor" />
         </svg>
+        <span className="hidden sm:inline">grid</span>
       </button>
     </div>
   );

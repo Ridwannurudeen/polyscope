@@ -7,6 +7,7 @@ import { ConnectWallet } from "@/components/connect-wallet";
 import { Wordmark } from "@/components/logo";
 import { MobileNav } from "@/components/mobile-nav";
 import { PageViewTracker } from "@/components/page-view-tracker";
+import { PolymarketLogo } from "@/components/polymarket-logo";
 import { SearchBar } from "@/components/search-bar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Web3Provider } from "@/lib/web3-provider";
@@ -174,12 +175,28 @@ export default function RootLayout({
                   </Link>
                 </div>
               </div>
-              <div className="mt-6 pt-6 border-t border-ink-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <p className="text-micro text-ink-500 font-mono">
-                  polyscope · intelligence layer for prediction markets
-                </p>
+              {/* Data attribution row — Bloomberg-style "data: REUTERS" */}
+              <div className="mt-6 pt-6 border-t border-ink-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <a
+                  href="https://polymarket.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-3 text-micro font-mono text-ink-500 hover:text-ink-300 transition-colors group"
+                >
+                  <span className="eyebrow">markets · positions · resolutions ·</span>
+                  <PolymarketLogo
+                    variant="full"
+                    height={14}
+                    className="opacity-80 group-hover:opacity-100 transition-opacity"
+                  />
+                </a>
                 <p className="text-micro text-ink-500 font-mono">
                   polymarket-v2 · clob · polygon
+                </p>
+              </div>
+              <div className="mt-3">
+                <p className="text-micro text-ink-500 font-mono">
+                  polyscope · intelligence layer for prediction markets
                 </p>
               </div>
             </div>

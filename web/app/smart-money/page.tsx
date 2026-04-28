@@ -5,6 +5,7 @@ import { DecisionCard } from "@/components/decision-card";
 import { Disclaimer } from "@/components/disclaimer";
 import { LastUpdated } from "@/components/last-updated";
 import { TableSkeleton } from "@/components/skeleton";
+import { useViewMode, ViewToggle } from "@/components/view-toggle";
 import { WhaleFlow } from "@/components/whale-flow";
 import { usePollingFetch } from "@/lib/hooks";
 import type { Trader, DivergenceSignal } from "@/lib/api";
@@ -57,6 +58,7 @@ export default function SmartMoneyPage() {
   const [tier, setTier] = useState<TierFilter>("all");
   const [category, setCategory] = useState<string>("all");
   const [predictiveOnly, setPredictiveOnly] = useState(false);
+  const { mode: viewMode, setMode: setViewMode } = useViewMode("smart-money", "list");
 
   const {
     data: lbData,
@@ -185,11 +187,14 @@ export default function SmartMoneyPage() {
                 </span>
               </h2>
             </div>
-            {filtersActive && (
-              <button onClick={resetFilters} className="btn-ghost">
-                clear filters
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {filtersActive && (
+                <button onClick={resetFilters} className="btn-ghost">
+                  clear filters
+                </button>
+              )}
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+            </div>
           </div>
 
           {/* Filter bar */}
@@ -270,7 +275,13 @@ export default function SmartMoneyPage() {
               </button>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div
+              className={
+                viewMode === "grid"
+                  ? "grid grid-cols-1 xl:grid-cols-2 gap-3"
+                  : "space-y-3"
+              }
+            >
               {filtered.map((d, i) => (
                 <DecisionCard key={d.market_id + i} signal={d} />
               ))}
