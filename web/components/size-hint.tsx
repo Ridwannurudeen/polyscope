@@ -61,8 +61,8 @@ export function SizeHint({
     <div
       className={`rounded-md border px-3.5 py-3 ${
         edgeNegative
-          ? "border-ink-800 bg-background"
-          : "border-scope-500/25 bg-scope-500/5"
+          ? "border-ink-800"
+          : "border-scope-500/30"
       }`}
     >
       <div className="flex items-baseline gap-3 flex-wrap text-caption font-mono">

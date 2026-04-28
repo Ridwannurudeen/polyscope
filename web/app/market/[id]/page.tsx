@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { Disclaimer } from "@/components/disclaimer";
-import { LastUpdated } from "@/components/last-updated";
+import { PageHeader } from "@/components/page-header";
 import { ScoreBadge } from "@/components/score-badge";
 import { SignalEvidence } from "@/components/signal-evidence";
 import { SkeletonCard } from "@/components/skeleton";
@@ -58,7 +58,7 @@ export default function MarketPage() {
   const params = useParams();
   const id = params.id as string;
 
-  const { data, loading, error, lastUpdated, retry } =
+  const { data, loading, error, retry } =
     usePollingFetch<MarketDetail>(`/api/market/${id}`, 120_000);
 
   if (loading) {
@@ -108,22 +108,10 @@ export default function MarketPage() {
 
   return (
     <div>
-      {/* Hero */}
-      <section className="mb-10 pb-10 border-b border-ink-800">
-        <div className="flex items-start justify-between gap-6">
-          <div className="min-w-0">
-            {market.category && (
-              <div className="eyebrow mb-3">
-                category · {market.category}
-              </div>
-            )}
-            <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight max-w-3xl">
-              {market.question}
-            </h1>
-          </div>
-          <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
-        </div>
-      </section>
+      <PageHeader
+        title={market.question}
+        sub={market.category ? `category · ${market.category}` : undefined}
+      />
 
       {/* Stat tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-12">

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Disclaimer } from "@/components/disclaimer";
+import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeleton";
 import { usePollingFetch } from "@/lib/hooks";
 
@@ -78,17 +79,10 @@ export default function ComparePage() {
 
   return (
     <div>
-      <section className="mb-10 pb-10 border-b border-ink-800">
-        <div className="eyebrow mb-3">compare · two ranks</div>
-        <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight">
-          p&amp;l vs accuracy
-        </h1>
-        <p className="text-body-lg text-ink-300 mt-3 max-w-2xl leading-relaxed">
-          Polymarket ranks traders by profit. PolyScope ranks them by how
-          often their positions match resolved outcomes when they diverge from
-          the crowd. These are not the same thing.
-        </p>
-      </section>
+      <PageHeader
+        title="p&l vs accuracy"
+        sub="Polymarket ranks by profit; PolyScope ranks by how often a trader's positions resolve in their favor when diverging from the crowd. These are not the same thing."
+      />
 
       <section className="mb-10">
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">

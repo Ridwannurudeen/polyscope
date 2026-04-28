@@ -27,14 +27,16 @@ export function WhaleFlow() {
 
   return (
     <div>
-      <div className="flex items-end justify-between mb-5 pb-3 border-b border-ink-800">
-        <div>
-          <div className="eyebrow mb-2">flow · top-trader entries</div>
-          <h2 className="text-h3 text-ink-100 tracking-tight">whale flow · 24h</h2>
-          <p className="text-caption text-ink-400 mt-1 max-w-2xl">
-            New positions ≥ $10K from top-ranked traders in the last 24 hours.
+      <div className="flex items-end justify-between mb-5 pb-2 border-b border-ink-800">
+        <div className="min-w-0">
+          <h2 className="text-h3 text-ink-100 tracking-tight">whale flow</h2>
+          <p className="text-caption text-ink-500 mt-1">
+            Top-trader entries ≥ $10K in the last 24h.
           </p>
         </div>
+        <span className="num text-micro font-mono text-ink-500 shrink-0 ml-4">
+          {data.alerts.length}
+        </span>
       </div>
       <div className="surface rounded-lg overflow-hidden divide-y divide-ink-800">
         {data.alerts.slice(0, 10).map((a) => (

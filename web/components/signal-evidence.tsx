@@ -152,48 +152,50 @@ export function SignalEvidence({ marketId }: { marketId: string }) {
         </span>
       </div>
 
-      {/* Historical context */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="surface rounded-md p-3">
-          <div className="eyebrow mb-1.5">skew band</div>
-          <p className="text-body-sm text-ink-100">{data.skew.label}</p>
+      {/* Historical context — flat 4-cell row, not nested cards.
+          The two `surface` boxes inside the already-bordered evidence
+          container were card-in-card-in-card chrome. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 py-3 border-y border-ink-800/70">
+        <div>
+          <div className="eyebrow mb-1">skew band</div>
+          <p className="text-body-sm text-ink-200">{data.skew.label}</p>
+        </div>
+        <div>
+          <div className="eyebrow mb-1">band hit rate</div>
           {data.skew.hit_rate_pct !== null ? (
-            <p className="text-caption text-ink-400 font-mono mt-1">
-              hit rate ·{" "}
+            <p className="text-body-sm font-mono">
               <span className={`num ${accuracyColor(data.skew.hit_rate_pct)}`}>
                 {data.skew.hit_rate_pct.toFixed(1)}%
-              </span>{" "}
-              <span className="text-ink-500 num">
-                ({data.skew.correct}/{data.skew.total_resolved})
+              </span>
+              <span className="text-ink-500 num ml-2">
+                {data.skew.correct}/{data.skew.total_resolved}
               </span>
             </p>
           ) : (
-            <p className="text-caption text-ink-500 font-mono mt-1">
-              no resolved data yet
-            </p>
+            <p className="text-body-sm text-ink-500 font-mono">—</p>
           )}
         </div>
-        <div className="surface rounded-md p-3">
-          <div className="eyebrow mb-1.5">category</div>
-          <p className="text-body-sm text-ink-100">
+        <div>
+          <div className="eyebrow mb-1">category</div>
+          <p className="text-body-sm text-ink-200 truncate">
             {data.category.name || "uncategorized"}
           </p>
+        </div>
+        <div>
+          <div className="eyebrow mb-1">cat hit rate</div>
           {data.category.hit_rate_pct !== null ? (
-            <p className="text-caption text-ink-400 font-mono mt-1">
-              hit rate ·{" "}
+            <p className="text-body-sm font-mono">
               <span
                 className={`num ${accuracyColor(data.category.hit_rate_pct)}`}
               >
                 {data.category.hit_rate_pct.toFixed(1)}%
-              </span>{" "}
-              <span className="text-ink-500 num">
-                ({data.category.correct}/{data.category.total_resolved})
+              </span>
+              <span className="text-ink-500 num ml-2">
+                {data.category.correct}/{data.category.total_resolved}
               </span>
             </p>
           ) : (
-            <p className="text-caption text-ink-500 font-mono mt-1">
-              no resolved data yet
-            </p>
+            <p className="text-body-sm text-ink-500 font-mono">—</p>
           )}
         </div>
       </div>
