@@ -87,8 +87,10 @@ function SectionHead({
 }
 
 export default function Dashboard() {
-  const { data, loading, error, lastUpdated, retry } =
-    usePollingFetch<ScanResult>("/api/scan/latest", 60_000);
+  const { data, loading, error, retry } = usePollingFetch<ScanResult>(
+    "/api/scan/latest",
+    60_000,
+  );
   const { data: eventsData } = usePollingFetch<EventsResponse>(
     "/api/events?limit=5",
     120_000,
