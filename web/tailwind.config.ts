@@ -9,20 +9,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Ink scale — custom neutrals, slight cool tint, tuned for terminal
-        // rendering. Never use default Tailwind grays.
+        // Ink scale — custom neutrals routed through CSS vars so the
+        // entire scale can flip dark↔light. RGB triplets defined in
+        // globals.css under :root and :root[data-theme="light"].
+        // The semantic mental model (50=fg, 950=bg in dark) inverts
+        // automatically in light: 50 stays "primary text," 950 stays
+        // "deepest background" — only the actual color values flip.
         ink: {
-          50: "#F8F9FB",
-          100: "#ECEEF2",
-          200: "#D8DCE4",
-          300: "#AFB6C3",
-          400: "#7A8496",
-          500: "#4D5566",
-          600: "#2A303D",
-          700: "#1E232D",
-          800: "#161A22",
-          900: "#0F1218",
-          950: "#0A0C10",
+          50:  "rgb(var(--ink-50)  / <alpha-value>)",
+          100: "rgb(var(--ink-100) / <alpha-value>)",
+          200: "rgb(var(--ink-200) / <alpha-value>)",
+          300: "rgb(var(--ink-300) / <alpha-value>)",
+          400: "rgb(var(--ink-400) / <alpha-value>)",
+          500: "rgb(var(--ink-500) / <alpha-value>)",
+          600: "rgb(var(--ink-600) / <alpha-value>)",
+          700: "rgb(var(--ink-700) / <alpha-value>)",
+          800: "rgb(var(--ink-800) / <alpha-value>)",
+          900: "rgb(var(--ink-900) / <alpha-value>)",
+          950: "rgb(var(--ink-950) / <alpha-value>)",
         },
         // Scope — mint-cyan accent, signal-positive / predictive / attribution.
         // Distinct from Hyperliquid green (shifted more cyan).

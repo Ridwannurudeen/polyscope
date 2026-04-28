@@ -8,7 +8,24 @@ import { Wordmark } from "@/components/logo";
 import { MobileNav } from "@/components/mobile-nav";
 import { PageViewTracker } from "@/components/page-view-tracker";
 import { SearchBar } from "@/components/search-bar";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Web3Provider } from "@/lib/web3-provider";
+
+/**
+ * Pre-paint theme script — runs synchronously in <head> before any
+ * stylesheet or component, so users with a saved light preference
+ * never see a dark→light flash. Mirrors the logic in ThemeToggle.
+ */
+const themePrePaintScript = `
+(function() {
+  try {
+    var t = localStorage.getItem('polyscope.theme');
+    if (t === 'light' || t === 'dark') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch (e) {}
+})();
+`;
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -58,7 +75,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{ __html: themePrePaintScript }}
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
       >
@@ -103,9 +125,13 @@ export default function RootLayout({
 
                 <div className="hidden lg:flex items-center gap-2">
                   <SearchBar />
+                  <ThemeToggle />
                   <ConnectWallet />
                 </div>
-                <MobileNav items={NAV_ITEMS} />
+                <div className="lg:hidden flex items-center gap-1">
+                  <ThemeToggle />
+                  <MobileNav items={NAV_ITEMS} />
+                </div>
               </div>
             </div>
           </header>

@@ -3,12 +3,31 @@
 @tailwind utilities;
 
 /* ── Design tokens ─────────────────────────────────────────
-   Semantic CSS variables map to ink/scope/fade tokens. Never
-   reference Tailwind default grays. Component code reads
-   `bg-surface`, `text-muted` etc. from these vars. */
+   Two themes: dark (default) and light. Tokens flip via CSS vars
+   on `:root` vs `:root[data-theme="light"]`. The Tailwind ink scale
+   is also routed through CSS vars (see tailwind.config.ts) so every
+   `text-ink-100` / `bg-ink-800` reference flips automatically.
+
+   Mental model preserved across themes: ink-50 = primary text,
+   ink-400/500 = muted text, ink-700/800 = borders / subtle surface,
+   ink-950 = deepest background. Only the *colors* invert.
+
+   Atmosphere (dot grid + radial glow) is also theme-aware below. */
 
 :root {
-  /* Terminal is dark-first; we ship a single theme. */
+  /* DARK theme (default) — terminal */
+  --ink-50:  248 249 251;  /* #F8F9FB — primary text */
+  --ink-100: 236 238 242;  /* #ECEEF2 */
+  --ink-200: 216 220 228;  /* #D8DCE4 */
+  --ink-300: 175 182 195;  /* #AFB6C3 */
+  --ink-400: 122 132 150;  /* #7A8496 */
+  --ink-500: 77  85  102;  /* #4D5566 */
+  --ink-600: 42  48  61;   /* #2A303D */
+  --ink-700: 30  35  45;   /* #1E232D — border */
+  --ink-800: 22  26  34;   /* #161A22 — elevated surface */
+  --ink-900: 15  18  24;   /* #0F1218 — surface */
+  --ink-950: 10  12  16;   /* #0A0C10 — background */
+
   --background: #0A0C10;
   --foreground: #ECEEF2;
   --surface: #0F1218;
@@ -23,8 +42,81 @@
   --fade-dim: rgba(255, 182, 54, 0.12);
   --alert: #FF5A6B;
 
-  /* Typography — consumed via font-family: var(--font-*) */
+  /* Atmosphere tunings */
+  --atm-dot-color: 122, 132, 150;
+  --atm-dot-alpha: 0.10;
+  --atm-glow-alpha-1: 0.10;
+  --atm-glow-alpha-2: 0.04;
+
   --tabular: "tnum" 1, "lnum" 1;
+}
+
+:root[data-theme="light"] {
+  /* LIGHT theme — same mental model, inverted values, slight warm tint
+     on the background to avoid pure-white "stock" feel. */
+  --ink-50:  17  20  28;   /* #11141C — primary text */
+  --ink-100: 30  35  45;   /* #1E232D */
+  --ink-200: 50  58  74;   /* #323A4A */
+  --ink-300: 77  85  102;  /* #4D5566 */
+  --ink-400: 122 132 150;  /* #7A8496 — muted */
+  --ink-500: 159 168 184;  /* #9FA8B8 */
+  --ink-600: 198 205 217;  /* #C6CDD9 */
+  --ink-700: 222 227 235;  /* #DEE3EB — border */
+  --ink-800: 236 238 242;  /* #ECEEF2 — elevated surface */
+  --ink-900: 244 245 248;  /* #F4F5F8 — surface */
+  --ink-950: 250 250 247;  /* #FAFAF7 — background, warm tint */
+
+  --background: #FAFAF7;
+  --foreground: #11141C;
+  --surface: #F4F5F8;
+  --elevated: #ECEEF2;
+  --border: #DEE3EB;
+  --border-strong: #C6CDD9;
+  --muted: #4D5566;
+
+  /* Accent stays the same hue; saturation/lightness tweak for contrast.
+     scope on light bg can stay #00E5A0 for accent fills, but
+     scope-dim and the conic halo need lower alpha. */
+  --scope-dim: rgba(0, 179, 124, 0.10);
+  --fade-dim: rgba(160, 95, 0, 0.10);
+
+  --atm-dot-color: 60, 70, 90;
+  --atm-dot-alpha: 0.06;
+  --atm-glow-alpha-1: 0.06;
+  --atm-glow-alpha-2: 0.03;
+}
+
+/* Honor system preference on first paint when no manual choice exists */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --ink-50:  17 20 28;
+    --ink-100: 30 35 45;
+    --ink-200: 50 58 74;
+    --ink-300: 77 85 102;
+    --ink-400: 122 132 150;
+    --ink-500: 159 168 184;
+    --ink-600: 198 205 217;
+    --ink-700: 222 227 235;
+    --ink-800: 236 238 242;
+    --ink-900: 244 245 248;
+    --ink-950: 250 250 247;
+
+    --background: #FAFAF7;
+    --foreground: #11141C;
+    --surface: #F4F5F8;
+    --elevated: #ECEEF2;
+    --border: #DEE3EB;
+    --border-strong: #C6CDD9;
+    --muted: #4D5566;
+
+    --scope-dim: rgba(0, 179, 124, 0.10);
+    --fade-dim: rgba(160, 95, 0, 0.10);
+
+    --atm-dot-color: 60, 70, 90;
+    --atm-dot-alpha: 0.06;
+    --atm-glow-alpha-1: 0.06;
+    --atm-glow-alpha-2: 0.03;
+  }
 }
 
 html {
@@ -58,21 +150,30 @@ body::after {
   z-index: 0;
 }
 
-/* Dot grid — scaled to read as texture, not pattern */
+/* Dot grid — scaled to read as texture, not pattern. Color and alpha
+   come from the theme so light mode shows darker dots at lower opacity. */
 body::before {
   background-image:
-    radial-gradient(rgba(122, 132, 150, 0.10) 1px, transparent 1px);
+    radial-gradient(rgba(var(--atm-dot-color), var(--atm-dot-alpha)) 1px, transparent 1px);
   background-size: 32px 32px;
   background-position: 0 0;
   mask-image: radial-gradient(ellipse 90% 80% at 50% 0%, #000 35%, transparent 90%);
   -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 0%, #000 35%, transparent 90%);
+  transition: background-image 240ms ease-out;
 }
 
-/* Hero glow — soft cyan halo under the top of the page */
+/* Hero glow — soft accent halo under the top of the page */
 body::after {
   background:
-    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(0, 229, 160, 0.10), transparent 70%),
-    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(0, 229, 160, 0.04), transparent 70%);
+    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(0, 229, 160, var(--atm-glow-alpha-1)), transparent 70%),
+    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(0, 229, 160, var(--atm-glow-alpha-2)), transparent 70%);
+  transition: background 240ms ease-out;
+}
+
+/* Smooth theme transition on key surfaces — body bg, text. Skip
+   on borders + interactive states to avoid trailing during hover. */
+body, header, footer, main {
+  transition: background-color 200ms ease-out, color 200ms ease-out;
 }
 
 /* Push real content above the ambient layer */
