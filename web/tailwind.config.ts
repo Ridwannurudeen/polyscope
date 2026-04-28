@@ -122,6 +122,8 @@ const config: Config = {
         "elevated": "0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px rgba(0,0,0,0.4)",
         "modal": "0 24px 64px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.03) inset",
         "glow-scope": "0 0 0 1px rgba(0,229,160,0.25), 0 0 24px rgba(0,229,160,0.08)",
+        "glow-scope-strong": "0 0 0 1px rgba(0,229,160,0.5), 0 0 32px rgba(0,229,160,0.25), 0 0 64px rgba(0,229,160,0.12)",
+        "hero-cta": "0 0 0 1px rgba(0,229,160,0.55), 0 8px 32px rgba(0,229,160,0.18), 0 1px 0 rgba(255,255,255,0.06) inset",
       },
       keyframes: {
         "tick-up": {
@@ -136,11 +138,47 @@ const config: Config = {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.55" },
         },
+        "fade-up": {
+          "0%": { opacity: "0", transform: "translateY(12px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        "fade-in": {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        "marquee": {
+          "0%": { transform: "translateX(0)" },
+          "100%": { transform: "translateX(-50%)" },
+        },
+        "flash-scope": {
+          "0%": { backgroundColor: "rgba(0, 229, 160, 0.18)" },
+          "100%": { backgroundColor: "rgba(0, 229, 160, 0)" },
+        },
+        "flash-fade": {
+          "0%": { backgroundColor: "rgba(255, 182, 54, 0.18)" },
+          "100%": { backgroundColor: "rgba(255, 182, 54, 0)" },
+        },
+        "shimmer": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        "halo-spin": {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(360deg)" },
+        },
       },
       animation: {
         "tick-up": "tick-up 180ms cubic-bezier(0.25, 1, 0.5, 1)",
         "tick-down": "tick-down 180ms cubic-bezier(0.25, 1, 0.5, 1)",
         "pulse-subtle": "pulse-subtle 2.4s ease-in-out infinite",
+        "fade-up": "fade-up 480ms cubic-bezier(0.16, 1, 0.3, 1) both",
+        "fade-in": "fade-in 320ms ease-out both",
+        "marquee": "marquee 60s linear infinite",
+        "marquee-slow": "marquee 120s linear infinite",
+        "flash-scope": "flash-scope 1200ms ease-out",
+        "flash-fade": "flash-fade 1200ms ease-out",
+        "shimmer": "shimmer 1.6s ease-in-out infinite",
+        "halo-spin": "halo-spin 24s linear infinite",
       },
     },
   },

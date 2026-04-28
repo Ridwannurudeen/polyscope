@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { AccBar } from "@/components/acc-bar";
 import { Disclaimer } from "@/components/disclaimer";
+import { DivergenceBar } from "@/components/divergence-bar";
+import { HeroSignature } from "@/components/hero-signature";
 import { LastUpdated } from "@/components/last-updated";
+import { LiveTicker } from "@/components/live-ticker";
 import { ScoreBadge } from "@/components/score-badge";
 import { SignalTrackRecord } from "@/components/signal-track-record";
 import { DashboardSkeleton } from "@/components/skeleton";
@@ -54,23 +58,36 @@ function formatNum(n: number | string | null | undefined, digits = 0) {
   return num.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
-/* ── Stat cell — eyebrow + mono value. Used in hero strip. ── */
-function StatCell({
+/* ── Stat card — framed surface with eyebrow + h2 number. The dashboard
+   summary row uses these instead of bare cells so each fact reads as a
+   discrete, scannable unit. Accent variant gets a left-edge scope bar
+   when the value is currently "live" (active signal). ── */
+function StatCard({
   label,
   value,
   sub,
-  align = "left",
+  accent,
 }: {
   label: string;
   value: string | number;
   sub?: string;
-  align?: "left" | "right";
+  accent?: boolean;
 }) {
   return (
-    <div className={align === "right" ? "text-right" : ""}>
-      <div className="eyebrow mb-1.5">{label}</div>
-      <div className="num text-h3 text-ink-100 leading-none">{value}</div>
-      {sub && <div className="text-micro text-ink-400 mt-1.5 font-mono">{sub}</div>}
+    <div
+      className={`relative surface rounded-lg p-4 transition-colors duration-180 hover:border-ink-600 ${
+        accent ? "before:absolute before:left-0 before:top-3 before:bottom-3 before:w-0.5 before:bg-scope-500 before:rounded-r" : ""
+      }`}
+    >
+      <div className="eyebrow mb-2">{label}</div>
+      <div className="num text-h2 text-ink-100 leading-none tracking-tight">
+        {value}
+      </div>
+      {sub && (
+        <div className="text-micro text-ink-500 mt-2 font-mono truncate">
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
@@ -170,58 +187,43 @@ export default function Dashboard() {
 
   return (
     <div>
-      {/* ── HERO — terminal style: info first, no marketing ── */}
-      <section className="pt-2 pb-10 border-b border-ink-800 mb-10">
-        <div className="flex items-start justify-between gap-8 mb-8">
-          <div className="max-w-3xl">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-scope-500 animate-pulse-subtle" />
-              <span className="eyebrow text-scope-500">live · polymarket v2</span>
-            </div>
-            <h1 className="text-h1 md:text-display text-ink-100 tracking-tightest leading-[1.02]">
-              counter-consensus
-              <br />
-              <span className="text-ink-300">intelligence for polymarket.</span>
-            </h1>
-            <p className="text-body-lg text-ink-300 mt-5 max-w-2xl leading-relaxed">
-              Polymarket ranks by P&amp;L. We rank by <em className="not-italic text-ink-100">accuracy</em>.
-              Each top trader is evaluated on their own divergent positions against
-              resolved outcomes, with Wilson 95% confidence intervals. Find the
-              handful who are actually predictive — see the evidence, follow the moves.
-            </p>
-            <div className="mt-7 flex flex-wrap items-center gap-3">
-              <Link href="/traders" className="btn-primary">
-                view predictive leaderboard →
-              </Link>
-              <Link href="/methodology" className="btn-ghost">
-                read methodology
-              </Link>
-            </div>
-          </div>
+      {/* ── HERO — signature stat + supporting copy ── */}
+      <HeroSignature />
+
+      {/* ── LIVE TICKER — pulse of activity, edge-to-edge ── */}
+      <LiveTicker />
+
+      {/* ── DASHBOARD STATS — compact summary row ── */}
+      <section className="mb-12">
+        <div className="flex items-center justify-between mb-5">
+          <div className="eyebrow text-ink-500">terminal · live counts</div>
           <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
         </div>
-
-        {/* Stats strip — mono values, tabular, terminal-first */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-6 pt-8 border-t border-ink-800">
-          <StatCell
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard
             label="active markets"
             value={formatNum(data?.total_markets)}
-            sub="tracked from polymarket gamma"
+            sub="polymarket gamma"
           />
-          <StatCell
+          <StatCard
             label="divergence signals"
             value={formatNum(data?.total_divergences)}
-            sub="top-trader vs market disagreement"
+            sub="top-trader vs market"
           />
-          <StatCell
+          <StatCard
             label="strongest divergence"
             value={topDivergence}
-            sub={divergences.length > 0 ? "live · active signal" : "no active signal"}
+            sub={divergences.length > 0 ? "active signal" : "no signal"}
+            accent={divergences.length > 0}
           />
-          <StatCell
+          <StatCard
             label="top mover · 24h"
             value={topMover}
-            sub={movers.length > 0 ? movers[0].question.slice(0, 28) + "…" : "—"}
+            sub={
+              movers.length > 0
+                ? movers[0].question.slice(0, 28) + "…"
+                : "—"
+            }
           />
         </div>
       </section>
@@ -284,20 +286,20 @@ export default function Dashboard() {
               <Link
                 key={d.market_id + i}
                 href={`/market/${d.market_id}`}
-                className="flex items-center justify-between px-5 py-4 row-hover"
+                className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_auto] items-center gap-x-6 gap-y-2 px-5 py-4 row-hover-reveal"
               >
-                <div className="flex-1 min-w-0 pr-6">
+                <div className="min-w-0">
                   <p className="text-body text-ink-100 font-medium truncate">
                     {d.question}
                   </p>
-                  <div className="flex items-center gap-5 mt-1.5 text-caption font-mono">
-                    <span className="text-ink-400">
+                  <div className="flex items-center gap-4 mt-1.5 text-caption font-mono">
+                    <span className="text-ink-500">
                       crowd{" "}
-                      <span className="text-ink-100 num">
+                      <span className="text-ink-200 num">
                         {(d.market_price * 100).toFixed(0)}%
                       </span>
                     </span>
-                    <span className="text-ink-400">
+                    <span className="text-ink-500">
                       polyscope{" "}
                       <span
                         className={`num ${
@@ -310,12 +312,19 @@ export default function Dashboard() {
                       </span>
                     </span>
                     <span className="text-ink-500">
-                      {d.sm_trader_count} traders
+                      <span className="num">{d.sm_trader_count}</span> traders
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-4 shrink-0">
-                  <span className="num text-h4 text-fade-500 tracking-tight">
+                <div className="hidden sm:block min-w-[140px] pr-6">
+                  <DivergenceBar
+                    marketPrice={d.market_price}
+                    smConsensus={d.sm_consensus}
+                    smDirection={d.sm_direction}
+                  />
+                </div>
+                <div className="flex items-center gap-3 shrink-0 pr-6">
+                  <span className="num text-h3 text-fade-500 tracking-tighter leading-none">
                     {(d.divergence_pct * 100).toFixed(0)}%
                   </span>
                   <ScoreBadge score={d.score} />
@@ -431,7 +440,10 @@ export default function Dashboard() {
   );
 }
 
-/* ── Trader leaderboard table — used in PREDICTIVE LEADERBOARD section ── */
+/* ── Trader leaderboard table ──
+   Each row: rank · address · accuracy bar (visual proof) · CI · sample size.
+   The accuracy bar replaces the bare percentage as the visual anchor —
+   pattern recognition works on shapes, not digits. */
 function TraderBoard({
   side,
   title,
@@ -446,7 +458,12 @@ function TraderBoard({
     side === "predictive" ? "hover:text-scope-400" : "hover:text-fade-500";
   return (
     <div>
-      <div className="eyebrow mb-3">{title}</div>
+      <div className="flex items-center justify-between mb-3">
+        <div className="eyebrow">{title}</div>
+        <div className="text-micro text-ink-500 font-mono">
+          n={rows.length}
+        </div>
+      </div>
       <div className="surface rounded-lg overflow-hidden">
         <table className="w-full text-body-sm">
           <tbody>
@@ -455,18 +472,19 @@ function TraderBoard({
                 key={t.trader_address}
                 className="border-b border-ink-800/70 last:border-0 row-hover"
               >
-                <td className="pl-4 pr-2 py-3 text-micro text-ink-500 font-mono w-8 num text-right">
+                <td className="pl-4 pr-2 py-3 text-micro text-ink-500 font-mono w-8 num text-right align-top">
                   {String(i + 1).padStart(2, "0")}
                 </td>
-                <td className="py-3 pr-3">
+                <td className="py-3 pr-3 align-top">
                   <Link
                     href={`/traders/${t.trader_address}`}
                     className={`text-ink-100 font-mono text-body-sm ${hoverAccent} transition-colors`}
                   >
                     {shortAddr(t.trader_address)}
                   </Link>
+                  <AccBar pct={t.accuracy_pct} side={side} />
                 </td>
-                <td className="py-3 pr-4 text-right">
+                <td className="py-3 pr-4 text-right align-top">
                   <div className={`num ${accent} text-body font-medium`}>
                     {t.accuracy_pct.toFixed(0)}%
                     {t.ci && !t.ci.sufficient && (
@@ -484,7 +502,7 @@ function TraderBoard({
                     </div>
                   )}
                 </td>
-                <td className="pr-4 py-3 text-right text-micro text-ink-500 num w-20">
+                <td className="pr-4 py-3 text-right text-micro text-ink-500 num w-20 align-top">
                   {t.correct_predictions}/{t.total_divergent_signals}
                 </td>
               </tr>

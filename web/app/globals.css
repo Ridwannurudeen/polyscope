@@ -27,6 +27,10 @@
   --tabular: "tnum" 1, "lnum" 1;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 html, body {
   height: 100%;
   background: var(--background);
@@ -38,9 +42,46 @@ html, body {
   text-rendering: optimizeLegibility;
 }
 
-/* Every number, anywhere, should be tabular. Non-negotiable for a
-   terminal. If a designer explicitly wants proportional nums they
-   can opt out with .font-proportional. */
+/* ── Ambient layer ─────────────────────────────────────────
+   A site without atmosphere reads as a dev tool. We layer two
+   things behind everything: a faint dot grid (scale, structure)
+   and a slow radial glow (depth, presence). Both are pure CSS,
+   no canvas, no JS, ~2KB total. They sit at z-index -1 so they
+   never block clicks. */
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Dot grid — scaled to read as texture, not pattern */
+body::before {
+  background-image:
+    radial-gradient(rgba(122, 132, 150, 0.10) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: 0 0;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 0%, #000 35%, transparent 90%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 0%, #000 35%, transparent 90%);
+}
+
+/* Hero glow — soft cyan halo under the top of the page */
+body::after {
+  background:
+    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(0, 229, 160, 0.10), transparent 70%),
+    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(0, 229, 160, 0.04), transparent 70%);
+}
+
+/* Push real content above the ambient layer */
+header, main, footer {
+  position: relative;
+  z-index: 1;
+}
+
+/* Every number, anywhere, should be tabular. */
 .tabular,
 [data-tabular],
 .font-mono,
@@ -58,11 +99,16 @@ samp {
   color: var(--foreground);
 }
 
-/* Focus — subtle outer ring, not a chunky glow */
+/* Focus — single, refined treatment used everywhere. The earlier
+   double-ring was too chunky; this is a tight scope-tinted line
+   plus a 1px background separation so it reads on any surface. */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--background), 0 0 0 2.5px var(--scope);
+  box-shadow:
+    0 0 0 2px var(--background),
+    0 0 0 3.5px var(--scope);
   border-radius: 4px;
+  transition: box-shadow 120ms ease-out;
 }
 
 /* Scrollbar — thin, terminal-appropriate */
@@ -80,6 +126,19 @@ samp {
 }
 *::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
+}
+
+/* Reduce motion respect — turn off entrance/marquee for users who
+   ask for it. Keeps the site usable for vestibular sensitivity. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── Utility classes ───────────────────────────────────── */
@@ -118,12 +177,37 @@ samp {
     @apply bg-elevated border border-ink-700;
   }
 
-  /* Button primitives */
+  /* ── Buttons ──────────────────────────────────────────
+     Three sizes (sm default, md, lg/hero) and three intents
+     (primary, secondary, ghost). Hero size is the one the
+     landing page uses as its main CTA. Lift+glow on primary
+     hover is what separates "professional crypto" from "shadcn". */
+
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 font-mono uppercase tracking-wider text-eyebrow h-8 px-3 rounded-md transition-colors duration-120 ease-out-quart;
+    @apply inline-flex items-center justify-center gap-1.5 font-mono uppercase tracking-wider text-eyebrow h-8 px-3 rounded-md transition-all duration-180 ease-out-quart;
+  }
+  .btn-md {
+    @apply h-10 px-4 text-micro;
+  }
+  .btn-lg {
+    @apply h-12 px-6 text-caption;
+    letter-spacing: 0.16em;
   }
   .btn-primary {
     @apply btn bg-scope-500 text-ink-950 hover:bg-scope-400 disabled:opacity-40 disabled:cursor-not-allowed;
+    box-shadow:
+      0 0 0 1px rgba(0, 229, 160, 0),
+      0 0 0 rgba(0, 229, 160, 0);
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 1px rgba(0, 229, 160, 0.4),
+      0 8px 24px rgba(0, 229, 160, 0.18),
+      0 1px 0 rgba(255, 255, 255, 0.1) inset;
+  }
+  .btn-primary:active {
+    transform: translateY(0);
   }
   .btn-secondary {
     @apply btn bg-transparent text-ink-100 border border-ink-600 hover:border-scope-500 hover:text-scope-400 disabled:opacity-40;
@@ -132,9 +216,48 @@ samp {
     @apply btn bg-transparent text-ink-300 hover:text-ink-100 hover:bg-ink-800;
   }
 
+  /* Hero-grade CTA — used for the single most important action
+     above the fold. Persistent glow that intensifies on hover. */
+  .btn-hero {
+    @apply btn btn-lg bg-scope-500 text-ink-950 hover:bg-scope-400;
+    box-shadow:
+      0 0 0 1px rgba(0, 229, 160, 0.45),
+      0 6px 24px rgba(0, 229, 160, 0.16),
+      0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  }
+  .btn-hero:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 1px rgba(0, 229, 160, 0.6),
+      0 12px 40px rgba(0, 229, 160, 0.28),
+      0 1px 0 rgba(255, 255, 255, 0.12) inset;
+  }
+
   /* Hover row for table-like content */
   .row-hover {
     @apply transition-colors duration-120 hover:bg-ink-800/60;
+  }
+
+  /* Row-hover with a small reveal indicator on the right edge */
+  .row-hover-reveal {
+    @apply relative transition-colors duration-120 hover:bg-ink-800/60;
+  }
+  .row-hover-reveal::after {
+    content: "→";
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translate(-6px, -50%);
+    color: var(--scope);
+    opacity: 0;
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 14px;
+    transition: opacity 180ms ease-out, transform 180ms ease-out;
+    pointer-events: none;
+  }
+  .row-hover-reveal:hover::after {
+    opacity: 1;
+    transform: translate(0, -50%);
   }
 
   /* Scanline — optional texture for hero/empty states */
@@ -146,5 +269,98 @@ samp {
       rgba(255, 255, 255, 0.015) 3px,
       rgba(255, 255, 255, 0.015) 4px
     );
+  }
+
+  /* Live-data flash — apply to a number that just changed. */
+  .flash-up {
+    animation: flash-scope 1200ms ease-out;
+  }
+  .flash-down {
+    animation: flash-fade 1200ms ease-out;
+  }
+
+  /* Skeleton shimmer — replaces flat-grey loading blocks */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+    background: var(--border);
+  }
+  .shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(122, 132, 150, 0.10) 50%,
+      transparent 100%
+    );
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+
+  /* Hero halo — slow rotating cyan gradient ring behind the
+     headline number. Pure CSS, no JS. Used once per page max. */
+  .halo {
+    position: absolute;
+    inset: -40%;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0%,
+      rgba(0, 229, 160, 0.18) 25%,
+      transparent 50%,
+      rgba(0, 229, 160, 0.10) 75%,
+      transparent 100%
+    );
+    filter: blur(48px);
+    animation: halo-spin 24s linear infinite;
+    opacity: 0.6;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* Marquee track — duplicate child content for seamless loop */
+  .marquee-track {
+    display: flex;
+    width: max-content;
+    animation: marquee 60s linear infinite;
+  }
+  .marquee-track:hover {
+    animation-play-state: paused;
+  }
+
+  /* Mask-fade horizontal edges — used on marquee containers */
+  .mask-fade-x {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0%,
+      #000 8%,
+      #000 92%,
+      transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0%,
+      #000 8%,
+      #000 92%,
+      transparent 100%
+    );
+  }
+
+  /* Inline accuracy bar — for trader leaderboards */
+  .acc-bar {
+    position: relative;
+    height: 3px;
+    background: rgba(122, 132, 150, 0.15);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .acc-bar > span {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    border-radius: 2px;
+    transition: width 600ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 }
