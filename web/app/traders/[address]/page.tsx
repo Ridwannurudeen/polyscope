@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { useEffect } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { FollowButton } from "@/components/follow-button";
-import { LastUpdated } from "@/components/last-updated";
 import { TableSkeleton } from "@/components/skeleton";
 import { trackEvent } from "@/lib/analytics";
 import { usePollingFetch } from "@/lib/hooks";
@@ -56,7 +55,7 @@ export default function TraderProfilePage() {
     }
   }, [address]);
 
-  const { data, loading, error, lastUpdated, retry } =
+  const { data, loading, error, retry } =
     usePollingFetch<TraderProfile>(`/api/traders/${address}`, 60_000);
 
   if (loading) {
@@ -108,23 +107,19 @@ export default function TraderProfilePage() {
         </Link>
       </div>
 
-      <section className="mb-10 pb-10 border-b border-ink-800">
-        <div className="flex items-start justify-between gap-6 mb-3">
-          <div className="min-w-0">
-            <div className="eyebrow mb-3">profile · trader</div>
-            <h1 className="text-h2 font-mono text-ink-100 break-all leading-tight tracking-tight num">
-              {data.trader_address}
-            </h1>
-            <p className="text-caption text-ink-400 mt-2 font-mono">
-              predictive accuracy on counter-consensus positions
-            </p>
-            <div className="mt-4">
-              <FollowButton traderAddress={data.trader_address} />
-            </div>
-          </div>
-          <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
+      <header className="mb-8 pb-5 border-b border-ink-800 flex items-end justify-between gap-6 flex-wrap">
+        <div className="min-w-0">
+          <div className="eyebrow mb-2">trader profile</div>
+          <h1 className="text-h2 md:text-h1 font-mono text-ink-100 break-all leading-tight tracking-tight num">
+            {data.trader_address}
+          </h1>
+          <p className="text-body-sm text-ink-400 mt-2">
+            Accuracy on counter-consensus positions, scored against resolved
+            outcomes.
+          </p>
         </div>
-      </section>
+        <FollowButton traderAddress={data.trader_address} />
+      </header>
 
       {data.ci && !data.ci.sufficient && (
         <div className="mb-8 border border-fade-500/30 bg-fade-500/5 rounded-md px-4 py-3">

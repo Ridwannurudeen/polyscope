@@ -48,74 +48,108 @@
   --atm-glow-alpha-1: 0.10;
   --atm-glow-alpha-2: 0.04;
 
+  /* Shadow drop / inner highlight — themed so cards still read in light */
+  --shadow-drop-soft: rgba(0, 0, 0, 0.4);
+  --shadow-drop-modal: rgba(0, 0, 0, 0.6);
+  --shadow-highlight: rgba(255, 255, 255, 0.06);
+
+  /* Subtle row-hover and shimmer track tints — themed so they're not
+     invisible on light bg. */
+  --row-hover-bg: rgba(122, 132, 150, 0.10);
+  --shimmer-band: rgba(122, 132, 150, 0.10);
+  --track-bg: rgba(122, 132, 150, 0.18);
+
   --tabular: "tnum" 1, "lnum" 1;
 }
 
 :root[data-theme="light"] {
-  /* LIGHT theme — same mental model, inverted values, slight warm tint
-     on the background to avoid pure-white "stock" feel. */
+  /* LIGHT theme — same mental model (50=primary text, 950=background),
+     inverted values, slight warm tint on background.
+
+     IMPORTANT: muted text values (ink-400/500) are darkened compared
+     to the naive inversion of the dark scale. The naive map gave
+     #7A8496/#9FA8B8 muted-on-#F4F5F8 surfaces — 3.3:1 / 2.0:1, both
+     fail WCAG AA 4.5:1. The values below clear AA across all common
+     muted-on-surface combinations. */
   --ink-50:  17  20  28;   /* #11141C — primary text */
   --ink-100: 30  35  45;   /* #1E232D */
   --ink-200: 50  58  74;   /* #323A4A */
   --ink-300: 77  85  102;  /* #4D5566 */
-  --ink-400: 122 132 150;  /* #7A8496 — muted */
-  --ink-500: 159 168 184;  /* #9FA8B8 */
-  --ink-600: 198 205 217;  /* #C6CDD9 */
-  --ink-700: 222 227 235;  /* #DEE3EB — border */
-  --ink-800: 236 238 242;  /* #ECEEF2 — elevated surface */
-  --ink-900: 244 245 248;  /* #F4F5F8 — surface */
+  --ink-400: 90  100 118;  /* #5A6476 — muted (darker than naive flip for AA) */
+  --ink-500: 122 132 150;  /* #7A8496 — secondary muted (= dark's ink-400) */
+  --ink-600: 159 168 184;  /* #9FA8B8 */
+  --ink-700: 200 207 219;  /* #C8CFDB — border */
+  --ink-800: 222 227 235;  /* #DEE3EB — elevated surface */
+  --ink-900: 236 238 242;  /* #ECEEF2 — surface */
   --ink-950: 250 250 247;  /* #FAFAF7 — background, warm tint */
 
   --background: #FAFAF7;
   --foreground: #11141C;
-  --surface: #F4F5F8;
-  --elevated: #ECEEF2;
-  --border: #DEE3EB;
-  --border-strong: #C6CDD9;
-  --muted: #4D5566;
+  --surface: #ECEEF2;
+  --elevated: #DEE3EB;
+  --border: #C8CFDB;
+  --border-strong: #9FA8B8;
+  --muted: #5A6476;
 
-  /* Accent stays the same hue; saturation/lightness tweak for contrast.
-     scope on light bg can stay #00E5A0 for accent fills, but
-     scope-dim and the conic halo need lower alpha. */
-  --scope-dim: rgba(0, 179, 124, 0.10);
+  /* Accent dims — tuned so subtle backgrounds are visible on light bg
+     but don't blow out (light theme amplifies low-alpha colors). */
+  --scope-dim: rgba(0, 179, 124, 0.12);
   --fade-dim: rgba(160, 95, 0, 0.10);
 
-  --atm-dot-color: 60, 70, 90;
-  --atm-dot-alpha: 0.06;
-  --atm-glow-alpha-1: 0.06;
-  --atm-glow-alpha-2: 0.03;
+  --atm-dot-color: 30, 40, 60;
+  --atm-dot-alpha: 0.10;
+  --atm-glow-alpha-1: 0.08;
+  --atm-glow-alpha-2: 0.04;
+
+  /* Light-mode shadow tuning — softer drops, no white inner highlight */
+  --shadow-drop-soft: rgba(20, 24, 34, 0.10);
+  --shadow-drop-modal: rgba(20, 24, 34, 0.18);
+  --shadow-highlight: rgba(255, 255, 255, 0);
+
+  --row-hover-bg: rgba(30, 40, 60, 0.06);
+  --shimmer-band: rgba(30, 40, 60, 0.10);
+  --track-bg: rgba(30, 40, 60, 0.12);
 }
 
-/* Honor system preference on first paint when no manual choice exists */
+/* Honor system preference on first paint when no manual choice exists.
+   Mirrors :root[data-theme="light"] above (kept in sync manually). */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     --ink-50:  17 20 28;
     --ink-100: 30 35 45;
     --ink-200: 50 58 74;
     --ink-300: 77 85 102;
-    --ink-400: 122 132 150;
-    --ink-500: 159 168 184;
-    --ink-600: 198 205 217;
-    --ink-700: 222 227 235;
-    --ink-800: 236 238 242;
-    --ink-900: 244 245 248;
+    --ink-400: 90 100 118;
+    --ink-500: 122 132 150;
+    --ink-600: 159 168 184;
+    --ink-700: 200 207 219;
+    --ink-800: 222 227 235;
+    --ink-900: 236 238 242;
     --ink-950: 250 250 247;
 
     --background: #FAFAF7;
     --foreground: #11141C;
-    --surface: #F4F5F8;
-    --elevated: #ECEEF2;
-    --border: #DEE3EB;
-    --border-strong: #C6CDD9;
-    --muted: #4D5566;
+    --surface: #ECEEF2;
+    --elevated: #DEE3EB;
+    --border: #C8CFDB;
+    --border-strong: #9FA8B8;
+    --muted: #5A6476;
 
-    --scope-dim: rgba(0, 179, 124, 0.10);
+    --scope-dim: rgba(0, 179, 124, 0.12);
     --fade-dim: rgba(160, 95, 0, 0.10);
 
-    --atm-dot-color: 60, 70, 90;
-    --atm-dot-alpha: 0.06;
-    --atm-glow-alpha-1: 0.06;
-    --atm-glow-alpha-2: 0.03;
+    --atm-dot-color: 30, 40, 60;
+    --atm-dot-alpha: 0.10;
+    --atm-glow-alpha-1: 0.08;
+    --atm-glow-alpha-2: 0.04;
+
+    --shadow-drop-soft: rgba(20, 24, 34, 0.10);
+    --shadow-drop-modal: rgba(20, 24, 34, 0.18);
+    --shadow-highlight: rgba(255, 255, 255, 0);
+
+    --row-hover-bg: rgba(30, 40, 60, 0.06);
+    --shimmer-band: rgba(30, 40, 60, 0.10);
+    --track-bg: rgba(30, 40, 60, 0.12);
   }
 }
 
@@ -336,12 +370,19 @@ samp {
 
   /* Hover row for table-like content */
   .row-hover {
-    @apply transition-colors duration-120 hover:bg-ink-800/60;
+    transition: background-color 120ms ease-out;
+  }
+  .row-hover:hover {
+    background-color: var(--row-hover-bg);
   }
 
   /* Row-hover with a small reveal indicator on the right edge */
   .row-hover-reveal {
-    @apply relative transition-colors duration-120 hover:bg-ink-800/60;
+    @apply relative;
+    transition: background-color 120ms ease-out;
+  }
+  .row-hover-reveal:hover {
+    background-color: var(--row-hover-bg);
   }
   .row-hover-reveal::after {
     content: "→";
@@ -394,7 +435,7 @@ samp {
     background: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(122, 132, 150, 0.10) 50%,
+      var(--shimmer-band) 50%,
       transparent 100%
     );
     animation: shimmer 1.6s ease-in-out infinite;
@@ -452,7 +493,7 @@ samp {
   .acc-bar {
     position: relative;
     height: 3px;
-    background: rgba(122, 132, 150, 0.15);
+    background: var(--track-bg);
     border-radius: 2px;
     overflow: hidden;
   }

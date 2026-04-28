@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { DecisionCard } from "@/components/decision-card";
 import { Disclaimer } from "@/components/disclaimer";
-import { LastUpdated } from "@/components/last-updated";
+import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeleton";
 import { useViewMode, ViewToggle } from "@/components/view-toggle";
 import { WhaleFlow } from "@/components/whale-flow";
@@ -64,7 +64,6 @@ export default function SmartMoneyPage() {
     data: lbData,
     loading: lbLoading,
     error: lbError,
-    lastUpdated,
     retry,
   } = usePollingFetch<LeaderboardResponse>(
     "/api/smart-money/leaderboard",
@@ -152,22 +151,10 @@ export default function SmartMoneyPage() {
 
   return (
     <div>
-      {/* HERO */}
-      <section className="mb-10 pb-10 border-b border-ink-800">
-        <div className="flex items-start justify-between gap-8 mb-2">
-          <div className="max-w-3xl">
-            <div className="eyebrow mb-3 text-scope-500">signals · realtime</div>
-            <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight">
-              smart money feed
-            </h1>
-            <p className="text-body-lg text-ink-300 mt-3 max-w-2xl leading-relaxed">
-              Top-trader rankings and counter-consensus signals with per-contributor
-              accuracy. Every decision card shows the evidence under the claim.
-            </p>
-          </div>
-          <LastUpdated lastUpdated={lastUpdated} error={lbError} retry={retry} />
-        </div>
-      </section>
+      <PageHeader
+        title="signals"
+        sub="Counter-consensus divergences with evidence — per-contributor accuracy on every card. Polymarket's P&L leaderboard surfaced for comparison below."
+      />
 
       {/* Whale Flow */}
       <section className="mb-12">

@@ -122,12 +122,14 @@ const config: Config = {
         "420": "420ms",
       },
       boxShadow: {
-        // Sparse shadow scale — mostly for modals/dropdowns only
-        "elevated": "0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px rgba(0,0,0,0.4)",
-        "modal": "0 24px 64px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.03) inset",
+        // Sparse shadow scale — drops + inner highlight routed through
+        // CSS vars so light theme can soften the drops and zero out the
+        // (white-on-white-invisible) highlights.
+        "elevated": "0 1px 0 var(--shadow-highlight) inset, 0 8px 24px var(--shadow-drop-soft)",
+        "modal": "0 24px 64px var(--shadow-drop-modal), 0 1px 0 var(--shadow-highlight) inset",
         "glow-scope": "0 0 0 1px rgba(0,229,160,0.25), 0 0 24px rgba(0,229,160,0.08)",
         "glow-scope-strong": "0 0 0 1px rgba(0,229,160,0.5), 0 0 32px rgba(0,229,160,0.25), 0 0 64px rgba(0,229,160,0.12)",
-        "hero-cta": "0 0 0 1px rgba(0,229,160,0.55), 0 8px 32px rgba(0,229,160,0.18), 0 1px 0 rgba(255,255,255,0.06) inset",
+        "hero-cta": "0 0 0 1px rgba(0,229,160,0.55), 0 8px 32px rgba(0,229,160,0.18), 0 1px 0 var(--shadow-highlight) inset",
       },
       keyframes: {
         "tick-up": {

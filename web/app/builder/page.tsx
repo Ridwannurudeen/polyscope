@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Disclaimer } from "@/components/disclaimer";
+import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeleton";
 import { usePollingFetch } from "@/lib/hooks";
 
@@ -109,17 +110,10 @@ export default function BuilderPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      {/* Hero */}
-      <section className="mb-10 pb-10 border-b border-ink-800">
-        <div className="eyebrow mb-3">on-chain · transparency</div>
-        <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight mb-3">
-          builder
-        </h1>
-        <p className="text-body-lg text-ink-300 leading-relaxed max-w-2xl">
-          Public transparency page for PolyScope&apos;s Polymarket builder
-          registration and any orders routed through the platform.
-        </p>
-      </section>
+      <PageHeader
+        title="builder"
+        sub="Public transparency: PolyScope's Polymarket Builder Code, trading config, and on-chain attributed-trade ledger."
+      />
 
       {/* Identity */}
       <section className="mb-12">

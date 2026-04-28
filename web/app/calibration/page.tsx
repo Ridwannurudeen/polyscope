@@ -11,14 +11,14 @@ import {
   ReferenceLine,
 } from "recharts";
 import { Disclaimer } from "@/components/disclaimer";
-import { LastUpdated } from "@/components/last-updated";
+import { PageHeader } from "@/components/page-header";
 import { SkeletonCard } from "@/components/skeleton";
 import { StatCard } from "@/components/stat-card";
 import { usePollingFetch } from "@/lib/hooks";
 import type { CalibrationData } from "@/lib/api";
 
 export default function CalibrationPage() {
-  const { data, loading, error, lastUpdated, retry } =
+  const { data, loading, error, retry } =
     usePollingFetch<CalibrationData>("/api/calibration", 600_000);
 
   if (loading) {
@@ -65,21 +65,10 @@ export default function CalibrationPage() {
 
   return (
     <div>
-      <section className="mb-10 pb-10 border-b border-ink-800">
-        <div className="flex items-start justify-between gap-6">
-          <div>
-            <div className="eyebrow mb-3">calibration · resolved</div>
-            <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight">
-              calibration dashboard
-            </h1>
-            <p className="text-body-lg text-ink-300 mt-3 max-w-2xl leading-relaxed">
-              How accurate are Polymarket predictions overall? Brier scores
-              and calibration curves across the resolved-market ledger.
-            </p>
-          </div>
-          <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
-        </div>
-      </section>
+      <PageHeader
+        title="calibration"
+        sub="Brier scores and calibration curves across the resolved-market ledger. Lower is better; 0 is perfect."
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-12">
         <StatCard

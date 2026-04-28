@@ -12,76 +12,42 @@ import { trackEvent } from "@/lib/analytics";
 import type { DivergenceSignal } from "@/lib/api";
 import { useBandStats } from "@/lib/hooks";
 
+/**
+ * DecisionCard — terminal row, not a SaaS card.
+ *
+ * Layout, top to bottom:
+ *  1. Tag row     — tier · predictive-backed (if any) · skew · freshness · source · score (right)
+ *  2. Question    — promoted to h3 so it dominates
+ *  3. Readout grid — crowd · polyscope · divergence (3 mono cells, the data, no prose)
+ *  4. Action bar  — watch · trade · log · share
+ *  5. Size hint   — quarter-Kelly suggestion when band has resolved samples
+ *  6. Disclosure  — single mono row "[+] evidence"
+ *
+ * Compared to the previous version: 6 stacked padded sections collapsed to
+ * 4 zones (header, readout, action, disclosure), card-in-card thesis box
+ * removed, invalidator chips merged into the tag row when active.
+ */
+
 function tierFromScore(score: number): {
   label: string;
   tone: "scope" | "fade" | "ink";
-  description: string;
+  hint: string;
 } {
-  if (score >= 80)
-    return {
-      label: "tier 1",
-      tone: "scope",
-      description: "Large divergence + multiple high-rank contributors.",
-    };
-  if (score >= 60)
-    return {
-      label: "tier 2",
-      tone: "fade",
-      description: "Meaningful divergence — inspect contributors before acting.",
-    };
-  if (score >= 40)
-    return {
-      label: "tier 3",
-      tone: "ink",
-      description: "Low composite — informational only.",
-    };
-  return {
-    label: "tier 4",
-    tone: "ink",
-    description: "Below confidence threshold.",
-  };
+  if (score >= 80) return { label: "tier 1", tone: "scope", hint: "large divergence · multi high-rank contributors" };
+  if (score >= 60) return { label: "tier 2", tone: "fade", hint: "meaningful · inspect contributors" };
+  if (score >= 40) return { label: "tier 3", tone: "ink", hint: "low composite · informational" };
+  return { label: "tier 4", tone: "ink", hint: "sub-threshold" };
 }
 
 function skewFromPrice(price: number): {
   band: "tight" | "moderate" | "lopsided" | "very_lopsided";
   label: string;
-  edgeNote: string;
   followSm: boolean;
 } {
-  if (price >= 0.9 || price <= 0.1) {
-    return {
-      band: "very_lopsided",
-      label: "very lopsided",
-      edgeNote:
-        "very-lopsided · fade SM · composition effect dominates, thin real edge.",
-      followSm: false,
-    };
-  }
-  if (price >= 0.75 || price <= 0.25) {
-    return {
-      band: "lopsided",
-      label: "lopsided",
-      edgeNote:
-        "lopsided · follow SM · low hit rate, high payout — positive EV on dissent.",
-      followSm: true,
-    };
-  }
-  if (price >= 0.6 || price <= 0.4) {
-    return {
-      band: "moderate",
-      label: "moderate",
-      edgeNote:
-        "moderate · follow SM · real uncertainty; historical SM edge ~86% on dissent.",
-      followSm: true,
-    };
-  }
-  return {
-    band: "tight",
-    label: "tight",
-    edgeNote:
-      "tight · follow SM · strongest edge zone — 100% on 17 resolved in this band.",
-    followSm: true,
-  };
+  if (price >= 0.9 || price <= 0.1) return { band: "very_lopsided", label: "very lopsided", followSm: false };
+  if (price >= 0.75 || price <= 0.25) return { band: "lopsided", label: "lopsided", followSm: true };
+  if (price >= 0.6 || price <= 0.4) return { band: "moderate", label: "moderate", followSm: true };
+  return { band: "tight", label: "tight", followSm: true };
 }
 
 function freshness(timestamp: string): { label: string; stale: boolean } {
@@ -111,16 +77,43 @@ function Tag({
   const styles = {
     scope: "border-scope-500/35 bg-scope-500/8 text-scope-300",
     fade: "border-fade-500/35 bg-fade-500/8 text-fade-400",
-    ink: "border-ink-700 bg-surface text-ink-300",
+    ink: "border-ink-700 text-ink-300",
     alert: "border-alert-500/40 bg-alert-500/8 text-alert-400",
   } as const;
   return (
     <span
       title={title}
-      className={`inline-flex items-center text-eyebrow font-mono uppercase tracking-wider px-2 py-[3px] rounded-sm border ${styles[tone]}`}
+      className={`inline-flex items-center text-eyebrow font-mono uppercase tracking-wider px-2 py-0.5 rounded-sm border ${styles[tone]}`}
     >
       {children}
     </span>
+  );
+}
+
+function ReadoutCell({
+  label,
+  value,
+  tone = "ink",
+}: {
+  label: string;
+  value: string;
+  tone?: "ink" | "scope" | "fade" | "alert";
+}) {
+  const valueClass =
+    tone === "scope"
+      ? "text-scope-400"
+      : tone === "fade"
+      ? "text-fade-500"
+      : tone === "alert"
+      ? "text-alert-500"
+      : "text-ink-100";
+  return (
+    <div>
+      <div className="eyebrow mb-1">{label}</div>
+      <div className={`num text-h3 leading-none tracking-tighter ${valueClass}`}>
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -130,63 +123,81 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
   const tier = tierFromScore(signal.score);
   const skew = skewFromPrice(signal.market_price);
   const fresh = freshness(signal.timestamp);
-  const crowdPct = (signal.market_price * 100).toFixed(0);
-  const smPct = (signal.sm_consensus * 100).toFixed(0);
-  const divPct = (signal.divergence_pct * 100).toFixed(0);
-  const dirClass =
-    signal.sm_direction === "YES" ? "text-scope-400" : "text-alert-500";
+  const crowdPct = `${(signal.market_price * 100).toFixed(0)}%`;
+  const smPct = `${(signal.sm_consensus * 100).toFixed(0)}%`;
+  const divPct = `${(signal.divergence_pct * 100).toFixed(0)}%`;
+  const dirTone: "scope" | "alert" =
+    signal.sm_direction === "YES" ? "scope" : "alert";
 
   return (
-    <div className="surface rounded-lg overflow-hidden">
-      {/* Header row — tags + question + score */}
-      <div className="p-5 flex items-start justify-between gap-4">
+    <article className="surface rounded-lg overflow-hidden">
+      {/* Header — tags + question + score */}
+      <div className="p-4 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-            <Tag tone={tier.tone}>{tier.label}</Tag>
+            <Tag tone={tier.tone} title={tier.hint}>
+              {tier.label}
+            </Tag>
             {signal.predictive_contributor && (
               <Tag
                 tone="scope"
                 title={`predictive contributor · ${signal.predictive_contributor.trader_address.slice(
                   0,
                   10,
-                )}… · ${signal.predictive_contributor.pct}% on ${
-                  signal.predictive_contributor.n
-                } signals · CI ${signal.predictive_contributor.ci_lo}–${signal.predictive_contributor.ci_hi}%`}
+                )}… · ${signal.predictive_contributor.pct}% on ${signal.predictive_contributor.n} signals · CI ${signal.predictive_contributor.ci_lo}–${signal.predictive_contributor.ci_hi}%`}
               >
-                predictive-backed ·{" "}
-                {signal.predictive_contributor.pct.toFixed(0)}%
-                &nbsp;(n={signal.predictive_contributor.n})
+                predictive · {signal.predictive_contributor.pct.toFixed(0)}%
+                &nbsp;n={signal.predictive_contributor.n}
               </Tag>
             )}
             <Tag tone={skew.band === "tight" ? "scope" : "ink"}>
               {skew.label}
             </Tag>
+            <Tag tone="ink">
+              {signal.sm_trader_count}{" "}
+              <span className="text-ink-500 normal-case ml-0.5">contributors</span>
+            </Tag>
+            {skew.band === "very_lopsided" && (
+              <Tag tone="fade" title="composition effect on lopsided markets">
+                composition
+              </Tag>
+            )}
+            {fresh.stale && (
+              <Tag tone="fade" title="signal older than 12h — recheck before acting">
+                stale
+              </Tag>
+            )}
             <span
-              className={`text-micro font-mono ${
-                fresh.stale ? "text-fade-500" : "text-ink-500"
-              }`}
+              className="text-micro font-mono text-ink-500 ml-1"
               title={`signal timestamp · ${signal.timestamp}`}
             >
               {fresh.label}
-              {fresh.stale && " · stale"}
-            </span>
-            <span className="text-micro font-mono text-ink-500 uppercase tracking-wider">
-              {signal.signal_source === "trades"
-                ? "trade-weighted"
-                : "position-based"}
+              <span className="mx-2 text-ink-700">·</span>
+              {signal.signal_source === "trades" ? "trade-weighted" : "positions"}
             </span>
           </div>
-          <p className="text-body-lg text-ink-100 leading-snug font-medium">
+          <h3 className="text-h3 text-ink-50 leading-snug font-medium tracking-tight">
             {signal.question}
-          </p>
+          </h3>
         </div>
-        <div className="shrink-0 pt-1">
+        <div className="shrink-0">
           <ScoreBadge score={signal.score} label="score" />
         </div>
       </div>
 
+      {/* Readout grid — replaces narrated thesis */}
+      <div className="px-4 pb-4 grid grid-cols-3 gap-4">
+        <ReadoutCell label="crowd" value={crowdPct} />
+        <ReadoutCell
+          label={`polyscope · ${skew.followSm ? "follow" : "fade"}`}
+          value={`${signal.sm_direction} ${smPct}`}
+          tone={dirTone}
+        />
+        <ReadoutCell label="divergence" value={divPct} tone="fade" />
+      </div>
+
       {/* Action bar */}
-      <div className="px-5 pb-4 flex items-center gap-2 flex-wrap">
+      <div className="px-4 pb-4 flex items-center gap-2 flex-wrap border-t border-ink-800 pt-4">
         <WatchlistButton marketId={signal.market_id} />
         <TradeButton
           marketId={signal.market_id}
@@ -212,31 +223,8 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
         />
       </div>
 
-      {/* Thesis */}
-      <div className="px-5 pb-4">
-        <div className="border border-ink-800 bg-background rounded-md p-3.5">
-          <div className="eyebrow mb-2">thesis</div>
-          <p className="text-body-sm text-ink-200 leading-relaxed">
-            market prices this at{" "}
-            <span className="num text-ink-100 font-medium">{crowdPct}%</span>{" "}
-            <span className="text-ink-400">yes</span>. polyscope view:{" "}
-            <span className={`num font-medium ${dirClass}`}>
-              {signal.sm_direction}
-            </span>{" "}
-            ({skew.followSm ? "following" : "fading"} a{" "}
-            <span className="num text-ink-100 font-medium">{smPct}%</span>{" "}
-            smart-money consensus that diverges by{" "}
-            <span className="num text-fade-500 font-medium">{divPct}%</span>{" "}
-            from market).
-          </p>
-          <p className="text-micro text-ink-400 font-mono mt-2">
-            {skew.edgeNote}
-          </p>
-        </div>
-      </div>
-
-      {/* Sizing hint */}
-      <div className="px-5 pb-4">
+      {/* Sizing hint — only renders when band has enough resolved samples */}
+      <div className="px-4 pb-4">
         <SizeHint
           marketPrice={signal.market_price}
           smDirection={signal.sm_direction}
@@ -244,74 +232,26 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
         />
       </div>
 
-      {/* Decision metadata */}
-      <div className="px-5 pb-4 grid grid-cols-2 gap-4">
-        <div>
-          <div className="eyebrow mb-1.5">contributors</div>
-          <p className="text-body-sm text-ink-200">
-            <span className="num text-ink-100 font-medium">
-              {signal.sm_trader_count}
-            </span>{" "}
-            top-100 traders
-          </p>
-          <p className="text-micro text-ink-500 font-mono mt-0.5">
-            expand evidence · per-trader accuracy
-          </p>
+      {/* Evidence disclosure — single mono row, not a CTA */}
+      <button
+        onClick={() => {
+          const next = !expanded;
+          setExpanded(next);
+          if (next) {
+            trackEvent("evidence_opened", { market_id: signal.market_id });
+          }
+        }}
+        className="w-full px-4 py-2.5 text-eyebrow font-mono text-ink-500 hover:text-ink-200 flex items-center gap-2 border-t border-ink-800 transition-colors"
+        aria-expanded={expanded}
+      >
+        <span className="text-ink-400">[{expanded ? "−" : "+"}]</span>
+        <span>{expanded ? "hide evidence" : "show evidence"}</span>
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4 pt-1 border-t border-ink-800/70">
+          <SignalEvidence marketId={signal.market_id} />
         </div>
-        <div>
-          <div className="eyebrow mb-1.5">confidence</div>
-          <p className="text-body-sm text-ink-200 leading-relaxed">
-            {tier.description}
-          </p>
-        </div>
-      </div>
-
-      {/* Invalidator chips */}
-      <div className="px-5 pb-4">
-        <div className="eyebrow mb-2">invalidators</div>
-        <div className="flex flex-wrap gap-1.5">
-          <span className="text-micro font-mono px-2 py-1 rounded-sm border border-ink-800 bg-background text-ink-300">
-            divergence &lt; 5% · auto-expire
-          </span>
-          <span className="text-micro font-mono px-2 py-1 rounded-sm border border-ink-800 bg-background text-ink-300">
-            high-accuracy contributor flips side
-          </span>
-          {skew.band === "very_lopsided" && (
-            <span className="text-micro font-mono px-2 py-1 rounded-sm border border-fade-500/30 bg-fade-500/5 text-fade-400">
-              lopsided · composition effect, not alpha
-            </span>
-          )}
-          {fresh.stale && (
-            <span className="text-micro font-mono px-2 py-1 rounded-sm border border-fade-500/30 bg-fade-500/5 text-fade-400">
-              stale · recheck before acting
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Evidence toggle */}
-      <div className="border-t border-ink-800">
-        <button
-          onClick={() => {
-            const next = !expanded;
-            setExpanded(next);
-            if (next) {
-              trackEvent("evidence_opened", { market_id: signal.market_id });
-            }
-          }}
-          className="w-full px-5 py-3 text-body-sm text-ink-400 hover:text-ink-100 hover:bg-ink-800/40 flex items-center justify-between font-mono transition-colors duration-120"
-        >
-          <span>{expanded ? "hide evidence" : "show evidence"}</span>
-          <span className="text-micro text-ink-500">
-            contributors · skew · category
-          </span>
-        </button>
-        {expanded && (
-          <div className="px-5 pb-5 pt-1">
-            <SignalEvidence marketId={signal.market_id} />
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </article>
   );
 }

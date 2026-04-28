@@ -67,7 +67,7 @@ const NAV_ITEMS = [
   { href: "/portfolio", label: "portfolio" },
   { href: "/calibration", label: "calibration" },
   { href: "/methodology", label: "methodology" },
-  { href: "/api/docs", label: "api", external: true },
+  { href: "/api-docs", label: "api" },
 ];
 
 export default function RootLayout({
@@ -101,27 +101,15 @@ export default function RootLayout({
                 </Link>
 
                 <nav className="hidden lg:flex items-center gap-0.5 flex-1 justify-center">
-                  {NAV_ITEMS.map((item) =>
-                    item.external ? (
-                      <a
-                        key={item.href}
-                        href={item.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-2.5 py-1.5 text-body-sm text-ink-400 hover:text-ink-100 font-mono transition-colors duration-120"
-                      >
-                        {item.label}
-                      </a>
-                    ) : (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className="px-2.5 py-1.5 text-body-sm text-ink-400 hover:text-ink-100 font-mono transition-colors duration-120"
-                      >
-                        {item.label}
-                      </Link>
-                    ),
-                  )}
+                  {NAV_ITEMS.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className="px-2.5 py-1.5 text-body-sm text-ink-400 hover:text-ink-100 font-mono transition-colors duration-120"
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
                 </nav>
 
                 <div className="hidden lg:flex items-center gap-2">
@@ -162,14 +150,12 @@ export default function RootLayout({
                   <Link href="/builder" className="text-ink-400 hover:text-ink-100 transition-colors">
                     builder
                   </Link>
-                  <a
-                    href="/api/docs"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <Link
+                    href="/api-docs"
                     className="text-ink-400 hover:text-ink-100 transition-colors"
                   >
                     api
-                  </a>
+                  </Link>
                   <Link href="/terms" className="text-ink-400 hover:text-ink-100 transition-colors">
                     terms
                   </Link>

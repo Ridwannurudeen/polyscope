@@ -284,25 +284,25 @@ export function TradeModal(props: TradeModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/70 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md bg-gray-950 border border-gray-800 rounded-2xl p-6 shadow-2xl"
+        className="w-full max-w-md bg-background border border-ink-700 rounded-2xl p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-white">Trade on Polymarket</h2>
+          <h2 className="text-lg font-semibold text-ink-100">Trade on Polymarket</h2>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-white text-xl leading-none"
+            className="text-ink-500 hover:text-ink-100 text-xl leading-none"
             aria-label="Close"
           >
             ×
           </button>
         </div>
 
-        <p className="text-sm text-gray-400 mb-5 line-clamp-3">
+        <p className="text-sm text-ink-400 mb-5 line-clamp-3">
           {marketQuestion}
         </p>
 
@@ -312,8 +312,8 @@ export function TradeModal(props: TradeModalProps) {
             onClick={() => setSide("BUY")}
             className={`py-2 rounded-lg text-sm font-medium border transition-colors ${
               side === "BUY"
-                ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
-                : "bg-gray-900 border-gray-800 text-gray-400 hover:text-white"
+                ? "bg-scope-500/20 border-scope-500/50 text-scope-300"
+                : "bg-surface border-ink-700 text-ink-400 hover:text-ink-100"
             }`}
           >
             Buy YES
@@ -322,8 +322,8 @@ export function TradeModal(props: TradeModalProps) {
             onClick={() => setSide("SELL")}
             className={`py-2 rounded-lg text-sm font-medium border transition-colors ${
               side === "SELL"
-                ? "bg-red-500/20 border-red-500/50 text-red-300"
-                : "bg-gray-900 border-gray-800 text-gray-400 hover:text-white"
+                ? "bg-alert-500/20 border-alert-500/50 text-alert-400"
+                : "bg-surface border-ink-700 text-ink-400 hover:text-ink-100"
             }`}
           >
             Sell YES
@@ -333,7 +333,7 @@ export function TradeModal(props: TradeModalProps) {
         {/* Price + size */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
-            <label className="block text-xs text-gray-500 uppercase mb-1">
+            <label className="block text-xs text-ink-500 uppercase mb-1">
               Price
             </label>
             <input
@@ -343,11 +343,11 @@ export function TradeModal(props: TradeModalProps) {
               max={tickCeil}
               value={price}
               onChange={(e) => setPrice(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-900 border border-gray-800 text-white rounded-lg focus:outline-none focus:border-emerald-500/50"
+              className="w-full px-3 py-2 bg-surface border border-ink-700 text-ink-100 rounded-lg focus:outline-none focus:border-scope-500/50"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 uppercase mb-1">
+            <label className="block text-xs text-ink-500 uppercase mb-1">
               Shares
             </label>
             <input
@@ -356,29 +356,29 @@ export function TradeModal(props: TradeModalProps) {
               min="0"
               value={size}
               onChange={(e) => setSize(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-900 border border-gray-800 text-white rounded-lg focus:outline-none focus:border-emerald-500/50"
+              className="w-full px-3 py-2 bg-surface border border-ink-700 text-ink-100 rounded-lg focus:outline-none focus:border-scope-500/50"
             />
           </div>
         </div>
 
         {/* Notional preview */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mb-4">
+        <div className="bg-surface border border-ink-700 rounded-lg p-3 mb-4">
           <div className="flex justify-between text-sm">
-            <span className="text-gray-500">Total cost</span>
-            <span className="text-white font-semibold">
+            <span className="text-ink-500">Total cost</span>
+            <span className="text-ink-100 font-semibold">
               ${notional.toFixed(2)}
             </span>
           </div>
-          <p className="text-xs text-gray-600 mt-1">
+          <p className="text-xs text-ink-500 mt-1">
             Limit order, good-til-canceled. Resting orders may or may not fill.
           </p>
         </div>
 
         {/* Funder — EOA vs Polymarket Safe */}
         {isConnected && !onWrongChain && (
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 mb-5">
+          <div className="bg-surface border border-ink-700 rounded-lg p-3 mb-5">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-gray-500 uppercase tracking-wide">
+              <span className="text-xs text-ink-500 uppercase tracking-wide">
                 Fund from
               </span>
               <div className="flex gap-1 text-xs">
@@ -389,8 +389,8 @@ export function TradeModal(props: TradeModalProps) {
                   }}
                   className={`px-2 py-1 rounded transition-colors ${
                     funderMode === "eoa"
-                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                      : "text-gray-400 border border-transparent hover:text-white"
+                      ? "bg-scope-500/20 text-scope-300 border border-scope-500/40"
+                      : "text-ink-400 border border-transparent hover:text-ink-100"
                   }`}
                 >
                   My wallet
@@ -399,8 +399,8 @@ export function TradeModal(props: TradeModalProps) {
                   onClick={() => setFunderMode("safe")}
                   className={`px-2 py-1 rounded transition-colors ${
                     funderMode === "safe"
-                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                      : "text-gray-400 border border-transparent hover:text-white"
+                      ? "bg-scope-500/20 text-scope-300 border border-scope-500/40"
+                      : "text-ink-400 border border-transparent hover:text-ink-100"
                   }`}
                 >
                   Polymarket Safe
@@ -409,7 +409,7 @@ export function TradeModal(props: TradeModalProps) {
             </div>
 
             {funderMode === "eoa" && (
-              <p className="text-[11px] text-gray-600 leading-snug">
+              <p className="text-[11px] text-ink-500 leading-snug">
                 Trades sign from and settle to your connected wallet directly.
                 Use this if your USDC is already in this wallet (not on
                 Polymarket).
@@ -418,12 +418,12 @@ export function TradeModal(props: TradeModalProps) {
 
             {funderMode === "safe" && funder && (
               <div className="flex items-center justify-between text-xs">
-                <span className="font-mono text-emerald-300">
+                <span className="font-mono text-scope-300">
                   {funder.slice(0, 6)}…{funder.slice(-4)}
                 </span>
                 <button
                   onClick={handleClearFunder}
-                  className="text-gray-500 hover:text-red-400 transition-colors"
+                  className="text-ink-500 hover:text-alert-500 transition-colors"
                 >
                   Unlink
                 </button>
@@ -439,16 +439,16 @@ export function TradeModal(props: TradeModalProps) {
                   onChange={(e) => setFunderInput(e.target.value)}
                   spellCheck={false}
                   autoComplete="off"
-                  className="w-full px-3 py-1.5 bg-gray-950 border border-gray-800 text-white text-xs font-mono rounded focus:outline-none focus:border-emerald-500/50"
+                  className="w-full px-3 py-1.5 bg-background border border-ink-700 text-ink-100 text-xs font-mono rounded focus:outline-none focus:border-scope-500/50"
                 />
                 <button
                   onClick={handleSaveFunder}
                   disabled={!funderInput.trim() || funderVerifying}
-                  className="w-full py-1.5 text-xs bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 rounded hover:bg-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="w-full py-1.5 text-xs bg-scope-500/15 border border-scope-500/40 text-scope-300 rounded hover:bg-scope-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {funderVerifying ? "Verifying ownership…" : "Link Safe"}
                 </button>
-                <p className="text-[11px] text-gray-600 leading-snug">
+                <p className="text-[11px] text-ink-500 leading-snug">
                   Polymarket deposits live in a Safe proxy controlled by your
                   wallet. Copy it from polymarket.com → Profile (under your
                   avatar — NOT your wallet address). PolyScope verifies on-chain
@@ -458,28 +458,28 @@ export function TradeModal(props: TradeModalProps) {
             )}
 
             {funderError && (
-              <p className="text-[11px] text-red-400 mt-2">{funderError}</p>
+              <p className="text-[11px] text-alert-500 mt-2">{funderError}</p>
             )}
           </div>
         )}
 
         {/* Status / actions */}
         {!builderCodeConfigured ? (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-300">
+          <div className="bg-alert-500/10 border border-alert-500/30 rounded-lg p-3 text-sm text-alert-400">
             Trading is disabled: builder code not set on this deployment.
           </div>
         ) : !isConnected ? (
           <button
             onClick={connect}
             disabled={connectStatus === "pending"}
-            className="w-full py-2.5 bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 rounded-lg font-medium hover:bg-emerald-500/30 disabled:opacity-50"
+            className="w-full py-2.5 bg-scope-500/20 border border-scope-500/50 text-scope-300 rounded-lg font-medium hover:bg-scope-500/30 disabled:opacity-50"
           >
             {connectStatus === "pending" ? "Connecting…" : "Connect wallet"}
           </button>
         ) : onWrongChain ? (
           <button
             onClick={switchToPolygon}
-            className="w-full py-2.5 bg-amber-500/20 border border-amber-500/50 text-amber-300 rounded-lg font-medium hover:bg-amber-500/30"
+            className="w-full py-2.5 bg-fade-500/20 border border-fade-500/50 text-fade-400 rounded-lg font-medium hover:bg-fade-500/30"
           >
             Switch to Polygon
           </button>
@@ -487,7 +487,7 @@ export function TradeModal(props: TradeModalProps) {
           <button
             onClick={handleApprove}
             disabled={isApproving}
-            className="w-full py-2.5 bg-amber-500/20 border border-amber-500/50 text-amber-200 rounded-lg font-medium hover:bg-amber-500/30 disabled:opacity-60"
+            className="w-full py-2.5 bg-fade-500/20 border border-fade-500/50 text-fade-400 rounded-lg font-medium hover:bg-fade-500/30 disabled:opacity-60"
           >
             {isApproving
               ? "Approving…"
@@ -499,7 +499,7 @@ export function TradeModal(props: TradeModalProps) {
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="w-full py-2.5 bg-emerald-500/30 border border-emerald-500/60 text-emerald-200 rounded-lg font-medium hover:bg-emerald-500/40 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full py-2.5 bg-scope-500/30 border border-scope-500/60 text-scope-200 rounded-lg font-medium hover:bg-scope-500/40 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isSubmitting
               ? "Signing + submitting…"
@@ -508,40 +508,40 @@ export function TradeModal(props: TradeModalProps) {
         )}
 
         {needsApproval && (
-          <p className="mt-2 text-[11px] text-amber-300/80">
+          <p className="mt-2 text-[11px] text-fade-400/80">
             First trade requires approving Polymarket&apos;s exchange contract to
             move your {side === "BUY" ? "pUSD" : "outcome tokens"}. One-time
             gasless signature.
           </p>
         )}
         {allowanceError && (
-          <div className="mt-3 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs text-amber-200">
+          <div className="mt-3 bg-fade-500/10 border border-fade-500/30 rounded-lg p-3 text-xs text-fade-400">
             {allowanceError}
           </div>
         )}
 
         {/* Connect error */}
         {connectError && (
-          <p className="mt-3 text-xs text-red-400">{connectError}</p>
+          <p className="mt-3 text-xs text-alert-500">{connectError}</p>
         )}
 
         {/* Submit error */}
         {submitError && (
-          <div className="mt-3 bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-xs text-red-300 break-words">
+          <div className="mt-3 bg-alert-500/10 border border-alert-500/30 rounded-lg p-3 text-xs text-alert-400 break-words">
             {submitError}
           </div>
         )}
 
         {/* Success */}
         {lastResult?.success && (
-          <div className="mt-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-xs text-emerald-200">
+          <div className="mt-3 bg-scope-500/10 border border-scope-500/30 rounded-lg p-3 text-xs text-scope-200">
             Order submitted. Status: {lastResult.status}. Order ID:{" "}
             <span className="font-mono break-all">{lastResult.orderID}</span>
           </div>
         )}
 
         {/* Wallet + compliance footer */}
-        <div className="mt-4 text-[10px] text-gray-600 text-center leading-relaxed">
+        <div className="mt-4 text-[10px] text-ink-500 text-center leading-relaxed">
           {isConnected && address && (
             <p>
               Connected: <span className="font-mono">{address.slice(0, 6)}…{address.slice(-4)}</span>
@@ -559,7 +559,7 @@ export function TradeModal(props: TradeModalProps) {
                 href="https://polymarket.com"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-emerald-400/80 hover:text-emerald-300 underline"
+                className="text-scope-400/80 hover:text-scope-300 underline"
               >
                 sign up there first
               </a>

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { FollowButton } from "@/components/follow-button";
-import { LastUpdated } from "@/components/last-updated";
+import { PageHeader } from "@/components/page-header";
 import { TableSkeleton } from "@/components/skeleton";
 import { usePollingFetch } from "@/lib/hooks";
 
@@ -53,7 +53,6 @@ export default function TradersPage() {
     data: predictive,
     loading,
     error,
-    lastUpdated,
     retry,
   } = usePollingFetch<LeaderboardResponse>(
     `/api/traders/leaderboard?order=predictive&min_signals=${minSignals}&limit=50`,
@@ -98,42 +97,25 @@ export default function TradersPage() {
 
   return (
     <div>
-      <section className="mb-10 pb-10 border-b border-ink-800">
-        <div className="flex items-start justify-between gap-8 mb-4">
-          <div className="max-w-3xl">
-            <div className="eyebrow mb-3 text-scope-500">
-              core · rank by accuracy
-            </div>
-            <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight">
-              the true smart-money leaderboard
-            </h1>
-            <p className="text-body-lg text-ink-300 mt-3 max-w-2xl leading-relaxed">
-              Polymarket ranks traders by P&amp;L — profitable, but not
-              necessarily{" "}
-              <em className="not-italic text-ink-100">predictive</em>.
-              PolyScope ranks them by how often their positions match the
-              actual market outcome when they diverge from the crowd. Two
-              views: the genuinely predictive, and the ones worth fading.
-            </p>
+      <PageHeader
+        title="leaderboard"
+        sub="Top-100 Polymarket addresses ranked by accuracy on resolved counter-consensus positions, not P&L."
+        right={
+          <div className="flex items-center gap-2">
+            <span className="eyebrow">min signals</span>
+            <select
+              value={minSignals}
+              onChange={(e) => setMinSignals(Number(e.target.value))}
+              className="bg-background border border-ink-700 text-ink-100 text-body-sm font-mono rounded-md h-9 px-2 focus:outline-none focus:border-scope-500/50 cursor-pointer"
+            >
+              <option value={1}>1+</option>
+              <option value={5}>5+</option>
+              <option value={10}>10+</option>
+              <option value={30}>30+</option>
+            </select>
           </div>
-          <LastUpdated lastUpdated={lastUpdated} error={error} retry={retry} />
-        </div>
-
-        <div className="flex items-center gap-3 mt-5">
-          <span className="eyebrow">min signals</span>
-          <select
-            value={minSignals}
-            onChange={(e) => setMinSignals(Number(e.target.value))}
-            className="bg-background border border-ink-700 text-ink-100 text-body-sm font-mono rounded-md px-2 py-1 focus:outline-none focus:border-scope-500/50 cursor-pointer"
-          >
-            <option value={1}>1+</option>
-            <option value={5}>5+</option>
-            <option value={10}>10+</option>
-            <option value={25}>25+</option>
-            <option value={50}>50+</option>
-          </select>
-        </div>
-      </section>
+        }
+      />
 
       {noData ? (
         <div className="surface rounded-lg p-10 text-center">

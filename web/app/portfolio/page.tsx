@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Disclaimer } from "@/components/disclaimer";
+import { PageHeader } from "@/components/page-header";
 import { FollowButton } from "@/components/follow-button";
 import { TableSkeleton } from "@/components/skeleton";
 import { TelegramConnect } from "@/components/telegram-connect";
@@ -235,25 +236,14 @@ export default function PortfolioPage() {
 
   return (
     <div>
-      {/* Hero */}
-      <section className="mb-10 pb-10 border-b border-ink-800">
-        <div className="eyebrow mb-3">your view</div>
-        <h1 className="text-h1 text-ink-100 tracking-tighter leading-tight mb-3">
-          portfolio
-        </h1>
-        <p className="text-body-lg text-ink-300 leading-relaxed max-w-2xl">
-          Watched signals and logged trades. Scored once markets resolve.{" "}
-          {walletAddress ? (
-            <span className="text-scope-400 font-mono">
-              · linked to {shortAddress(walletAddress)} (cross-device sync)
-            </span>
-          ) : (
-            <span className="text-ink-400">
-              · stored anonymously on this browser. link a wallet to sync.
-            </span>
-          )}
-        </p>
-      </section>
+      <PageHeader
+        title="portfolio"
+        sub={
+          walletAddress
+            ? `Watched signals and logged trades · linked to ${shortAddress(walletAddress)}.`
+            : "Watched signals and logged trades · stored anonymously on this browser. Link a wallet to sync."
+        }
+      />
 
       {noData ? (
         <div className="surface rounded-lg p-10 text-center">

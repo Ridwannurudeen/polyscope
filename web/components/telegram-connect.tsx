@@ -22,25 +22,25 @@ export function TelegramConnect() {
   };
 
   return (
-    <section className="mb-6 bg-gray-900 border border-gray-800 rounded-xl">
+    <section className="mb-6 bg-surface border border-ink-700 rounded-xl">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full p-4 flex items-center justify-between text-left hover:bg-gray-800/40"
+        className="w-full p-4 flex items-center justify-between text-left hover:bg-elevated/40"
       >
         <div>
-          <p className="text-white text-sm font-medium">
+          <p className="text-ink-100 text-sm font-medium">
             Telegram DMs for follow-trader alerts
           </p>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-ink-500 mt-0.5">
             Get instant DMs when a trader you follow takes a new divergent
             position.
           </p>
         </div>
-        <span className="text-xs text-gray-500">{open ? "Hide" : "Set up"}</span>
+        <span className="text-xs text-ink-500">{open ? "Hide" : "Set up"}</span>
       </button>
       {open && (
-        <div className="border-t border-gray-800 p-4 space-y-3">
-          <ol className="list-decimal list-inside text-sm text-gray-300 space-y-2">
+        <div className="border-t border-ink-700 p-4 space-y-3">
+          <ol className="list-decimal list-inside text-sm text-ink-300 space-y-2">
             <li>
               Open the bot:{" "}
               <a
@@ -55,17 +55,17 @@ export function TelegramConnect() {
             <li>
               Send <code className="text-emerald-300">/connect {token}</code>
               <div className="flex items-center gap-2 mt-1.5">
-                <code className="text-xs text-gray-400 bg-gray-950 border border-gray-800 rounded px-2 py-1 truncate flex-1">
+                <code className="text-xs text-ink-400 bg-background border border-ink-700 rounded px-2 py-1 truncate flex-1">
                   /connect {token}
                 </code>
                 <button
                   onClick={() => copy("cmd", `/connect ${token}`)}
-                  className="text-xs px-2 py-1 bg-gray-800 border border-gray-700 text-gray-200 rounded hover:bg-gray-700"
+                  className="text-xs px-2 py-1 bg-elevated border border-ink-600 text-ink-200 rounded hover:bg-ink-700"
                 >
                   {copied === "cmd" ? "✓ Copied" : "Copy"}
                 </button>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-ink-500 mt-1">
                 This sends your {kind} to the bot so it knows which alerts to
                 DM you.
               </p>
@@ -78,7 +78,7 @@ export function TelegramConnect() {
               . DMs start on their next divergent move.
             </li>
           </ol>
-          <p className="text-[11px] text-gray-500">
+          <p className="text-[11px] text-ink-500">
             Send <code>/disconnect</code> to the bot anytime to stop DMs.
           </p>
         </div>
