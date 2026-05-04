@@ -41,7 +41,7 @@ def request_json(
     except urllib.error.HTTPError as e:
         status = e.code
         body = e.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as e:
+    except (TimeoutError, urllib.error.URLError) as e:
         raise SmokeFailure(f"{path}: request failed: {e}") from e
 
     if status != expected_status:
@@ -63,7 +63,7 @@ def request_text(base_url: str, path: str, *, expected_status: int = 200) -> str
     except urllib.error.HTTPError as e:
         status = e.code
         body = e.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as e:
+    except (TimeoutError, urllib.error.URLError) as e:
         raise SmokeFailure(f"{path}: request failed: {e}") from e
     if status != expected_status:
         raise SmokeFailure(f"{path}: expected HTTP {expected_status}, got {status}: {body[:300]}")
@@ -176,7 +176,7 @@ def check_polymarket_geoblock() -> None:
     try:
         with urllib.request.urlopen("https://polymarket.com/api/geoblock", timeout=20) as resp:
             body = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as e:
+    except (TimeoutError, urllib.error.URLError) as e:
         raise SmokeFailure(f"polymarket geoblock check failed: {e}") from e
     data = json.loads(body)
     if "blocked" not in data:
