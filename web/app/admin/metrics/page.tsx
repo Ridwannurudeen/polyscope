@@ -59,7 +59,7 @@ export default function AdminMetricsPage() {
   // Load saved token
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(TOKEN_KEY);
+    const saved = window.sessionStorage.getItem(TOKEN_KEY);
     if (saved) {
       setToken(saved);
       setTokenInput(saved);
@@ -71,9 +71,9 @@ export default function AdminMetricsPage() {
     if (!token) return;
     setLoading(true);
     setError(null);
-    fetch(
-      `/api/admin/metrics?token=${encodeURIComponent(token)}&days=${days}`
-    )
+    fetch(`/api/admin/metrics?days=${days}`, {
+      headers: { "X-Admin-Token": token },
+    })
       .then(async (r) => {
         if (r.status === 401) {
           setError("Invalid token");
@@ -97,13 +97,13 @@ export default function AdminMetricsPage() {
       setError("Token too short");
       return;
     }
-    window.localStorage.setItem(TOKEN_KEY, tokenInput);
+    window.sessionStorage.setItem(TOKEN_KEY, tokenInput);
     setToken(tokenInput);
     setError(null);
   };
 
   const clearToken = () => {
-    window.localStorage.removeItem(TOKEN_KEY);
+    window.sessionStorage.removeItem(TOKEN_KEY);
     setToken("");
     setTokenInput("");
     setData(null);

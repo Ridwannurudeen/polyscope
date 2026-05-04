@@ -35,7 +35,7 @@ npm install
 npm run dev      # http://localhost:3000
 ```
 
-The dev server proxies `/api/*` to the backend — make sure the FastAPI server is running on port 8020 or update the proxy target in `next.config.mjs`.
+The dev server rewrites `/api/*` to the backend. Make sure FastAPI is running on port 8020, or set `POLYSCOPE_API_URL` before starting Next.js.
 
 ## Production build
 

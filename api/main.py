@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -38,6 +42,7 @@ from .database import (
     get_whale_alerts,
     init_db,
     is_following,
+    is_wallet_linked_to_client,
     link_wallet_to_client,
     builder_trades_stats,
     list_builder_orders,
@@ -130,7 +135,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://polyscope.gudman.xyz"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -138,6 +143,11 @@ DISCLAIMER = (
     "PolyScope provides market intelligence only. "
     "It does not facilitate, recommend, or enable participation in prediction markets."
 )
+
+_CONDITION_ID_RE = re.compile(r"^[0-9a-zA-Z_-]{1,128}$")
+_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
+_WALLET_LINK_TTL_SECONDS = 300
+_WALLET_LINK_DOMAINS = {"polyscope.gudman.xyz", "testserver"}
 
 
 @app.get("/")
@@ -276,9 +286,7 @@ async def list_markets(
 @app.get("/api/market/{condition_id}")
 async def get_market(condition_id: str):
     """Single market detail + divergence info."""
-    import re
-
-    if not re.fullmatch(r"[0-9a-zA-Z_-]{1,128}", condition_id):
+    if not _CONDITION_ID_RE.fullmatch(condition_id):
         return {"error": "Invalid condition ID"}
 
     markets = cache.get("markets") or []
@@ -312,6 +320,118 @@ async def get_market(condition_id: str):
         "divergence": asdict(signal) if signal else None,
         "price_history": price_history[:100],
         "signal_history": signal_history,
+    }
+
+
+def _parse_clob_token_ids(raw: object) -> tuple[str, str]:
+    tokens = raw
+    if isinstance(tokens, str):
+        try:
+            tokens = json.loads(tokens)
+        except json.JSONDecodeError:
+            tokens = [part.strip() for part in tokens.split(",")]
+    if not isinstance(tokens, list) or len(tokens) < 2:
+        raise HTTPException(
+            status_code=502,
+            detail="Polymarket returned malformed token IDs",
+        )
+    yes_token = str(tokens[0]).strip()
+    no_token = str(tokens[1]).strip()
+    if not yes_token or not no_token:
+        raise HTTPException(
+            status_code=502,
+            detail="Polymarket returned incomplete token IDs",
+        )
+    return yes_token, no_token
+
+
+def _tick_size_from_gamma(value: object) -> str:
+    try:
+        min_tick = float(value)
+    except (TypeError, ValueError):
+        return "0.01"
+    if min_tick <= 0.001:
+        return "0.001"
+    if min_tick <= 0.01:
+        return "0.01"
+    return "0.1"
+
+
+async def _fetch_gamma_market(condition_id: str) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                _GAMMA_MARKETS_URL,
+                params={"condition_ids": condition_id, "limit": 1},
+                headers={"User-Agent": "PolyScope/0.3"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Polymarket market lookup failed: {type(e).__name__}",
+        ) from e
+    except ValueError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="Polymarket returned invalid JSON",
+        ) from e
+
+    gamma = data[0] if isinstance(data, list) and data else None
+    gamma_condition = (
+        gamma.get("conditionId")
+        or gamma.get("condition_id")
+        or gamma.get("id")
+        if isinstance(gamma, dict)
+        else None
+    )
+    if not isinstance(gamma, dict) or str(gamma_condition).lower() != condition_id.lower():
+        raise HTTPException(status_code=404, detail="Market not found on Polymarket")
+    return gamma
+
+
+@app.get("/api/market/{condition_id}/trade")
+async def get_market_trade(condition_id: str):
+    """Server-side Polymarket trade metadata for the order modal.
+
+    The browser cannot safely call Gamma directly because production CORS
+    blocks it. This endpoint fetches Gamma from the server, validates the
+    token IDs against PolyScope's cached market, and returns only the fields
+    needed for non-custodial CLOB order construction.
+    """
+    if not _CONDITION_ID_RE.fullmatch(condition_id):
+        raise HTTPException(status_code=400, detail="Invalid condition ID")
+
+    markets = cache.get("markets") or []
+    market = next(
+        (m for m in markets if m.condition_id.lower() == condition_id.lower()),
+        None,
+    )
+    if not market:
+        raise HTTPException(status_code=404, detail="Market not found")
+
+    gamma = await _fetch_gamma_market(condition_id)
+    if gamma.get("closed"):
+        raise HTTPException(status_code=409, detail="Market is closed")
+    if gamma.get("enableOrderBook") is False or gamma.get("acceptingOrders") is False:
+        raise HTTPException(
+            status_code=409,
+            detail="Polymarket is not accepting orders on this market",
+        )
+
+    yes_token, no_token = _parse_clob_token_ids(gamma.get("clobTokenIds"))
+    if market.token_id_yes and market.token_id_yes != yes_token:
+        raise HTTPException(status_code=409, detail="YES token mismatch")
+    if market.token_id_no and market.token_id_no != no_token:
+        raise HTTPException(status_code=409, detail="NO token mismatch")
+
+    return {
+        "market": asdict(market),
+        "tokens": {"YES": yes_token, "NO": no_token},
+        "tick_size": _tick_size_from_gamma(gamma.get("orderPriceMinTickSize")),
+        "neg_risk": bool(gamma.get("negRisk")),
+        "accepting_orders": True,
     }
 
 
@@ -566,11 +686,16 @@ async def calibration_overview():
 @app.get("/api/signals/accuracy")
 async def signals_accuracy():
     """Signal track record — win rates by tier, rolling 30-day, and simulated P&L."""
+    cached = cache.get("signals_accuracy")
+    if cached is not None:
+        return cached
+
     db = await get_db()
     try:
         stats = await get_signal_accuracy(db)
         simulation = await get_signal_pnl_simulation(db)
         stats["simulation"] = simulation
+        cache.set("signals_accuracy", stats, ttl_seconds=600)
         return stats
     finally:
         await db.close()
@@ -719,16 +844,82 @@ class UserActionRequest(BaseModel):
 class LinkWalletRequest(BaseModel):
     client_id: str = Field(min_length=8, max_length=64)
     wallet_address: str = Field(pattern=_EVM_ADDR_RE)
+    domain: str = Field(min_length=1, max_length=128, pattern=r"^[^\s/]+$")
+    issued_at: int = Field(gt=0)
+    signature: str = Field(min_length=1, max_length=512)
+
+
+def _wallet_link_message(
+    client_id: str,
+    wallet_address: str,
+    domain: str,
+    issued_at: int,
+) -> str:
+    return (
+        "PolyScope wallet link\n"
+        f"Domain: {domain}\n"
+        f"Client ID: {client_id}\n"
+        f"Wallet: {wallet_address.lower()}\n"
+        f"Issued At: {issued_at}"
+    )
+
+
+def _verify_wallet_link_signature(body: LinkWalletRequest) -> None:
+    if (
+        body.domain not in _WALLET_LINK_DOMAINS
+        and not body.domain.startswith("localhost:")
+        and not body.domain.startswith("127.0.0.1:")
+    ):
+        raise HTTPException(status_code=400, detail="wallet link domain not allowed")
+
+    now = int(time.time())
+    if abs(now - body.issued_at) > _WALLET_LINK_TTL_SECONDS:
+        raise HTTPException(status_code=400, detail="wallet link signature expired")
+
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_defunct
+
+        message = _wallet_link_message(
+            body.client_id,
+            body.wallet_address,
+            body.domain,
+            body.issued_at,
+        )
+        recovered = Account.recover_message(
+            encode_defunct(text=message),
+            signature=body.signature,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="invalid wallet signature") from e
+
+    if recovered.lower() != body.wallet_address.lower():
+        raise HTTPException(status_code=401, detail="signature does not match wallet")
+
+
+async def _require_wallet_link(db, client_id: str, wallet_address: str | None) -> None:
+    if not wallet_address:
+        return
+    if not await is_wallet_linked_to_client(db, client_id, wallet_address):
+        raise HTTPException(status_code=401, detail="wallet is not linked to client")
 
 
 @app.post("/api/watchlist/add")
 async def watchlist_add(body: WatchlistAddRequest):
     wallet = body.wallet_address.lower() if body.wallet_address else None
+
+    async def _op(db):
+        await _require_wallet_link(db, body.client_id, wallet)
+        return await add_to_watchlist(
+            db,
+            body.client_id,
+            body.market_id,
+            wallet_address=wallet,
+        )
+
     result = await _retry_on_locked(
         "watchlist_add",
-        lambda db: add_to_watchlist(
-            db, body.client_id, body.market_id, wallet_address=wallet
-        ),
+        _op,
     )
     if not result:
         raise HTTPException(status_code=404, detail="no signal for this market")
@@ -736,10 +927,22 @@ async def watchlist_add(body: WatchlistAddRequest):
 
 
 @app.delete("/api/watchlist/{watchlist_id}")
-async def watchlist_remove(watchlist_id: int, client_id: str = Query(..., min_length=8)):
+async def watchlist_remove(
+    watchlist_id: int,
+    client_id: str = Query(..., min_length=8),
+    wallet_address: str | None = Query(default=None, pattern=_EVM_ADDR_RE),
+):
+    wallet = wallet_address.lower() if wallet_address else None
+
     async def _op(db):
+        await _require_wallet_link(db, client_id, wallet)
         return {
-            "removed": await remove_from_watchlist(db, client_id, watchlist_id)
+            "removed": await remove_from_watchlist(
+                db,
+                client_id,
+                watchlist_id,
+                wallet_address=wallet,
+            )
         }
 
     result = await _retry_on_locked("watchlist_remove", _op)
@@ -756,6 +959,7 @@ async def watchlist_list(
     wallet = wallet_address.lower() if wallet_address else None
     db = await get_db()
     try:
+        await _require_wallet_link(db, client_id, wallet)
         items = await get_watchlist(db, client_id, wallet_address=wallet)
     finally:
         await db.close()
@@ -767,6 +971,7 @@ async def portfolio_act(body: UserActionRequest):
     wallet = body.wallet_address.lower() if body.wallet_address else None
 
     async def _op(db):
+        await _require_wallet_link(db, body.client_id, wallet)
         action_id = await record_user_action(
             db,
             client_id=body.client_id,
@@ -790,6 +995,7 @@ async def portfolio(
     wallet = wallet_address.lower() if wallet_address else None
     db = await get_db()
     try:
+        await _require_wallet_link(db, client_id, wallet)
         return await get_portfolio(db, client_id, wallet_address=wallet)
     finally:
         await db.close()
@@ -833,11 +1039,12 @@ async def _retry_on_locked(op_name: str, coro_factory):
 
 @app.post("/api/wallet/link")
 async def wallet_link(body: LinkWalletRequest):
-    """Link an anonymous client_id to a wallet + migrate prior history.
+    """Link an anonymous client_id to a wallet after proving wallet ownership.
 
     Idempotent — subsequent calls update last_seen and migrate any rows
     still tagged with the raw client_id.
     """
+    _verify_wallet_link_signature(body)
     return await _retry_on_locked(
         "wallet_link",
         lambda db: link_wallet_to_client(
@@ -858,11 +1065,19 @@ class FollowRequest(BaseModel):
 @app.post("/api/follow/trader")
 async def follow(body: FollowRequest):
     wallet = body.wallet_address.lower() if body.wallet_address else None
+
+    async def _op(db):
+        await _require_wallet_link(db, body.client_id, wallet)
+        return await follow_trader(
+            db,
+            body.trader_address,
+            body.client_id,
+            wallet_address=wallet,
+        )
+
     return await _retry_on_locked(
         "follow",
-        lambda db: follow_trader(
-            db, body.trader_address, body.client_id, wallet_address=wallet
-        ),
+        _op,
     )
 
 
@@ -877,6 +1092,7 @@ async def unfollow(
     wallet = wallet_address.lower() if wallet_address else None
 
     async def _op(db):
+        await _require_wallet_link(db, client_id, wallet)
         return {
             "removed": await unfollow_trader(
                 db, trader_address, client_id, wallet_address=wallet
@@ -894,6 +1110,7 @@ async def follow_list(
     wallet = wallet_address.lower() if wallet_address else None
     db = await get_db()
     try:
+        await _require_wallet_link(db, client_id, wallet)
         items = await get_followed_traders(db, client_id, wallet_address=wallet)
     finally:
         await db.close()
@@ -911,6 +1128,7 @@ async def follow_status(
     wallet = wallet_address.lower() if wallet_address else None
     db = await get_db()
     try:
+        await _require_wallet_link(db, client_id, wallet)
         following = await is_following(
             db, trader_address, client_id, wallet_address=wallet
         )
@@ -929,6 +1147,7 @@ async def follow_alerts(
     wallet = wallet_address.lower() if wallet_address else None
     db = await get_db()
     try:
+        await _require_wallet_link(db, client_id, wallet)
         items = await get_follow_alerts(
             db, client_id, wallet_address=wallet,
             unseen_only=unseen_only, limit=limit,
@@ -946,6 +1165,7 @@ async def follow_alerts_mark_seen(
     wallet = wallet_address.lower() if wallet_address else None
 
     async def _op(db):
+        await _require_wallet_link(db, client_id, wallet)
         updated = await mark_alerts_seen(db, client_id, wallet_address=wallet)
         return {"marked_seen": updated}
 
@@ -957,21 +1177,13 @@ async def follow_alerts_mark_seen(
 from .polymarket_signing import (
     get_builder_code,
     is_builder_code_configured,
-    is_configured,
-    sign_request,
 )
-
-
-class SignRequest(BaseModel):
-    method: str = Field(pattern="^(GET|POST|DELETE|PUT|PATCH)$")
-    path: str = Field(min_length=1, max_length=256, pattern="^/")
-    body: str = Field(default="", max_length=16384)
 
 
 @app.get("/api/builder/status")
 async def builder_status():
-    """Whether builder attribution secrets are configured on this server."""
-    return {"configured": is_configured()}
+    """Whether public Builder Code attribution is configured on this server."""
+    return {"configured": is_builder_code_configured()}
 
 
 @app.get("/api/builder/identity")
@@ -1218,28 +1430,7 @@ async def orders_public(limit: int = Query(default=20, ge=1, le=100)):
     return {"orders": redacted, "stats": stats}
 
 
-@app.post("/api/sign")
-async def sign(body: SignRequest):
-    """Produce the four POLY_BUILDER_* attribution headers for a CLOB request.
-
-    The secret never leaves the server — the frontend sends only the
-    request method/path/body it intends to forward, receives the signed
-    headers, and attaches them to its outbound request to Polymarket.
-
-    If builder secrets aren't yet configured on this server, returns
-    `mode: "stub"` so the UI can render a "Coming soon" state without
-    the flow breaking.
-    """
-    signed = sign_request(body.method, body.path, body.body)
-    return {
-        "headers": signed.to_headers(),
-        "mode": signed.mode,
-    }
-
-
 # ── Instrumentation ────────────────────────────────────────
-
-import os
 
 
 class EventRequest(BaseModel):
@@ -1270,13 +1461,11 @@ async def events_ingest(body: EventRequest):
 
 @app.get("/api/admin/metrics")
 async def admin_metrics(
-    token: str = Query(...),
     days: int = Query(7, ge=1, le=90),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ):
     """Admin metrics dashboard. Requires POLYSCOPE_ADMIN_TOKEN env match."""
-    expected = os.environ.get("POLYSCOPE_ADMIN_TOKEN", "")
-    if not expected or token != expected:
-        raise HTTPException(status_code=401, detail="invalid token")
+    _require_admin(x_admin_token)
     db = await get_db()
     try:
         return await get_metrics_summary(db, days=days)

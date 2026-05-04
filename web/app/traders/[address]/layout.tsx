@@ -11,13 +11,14 @@ function shortAddr(addr: string) {
 export async function generateMetadata({
   params,
 }: {
-  params: { address: string };
+  params: Promise<{ address: string }>;
 }): Promise<Metadata> {
-  const title = `${shortAddr(params.address)} — PolyScope trader profile`;
+  const { address } = await params;
+  const title = `${shortAddr(address)} — PolyScope trader profile`;
   let description = "Predictive accuracy for this Polymarket trader.";
 
   try {
-    const r = await fetch(`${API_BASE}/api/traders/${params.address}`, {
+    const r = await fetch(`${API_BASE}/api/traders/${address}`, {
       cache: "no-store",
     });
     if (r.ok) {
@@ -34,8 +35,8 @@ export async function generateMetadata({
     // defaults
   }
 
-  const ogUrl = `${SITE}/og/trader/${params.address}`;
-  const pageUrl = `${SITE}/traders/${params.address}`;
+  const ogUrl = `${SITE}/og/trader/${address}`;
+  const pageUrl = `${SITE}/traders/${address}`;
 
   return {
     title,

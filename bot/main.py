@@ -269,30 +269,33 @@ _EVM_ADDR_RE = __import__("re").compile(r"^0x[a-fA-F0-9]{40}$")
 async def connect_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Link this Telegram chat to a web identity.
 
-    Usage: /connect <client_id_or_wallet_address>
+    Usage: /connect <client_id>
 
-    The argument can be either the 16+ char client_id shown on the
-    portfolio page, or a wallet address. Once linked, follow-trader
-    alerts for that identity are DM'd to this chat.
+    The argument is the 8+ char client_id shown on the portfolio page.
+    Wallet addresses are not accepted here because Telegram cannot prove
+    wallet ownership.
     """
     if not ctx.args:
         await update.message.reply_text(
             "Usage: /connect <id>\n\n"
             "Find your ID on https://polyscope.gudman.xyz/portfolio "
-            "(Telegram section). You can also pass a wallet address (0x...)."
+            "(Telegram section)."
         )
         return
 
     token = ctx.args[0].strip()
     client_id: str | None = None
-    wallet: str | None = None
     if _EVM_ADDR_RE.match(token):
-        wallet = token.lower()
+        await update.message.reply_text(
+            "Wallet addresses must be linked from the web app with a wallet signature\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
     elif len(token) >= 8:
         client_id = token
     else:
         await update.message.reply_text(
-            "Invalid ID\\. Expected a client\\_id \\(8\\+ chars\\) or wallet address\\.",
+            "Invalid ID\\. Expected a client\\_id \\(8\\+ chars\\)\\.",
             parse_mode="MarkdownV2",
         )
         return
@@ -304,12 +307,12 @@ async def connect_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         db = await get_db()
         try:
             await link_bot_identity(
-                db, chat_id, client_id=client_id, wallet_address=wallet
+                db, chat_id, client_id=client_id, wallet_address=None
             )
             await db.commit()
         finally:
             await db.close()
-        target = _esc(wallet or client_id or "")
+        target = _esc(client_id or "")
         await update.message.reply_text(
             f"Linked\\. I'll DM follow\\-trader alerts for `{target}` to this chat\\."
             + DISCLAIMER,

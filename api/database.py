@@ -175,6 +175,14 @@ CREATE TABLE IF NOT EXISTS wallets (
     last_seen_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS wallet_client_links (
+    wallet_address TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    first_seen_at TEXT,
+    last_seen_at TEXT,
+    PRIMARY KEY (wallet_address, client_id)
+);
+
 CREATE TABLE IF NOT EXISTS trader_follows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     follower_wallet TEXT,
@@ -345,6 +353,18 @@ async def migrate_db(db: aiosqlite.Connection):
     )
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_wallets_client ON wallets(client_id)"
+    )
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS wallet_client_links (
+            wallet_address TEXT NOT NULL,
+            client_id TEXT NOT NULL,
+            first_seen_at TEXT,
+            last_seen_at TEXT,
+            PRIMARY KEY (wallet_address, client_id)
+        )"""
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_wallet_links_client ON wallet_client_links(client_id)"
     )
 
     # Follow-trader tables (created if missing on pre-existing DBs).
@@ -1038,11 +1058,18 @@ async def add_to_watchlist(
 
 
 async def remove_from_watchlist(
-    db: aiosqlite.Connection, client_id: str, watchlist_id: int
+    db: aiosqlite.Connection,
+    client_id: str,
+    watchlist_id: int,
+    wallet_address: str | None = None,
 ) -> bool:
+    wallet = wallet_address.lower() if wallet_address else None
     cursor = await db.execute(
-        "DELETE FROM watchlist WHERE id = ? AND client_id = ?",
-        (watchlist_id, client_id),
+        """DELETE FROM watchlist
+           WHERE id = ?
+             AND (client_id = ?
+                  OR (? IS NOT NULL AND wallet_address = ?))""",
+        (watchlist_id, client_id, wallet, wallet),
     )
     return (cursor.rowcount or 0) > 0
 
@@ -1179,6 +1206,14 @@ async def link_wallet_to_client(
                client_id = COALESCE(wallets.client_id, excluded.client_id)""",
         (wallet, client_id, now, now),
     )
+    await db.execute(
+        """INSERT INTO wallet_client_links
+           (wallet_address, client_id, first_seen_at, last_seen_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(wallet_address, client_id) DO UPDATE SET
+               last_seen_at = excluded.last_seen_at""",
+        (wallet, client_id, now, now),
+    )
 
     cursor = await db.execute(
         """UPDATE watchlist SET wallet_address = ?
@@ -1209,6 +1244,24 @@ async def link_wallet_to_client(
         "user_actions_migrated": ua_migrated,
         "follows_migrated": follows_migrated,
     }
+
+
+async def is_wallet_linked_to_client(
+    db: aiosqlite.Connection,
+    client_id: str,
+    wallet_address: str,
+) -> bool:
+    wallet = wallet_address.lower()
+    cursor = await db.execute(
+        """SELECT 1 FROM wallet_client_links
+           WHERE wallet_address = ? AND client_id = ?
+           UNION
+           SELECT 1 FROM wallets
+           WHERE wallet_address = ? AND client_id = ?
+           LIMIT 1""",
+        (wallet, client_id, wallet, client_id),
+    )
+    return await cursor.fetchone() is not None
 
 
 # ── Follow-trader ──────────────────────────────────────────

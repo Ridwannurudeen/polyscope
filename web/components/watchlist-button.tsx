@@ -15,6 +15,54 @@ interface WatchlistResponse {
   count: number;
 }
 
+interface WatchlistCacheEntry {
+  items?: WatchlistItem[];
+  promise?: Promise<WatchlistItem[]>;
+}
+
+const watchlistCache = new Map<string, WatchlistCacheEntry>();
+
+function cacheKey(clientId: string, walletAddress: string | null): string {
+  return `${clientId}|${walletAddress ?? ""}`;
+}
+
+function updateWatchlistCache(
+  clientId: string,
+  walletAddress: string | null,
+  update: (items: WatchlistItem[]) => WatchlistItem[],
+) {
+  const key = cacheKey(clientId, walletAddress);
+  const entry = watchlistCache.get(key) ?? {};
+  entry.items = update(entry.items ?? []);
+  entry.promise = undefined;
+  watchlistCache.set(key, entry);
+}
+
+async function loadWatchlist(
+  clientId: string,
+  walletAddress: string | null,
+): Promise<WatchlistItem[]> {
+  const key = cacheKey(clientId, walletAddress);
+  const cached = watchlistCache.get(key);
+  if (cached?.items) return cached.items;
+  if (cached?.promise) return cached.promise;
+
+  const qs = new URLSearchParams({ client_id: clientId });
+  if (walletAddress) qs.set("wallet_address", walletAddress);
+  const promise = fetch(`/api/watchlist?${qs.toString()}`)
+    .then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json() as Promise<WatchlistResponse>;
+    })
+    .then((d) => {
+      const items = d.items ?? [];
+      watchlistCache.set(key, { items });
+      return items;
+    });
+  watchlistCache.set(key, { promise });
+  return promise;
+}
+
 export function WatchlistButton({ marketId }: { marketId: string }) {
   const { walletAddress } = useIdentity();
   const [watchedId, setWatchedId] = useState<number | null>(null);
@@ -23,31 +71,40 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
   useEffect(() => {
     const clientId = getClientId();
     if (!clientId) return;
-    const qs = new URLSearchParams({ client_id: clientId });
-    if (walletAddress) qs.set("wallet_address", walletAddress);
-    fetch(`/api/watchlist?${qs.toString()}`)
-      .then((r) => r.json())
-      .then((d: WatchlistResponse) => {
-        const hit = d.items?.find((x) => x.market_id === marketId);
+    let cancelled = false;
+    loadWatchlist(clientId, walletAddress)
+      .then((items) => {
+        if (cancelled) return;
+        const hit = items.find((x) => x.market_id === marketId);
         setWatchedId(hit?.id ?? null);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setWatchedId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [marketId, walletAddress]);
 
   const add = async () => {
+    const clientId = getClientId();
     setLoading(true);
     try {
       const r = await fetch("/api/watchlist/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          client_id: getClientId(),
+          client_id: clientId,
           market_id: marketId,
           ...(walletAddress ? { wallet_address: walletAddress } : {}),
         }),
       });
       if (r.ok) {
-        const d = await r.json();
+        const d: WatchlistItem = await r.json();
+        updateWatchlistCache(clientId, walletAddress, (items) => [
+          d,
+          ...items.filter((x) => x.market_id !== marketId),
+        ]);
         setWatchedId(d.id);
         trackEvent("watchlist_added", { market_id: marketId });
       }
@@ -58,13 +115,19 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
 
   const remove = async () => {
     if (!watchedId) return;
+    const clientId = getClientId();
+    const qs = new URLSearchParams({ client_id: clientId });
+    if (walletAddress) qs.set("wallet_address", walletAddress);
     setLoading(true);
     try {
       const r = await fetch(
-        `/api/watchlist/${watchedId}?client_id=${encodeURIComponent(getClientId())}`,
+        `/api/watchlist/${watchedId}?${qs.toString()}`,
         { method: "DELETE" },
       );
       if (r.ok) {
+        updateWatchlistCache(clientId, walletAddress, (items) =>
+          items.filter((x) => x.id !== watchedId),
+        );
         setWatchedId(null);
         trackEvent("watchlist_removed", { market_id: marketId });
       }
@@ -80,14 +143,14 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
         disabled={loading}
         className="btn bg-scope-500/12 border border-scope-500/40 text-scope-300 hover:bg-scope-500/20 disabled:opacity-40"
       >
-        {loading ? "…" : "watching"}
+        {loading ? "..." : "watching"}
       </button>
     );
   }
 
   return (
     <button onClick={add} disabled={loading} className="btn-secondary">
-      {loading ? "…" : "watch"}
+      {loading ? "..." : "watch"}
     </button>
   );
 }

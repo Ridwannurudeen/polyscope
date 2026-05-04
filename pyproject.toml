@@ -11,6 +11,7 @@ dependencies = [
     "pydantic>=2.10.0",
     "python-telegram-bot>=20.7",
     "aiosqlite>=0.20.0",
+    "eth-account>=0.13.0",
     "py_clob_client_v2>=1.0.0",
     # Polymarket's official builder-auth SDK. Required because
     # py_clob_client_v2.get_builder_trades() incorrectly signs with L2

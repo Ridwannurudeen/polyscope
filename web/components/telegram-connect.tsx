@@ -1,22 +1,22 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { getClientId } from "@/lib/client-id";
-import { useIdentity } from "@/lib/identity";
 
 const BOT_URL = "https://t.me/polyscoppe_bot";
 
 export function TelegramConnect() {
-  const { walletAddress } = useIdentity();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
   const clientId = typeof window !== "undefined" ? getClientId() : "";
-  const token = walletAddress || clientId;
-  const kind = walletAddress ? "wallet" : "client ID";
+  const token = clientId;
 
   const copy = (label: string, text: string) => {
-    navigator.clipboard.writeText(text).catch(() => {});
+    navigator.clipboard.writeText(text).catch(() => {
+      setCopied(null);
+    });
     setCopied(label);
     setTimeout(() => setCopied(null), 1500);
   };
@@ -66,15 +66,15 @@ export function TelegramConnect() {
                 </button>
               </div>
               <p className="text-xs text-ink-500 mt-1">
-                This sends your {kind} to the bot so it knows which alerts to
+                This sends your client ID to the bot so it knows which alerts to
                 DM you.
               </p>
             </li>
             <li>
               Follow a trader on the{" "}
-              <a href="/traders" className="text-emerald-400 hover:underline">
+              <Link href="/traders" className="text-emerald-400 hover:underline">
                 traders page
-              </a>
+              </Link>
               . DMs start on their next divergent move.
             </li>
           </ol>

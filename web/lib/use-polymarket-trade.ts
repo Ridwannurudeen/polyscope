@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWalletClient } from "wagmi";
 import { polygon } from "wagmi/chains";
 import {
@@ -19,7 +19,6 @@ const CLOB_HOST =
 
 const BUILDER_CODE = process.env.NEXT_PUBLIC_POLYMARKET_BUILDER_CODE || "";
 
-const CREDS_KEY_PREFIX = "polyscope.polymarket.creds.";
 const FUNDER_KEY_PREFIX = "polyscope.polymarket.funder.";
 
 // ── Safe-funder storage ──────────────────────────────────────
@@ -56,32 +55,6 @@ export function saveSafeFunder(address: string, funder: string) {
 export function clearSafeFunder(address: string) {
   if (typeof window === "undefined") return;
   sessionStorage.removeItem(`${FUNDER_KEY_PREFIX}${address.toLowerCase()}`);
-}
-
-function loadCachedCreds(address: string): ApiKeyCreds | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = sessionStorage.getItem(`${CREDS_KEY_PREFIX}${address.toLowerCase()}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed?.key && parsed?.secret && parsed?.passphrase) return parsed;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function saveCachedCreds(address: string, creds: ApiKeyCreds) {
-  if (typeof window === "undefined") return;
-  sessionStorage.setItem(
-    `${CREDS_KEY_PREFIX}${address.toLowerCase()}`,
-    JSON.stringify(creds)
-  );
-}
-
-function clearCachedCreds(address: string) {
-  if (typeof window === "undefined") return;
-  sessionStorage.removeItem(`${CREDS_KEY_PREFIX}${address.toLowerCase()}`);
 }
 
 // User-facing error mapping. Raw axios dumps from clob-client-v2 leak the
@@ -156,6 +129,9 @@ export function usePolymarketTrade() {
   const [isApproving, setIsApproving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<SubmitOrderResult | null>(null);
+  const credsByAddress = useRef<Record<string, ApiKeyCreds>>({});
+  const currentAddress = useRef<string | null>(null);
+  const lastAddress = useRef<string | null>(null);
 
   const onWrongChain = isConnected && chainId !== polygon.id;
 
@@ -178,7 +154,8 @@ export function usePolymarketTrade() {
   // actual trade calls.
   const deriveOrLoadCreds = useCallback(
     async (addr: string): Promise<ApiKeyCreds> => {
-      const cached = loadCachedCreds(addr);
+      const key = addr.toLowerCase();
+      const cached = credsByAddress.current[key];
       if (cached) return cached;
       if (!walletClient) {
         throw new Error("Wallet client not ready — reconnect your wallet.");
@@ -191,7 +168,7 @@ export function usePolymarketTrade() {
       });
       try {
         const creds = await tmpClient.createOrDeriveApiKey();
-        saveCachedCreds(addr, creds);
+        credsByAddress.current[key] = creds;
         return creds;
       } catch (err) {
         // Map the /auth/api-key 400 ("Could not create api key" when the
@@ -340,7 +317,7 @@ export function usePolymarketTrade() {
       // Capture the EOA at start and abort if it changes after any await.
       const addrAtStart = address.toLowerCase();
       const guardAccount = () => {
-        if ((address ?? "").toLowerCase() !== addrAtStart) {
+        if (currentAddress.current !== addrAtStart) {
           throw new Error("Wallet account changed mid-trade — re-open the dialog.");
         }
       };
@@ -408,17 +385,20 @@ export function usePolymarketTrade() {
     return "ready";
   }, [isConnected, isSubmitting, onWrongChain]);
 
-  // Clear last result/error AND any cached L2 creds on disconnect.
-  // Without this, derived API keys for the previously-connected EOA
-  // linger in sessionStorage until the tab closes — letting any
-  // same-origin script that runs after the user signs out still hit
-  // the L2 endpoints (cancel order, balance/allowance, history) on
-  // their behalf without a wallet popup.
+  // Keep derived L2 creds in memory only. They leave no sessionStorage
+  // artifact for same-origin scripts to reuse after disconnect or reload.
   useEffect(() => {
+    currentAddress.current = address?.toLowerCase() ?? null;
+    if (address) {
+      lastAddress.current = address.toLowerCase();
+    }
     if (!isConnected) {
       setLastResult(null);
       setSubmitError(null);
-      if (address) clearCachedCreds(address);
+      credsByAddress.current = {};
+      if (lastAddress.current) {
+        lastAddress.current = null;
+      }
     }
   }, [isConnected, address]);
 

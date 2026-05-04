@@ -10,7 +10,7 @@ Live: [polyscope.gudman.xyz](https://polyscope.gudman.xyz)
 
 ## What it does
 
-- **Scans 500+ Polymarket markets every 5 minutes** for divergence between crowd consensus and top-100 trader positions
+- **Scans up to 500 active Polymarket markets every 5 minutes** for divergence between crowd consensus and top-100 trader positions
 - **Captures per-signal, per-trader attribution** — who positioned which way, at what size, at what rank
 - **Scores individual predictive accuracy** against resolved market outcomes
 - **Publishes two leaderboards**: genuinely predictive traders, and traders worth fading
@@ -27,7 +27,7 @@ The core insight driving the product: Polymarket's built-in leaderboard ranks by
 │  Polymarket APIs                                            │
 │  ├─ Gamma (markets, resolution)                             │
 │  ├─ Data API (positions, trades, leaderboard)               │
-│  └─ CLOB (future: order routing)                            │
+│  └─ CLOB (browser-signed Builder Code orders)               │
 └─────────────────────────┬───────────────────────────────────┘
                           │
          ┌────────────────▼─────────────────┐
@@ -88,7 +88,7 @@ A signal fires when `|market_price - sm_consensus| ≥ 10%` AND the composite sc
 
 ### Contrarian direction
 
-Empirically validated on 139K+ resolved signals: SM consensus at the aggregate level is **anti-predictive** when it diverges from market price. The signal direction is explicitly the opposite of SM consensus. See [/methodology](https://polyscope.gudman.xyz/methodology) for the honest breakdown with market-skew caveats.
+Empirically validated on resolved signals: SM consensus is **skew-sensitive**, not mechanically contrarian. PolyScope fades very-lopsided aggregate SM consensus, follows stronger predictive contributors elsewhere, and exposes the market-skew caveats on [/methodology](https://polyscope.gudman.xyz/methodology).
 
 ### Per-trader accuracy (live since Apr 12, 2026)
 
@@ -153,9 +153,9 @@ Copy `.env.example` to `.env` — see the bot container env for Telegram alert c
 ## Status
 
 - **Signals tracked**: 340K+ divergence signals, 28+ days of capture
-- **Markets watched**: 500 active per scan cycle
+- **Markets watched**: up to 500 active per scan cycle
 - **Resolved outcomes**: 10K+ markets scored, 139K+ resolved signals
-- **Tests**: 196 passing
+- **Tests**: backend pytest suite plus frontend lint/type/build checks
 - **Stack**: containerized, deployed on dedicated VPS, TLS via Let's Encrypt webroot
 
 ---
@@ -168,7 +168,7 @@ PolyScope has converted from read-only analytics into an **execution-native inte
 - **Methodology Page** ✓ — honest public documentation of findings, dynamic stats
 - **Decision Cards** ✓ — workflow-grade signal display with thesis, invalidators, confidence tier
 - **Portfolio Layer** ✓ — anonymous client_id watchlist + trade log, PnL estimate, outcome scoring
-- **Builder Integration** ✓ — Builder Code attribution live, CLOB order routing via browser wallet-connect (POLY_GNOSIS_SAFE + EOA paths), on-chain Safe-owner verification, Gamma token cross-validation, attributed-trade sync job
+- **Builder Integration** ✓ — Builder Code attribution configured, browser wallet-connect CLOB order construction for EOA and user-provided Safe funder paths, user geoblock check, server-side Gamma token validation, attributed-trade sync job
 - **Predictive-contributor filter** ✓ — Wilson-95% gated trader leaderboard surfaces signals backed by genuinely predictive addresses
 
 Next: per-trader data continues accumulating — qualifying-trader pool grows over time, backtest reruns hourly.

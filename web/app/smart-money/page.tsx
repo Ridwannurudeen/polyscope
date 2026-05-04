@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DecisionCard } from "@/components/decision-card";
 import { Disclaimer } from "@/components/disclaimer";
@@ -52,6 +53,10 @@ interface HistoryResponse {
   count: number;
 }
 
+const EMPTY_TRADERS: Trader[] = [];
+const EMPTY_DIVERGENCES: DivergenceSignal[] = [];
+const EMPTY_HISTORY: HistorySignal[] = [];
+
 export default function SmartMoneyPage() {
   const [direction, setDirection] = useState<DirectionFilter>("all");
   const [skew, setSkew] = useState<SkewFilter>("all");
@@ -80,9 +85,9 @@ export default function SmartMoneyPage() {
     60_000,
   );
 
-  const traders = lbData?.traders || [];
-  const divergences = divData?.signals || [];
-  const history = histData?.history || [];
+  const traders = lbData?.traders ?? EMPTY_TRADERS;
+  const divergences = divData?.signals ?? EMPTY_DIVERGENCES;
+  const history = histData?.history ?? EMPTY_HISTORY;
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -345,12 +350,12 @@ export default function SmartMoneyPage() {
           </h2>
           <p className="text-caption text-ink-400 mt-1">
             Polymarket&apos;s native ranking. Not what we rank by — see the{" "}
-            <a
+            <Link
               href="/traders"
               className="text-scope-500 hover:text-scope-400 underline underline-offset-2"
             >
               predictive leaderboard
-            </a>{" "}
+            </Link>{" "}
             for accuracy-ranked.
           </p>
         </div>

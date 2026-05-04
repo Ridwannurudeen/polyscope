@@ -770,6 +770,33 @@ async def test_get_watchlist_resolves_by_wallet_after_link(db):
 
 
 @pytest.mark.anyio
+async def test_remove_watchlist_allows_verified_wallet_identity(db):
+    wallet = "0x" + "c" * 40
+    await _seed_signal_with_traders(
+        db, "lm3", 0.6, "crypto", [("0xfff", "YES")]
+    )
+    await db.commit()
+    result = await add_to_watchlist(db, "client-old", "lm3")
+    await db.commit()
+    await link_wallet_to_client(db, "client-old", wallet)
+    await db.commit()
+
+    # A different device/client can remove rows it can see through the
+    # verified wallet identity.
+    ok = await remove_from_watchlist(
+        db,
+        "client-new",
+        result["id"],
+        wallet_address=wallet,
+    )
+    await db.commit()
+
+    assert ok is True
+    items = await get_watchlist(db, "client-new", wallet_address=wallet)
+    assert items == []
+
+
+@pytest.mark.anyio
 async def test_watchlist_remove_only_own(db):
     await _seed_signal_with_traders(
         db, "mw4", 0.6, "crypto", [("0xaaa", "YES")]

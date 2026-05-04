@@ -14,6 +14,8 @@ interface MarketsResponse {
   total: number;
 }
 
+const EMPTY_MARKETS: Market[] = [];
+
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   Politics: ["trump", "biden", "president", "election", "congress", "senate", "governor", "democrat", "republican", "vote", "party", "political", "iran", "tariff", "nato", "war", "regime", "sanction", "cabinet", "impeach", "poll"],
   Crypto: ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana", "sol", "token", "defi", "nft", "blockchain", "binance", "coinbase", "altcoin", "memecoin"],
@@ -42,7 +44,7 @@ export default function MarketsPage() {
       300_000,
     );
 
-  const markets = data?.markets || [];
+  const markets = data?.markets ?? EMPTY_MARKETS;
   const total = data?.total || 0;
 
   const categorized = useMemo(

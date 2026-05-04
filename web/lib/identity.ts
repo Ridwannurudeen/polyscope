@@ -2,12 +2,8 @@
  * User identity hook.
  *
  * Combines the anonymous client_id (localStorage UUID) with an optional
- * linked wallet address. On first wallet link, calls POST /api/wallet/link
- * so prior watchlist/portfolio history is migrated to the wallet.
- *
- * Privy integration slots in here once creds are configured — the React
- * Privy hook replaces the manual setWalletAddress call, but the shape of
- * this hook and its consumers stays the same.
+ * linked wallet address. Wallet links require a fresh EVM signature before
+ * POST /api/wallet/link migrates prior watchlist/portfolio history.
  */
 
 "use client";
@@ -28,16 +24,42 @@ function storedWallet(): string | null {
   try {
     const raw = window.localStorage.getItem(WALLET_KEY);
     if (raw && isValidEvmAddress(raw)) return raw.toLowerCase();
-  } catch {}
+  } catch {
+    return null;
+  }
   return null;
+}
+
+export interface WalletLinkProof {
+  domain: string;
+  issuedAt: number;
+  signature: string;
 }
 
 export interface Identity {
   clientId: string;
   walletAddress: string | null;
-  linkWallet: (address: string) => Promise<{ ok: boolean; error?: string }>;
+  linkWallet: (
+    address: string,
+    proof: WalletLinkProof,
+  ) => Promise<{ ok: boolean; error?: string }>;
   unlinkWallet: () => void;
   linking: boolean;
+}
+
+export function buildWalletLinkMessage(
+  clientId: string,
+  address: string,
+  domain: string,
+  issuedAt: number,
+): string {
+  return [
+    "PolyScope wallet link",
+    `Domain: ${domain}`,
+    `Client ID: ${clientId}`,
+    `Wallet: ${address.toLowerCase()}`,
+    `Issued At: ${issuedAt}`,
+  ].join("\n");
 }
 
 export function useIdentity(): Identity {
@@ -51,7 +73,10 @@ export function useIdentity(): Identity {
   }, []);
 
   const linkWallet = useCallback(
-    async (address: string): Promise<{ ok: boolean; error?: string }> => {
+    async (
+      address: string,
+      proof: WalletLinkProof,
+    ): Promise<{ ok: boolean; error?: string }> => {
       const trimmed = address.trim().toLowerCase();
       if (!isValidEvmAddress(trimmed)) {
         return { ok: false, error: "Not a valid EVM address" };
@@ -62,28 +87,41 @@ export function useIdentity(): Identity {
         const res = await fetch("/api/wallet/link", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ client_id: cid, wallet_address: trimmed }),
+          body: JSON.stringify({
+            client_id: cid,
+            wallet_address: trimmed,
+            domain: proof.domain,
+            issued_at: proof.issuedAt,
+            signature: proof.signature,
+          }),
         });
         if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          return { ok: false, error: text || `HTTP ${res.status}` };
+          const data: { detail?: string } | null = await res
+            .json()
+            .catch(() => null);
+          return { ok: false, error: data?.detail || `HTTP ${res.status}` };
         }
         window.localStorage.setItem(WALLET_KEY, trimmed);
         setWalletAddress(trimmed);
         return { ok: true };
       } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+        return {
+          ok: false,
+          error: e instanceof Error ? e.message : "Network error",
+        };
       } finally {
         setLinking(false);
       }
     },
-    [clientId]
+    [clientId],
   );
 
   const unlinkWallet = useCallback(() => {
     try {
       window.localStorage.removeItem(WALLET_KEY);
-    } catch {}
+    } catch {
+      // localStorage can be unavailable; in-memory state still unlinks.
+    }
     setWalletAddress(null);
   }, []);
 
@@ -92,5 +130,5 @@ export function useIdentity(): Identity {
 
 export function shortAddress(addr: string): string {
   if (!addr) return "";
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }

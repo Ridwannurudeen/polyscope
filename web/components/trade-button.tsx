@@ -5,9 +5,7 @@ import { TradeModal } from "@/components/trade-modal";
 import { trackEvent } from "@/lib/analytics";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
-const GAMMA_HOST =
-  process.env.NEXT_PUBLIC_POLYMARKET_GAMMA_HOST ||
-  "https://gamma-api.polymarket.com";
+const POLYMARKET_GEOBLOCK_URL = "https://polymarket.com/api/geoblock";
 
 interface TradeButtonProps {
   marketId: string;
@@ -16,28 +14,28 @@ interface TradeButtonProps {
   marketPrice: number; // price_yes
 }
 
-interface MarketDetailResp {
-  market?: {
-    token_id_yes?: string;
-    token_id_no?: string;
+interface MarketTradeResp {
+  market: {
+    price_yes: number;
   };
+  tokens: {
+    YES: string;
+    NO: string;
+  };
+  tick_size: "0.001" | "0.01" | "0.1";
+  neg_risk: boolean;
+  accepting_orders: boolean;
 }
 
-interface GammaMarket {
-  conditionId?: string;
-  clobTokenIds?: string;
-  orderPriceMinTickSize?: number;
-  negRisk?: boolean;
-  acceptingOrders?: boolean;
-  enableOrderBook?: boolean;
-  closed?: boolean;
-}
-
-function tickSizeFromGamma(min: number | undefined): "0.001" | "0.01" | "0.1" {
-  if (min === undefined) return "0.01";
-  if (min <= 0.001) return "0.001";
-  if (min <= 0.01) return "0.01";
-  return "0.1";
+async function assertGeoEligible() {
+  const res = await fetch(POLYMARKET_GEOBLOCK_URL, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error("Could not verify whether trading is available in your region");
+  }
+  const data: { blocked?: boolean } = await res.json();
+  if (data.blocked) {
+    throw new Error("Polymarket trading is not available in your region");
+  }
 }
 
 export function TradeButton({
@@ -54,10 +52,6 @@ export function TradeButton({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Markets inside ±1% of certainty can't be traded meaningfully — no
-  // counterparty will sell YES at 0.99 when the market is at ~1.00, and
-  // the inputs would be clamped to 0.99 anyway. Hide the button rather
-  // than render a dead UI element on resolved/near-resolved markets.
   if (marketPrice >= 0.99 || marketPrice <= 0.01) {
     return null;
   }
@@ -70,77 +64,35 @@ export function TradeButton({
       direction,
     });
     try {
-      // Parallel fetch: PolyScope's market detail (for question) and
-      // Polymarket Gamma (for token IDs, tick size, neg-risk). We
-      // cross-validate the token IDs from both sources before signing.
-      // Without Gamma cross-validation the wallet popup would show a
-      // 77-digit token ID with no way for the user to know whether the
-      // backend is returning the *correct* token for the question they
-      // see — classic blind-signing attack surface.
-      const [psRes, gammaRes] = await Promise.all([
-        fetch(`${API_BASE}/api/market/${marketId}`),
-        fetch(
-          `${GAMMA_HOST}/markets?condition_ids=${encodeURIComponent(marketId)}&limit=1`,
-        ),
-      ]);
-      if (!psRes.ok) throw new Error(`PolyScope API ${psRes.status}`);
-      if (!gammaRes.ok) throw new Error(`Polymarket API ${gammaRes.status}`);
+      await assertGeoEligible();
 
-      const psData: MarketDetailResp = await psRes.json();
-      const gammaArr: GammaMarket[] = await gammaRes.json();
-      const gamma = Array.isArray(gammaArr) ? gammaArr[0] : null;
-
-      if (!gamma || gamma.conditionId?.toLowerCase() !== marketId.toLowerCase()) {
-        throw new Error("Market not found on Polymarket");
-      }
-      if (gamma.closed) throw new Error("Market is closed");
-      if (gamma.enableOrderBook === false || gamma.acceptingOrders === false) {
-        throw new Error("Polymarket isn't accepting orders on this market right now");
+      const res = await fetch(
+        `${API_BASE}/api/market/${encodeURIComponent(marketId)}/trade`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `PolyScope API ${res.status}`);
       }
 
-      // Parse Gamma's clobTokenIds — it's a JSON-stringified array
-      // ["<yesId>", "<noId>"]. Position 0 is YES; position 1 is NO.
-      let gammaYesToken: string | undefined;
-      let gammaNoToken: string | undefined;
-      try {
-        const parsed = JSON.parse(gamma.clobTokenIds || "[]") as string[];
-        gammaYesToken = parsed[0];
-        gammaNoToken = parsed[1];
-      } catch {
-        throw new Error("Polymarket returned malformed token IDs");
-      }
-      if (!gammaYesToken || !gammaNoToken) {
-        throw new Error("Polymarket has no CLOB tokens for this market");
+      const data: MarketTradeResp = await res.json();
+      if (!data.accepting_orders) {
+        throw new Error("Polymarket is not accepting orders on this market right now");
       }
 
-      const psYesToken = psData.market?.token_id_yes;
-      const psNoToken = psData.market?.token_id_no;
-      // If PolyScope's cache disagrees with Polymarket itself, do not
-      // sign — refuse the trade. Either our cache is stale or
-      // something is wrong; we'd rather block than let the user sign
-      // a different token than expected.
-      if (psYesToken && psYesToken !== gammaYesToken) {
-        throw new Error("Token ID mismatch — refresh and retry");
-      }
-      if (psNoToken && psNoToken !== gammaNoToken) {
-        throw new Error("Token ID mismatch — refresh and retry");
-      }
-
-      const tick = tickSizeFromGamma(gamma.orderPriceMinTickSize);
-      const tickFloor = Number(tick); // smallest valid price on this market
+      const tickFloor = Number(data.tick_size);
       const tickCeil = 1 - tickFloor;
-      const clamp = (p: number) =>
-        Math.max(tickFloor, Math.min(tickCeil, p));
+      const clamp = (p: number) => Math.max(tickFloor, Math.min(tickCeil, p));
 
       if (direction === "YES") {
-        setTokenId(gammaYesToken);
-        setSuggestedPrice(clamp(marketPrice));
+        setTokenId(data.tokens.YES);
+        setSuggestedPrice(clamp(data.market.price_yes));
       } else {
-        setTokenId(gammaNoToken);
-        setSuggestedPrice(clamp(1 - marketPrice));
+        setTokenId(data.tokens.NO);
+        setSuggestedPrice(clamp(1 - data.market.price_yes));
       }
-      setTickSize(tick);
-      setNegRisk(Boolean(gamma.negRisk));
+      setTickSize(data.tick_size);
+      setNegRisk(data.neg_risk);
       setOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load market");
@@ -157,7 +109,7 @@ export function TradeButton({
         className="px-3 py-1.5 text-xs font-medium bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 rounded-lg hover:bg-emerald-500/25 disabled:opacity-60 transition-colors"
         title="Route an attributed order through PolyScope"
       >
-        {loading ? "Loading…" : `Trade ${direction}`}
+        {loading ? "Loading..." : `Trade ${direction}`}
       </button>
       {error && <span className="text-xs text-red-400">{error}</span>}
       {open && tokenId && (

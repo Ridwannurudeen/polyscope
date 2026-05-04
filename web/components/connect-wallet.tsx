@@ -1,13 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { isValidEvmAddress, shortAddress, useIdentity } from "@/lib/identity";
+import { useAccount, useConnect, useSignMessage } from "wagmi";
+import {
+  buildWalletLinkMessage,
+  isValidEvmAddress,
+  shortAddress,
+  useIdentity,
+} from "@/lib/identity";
+import { getClientId } from "@/lib/client-id";
 import { trackEvent } from "@/lib/analytics";
 
 export function ConnectWallet() {
-  const { walletAddress, linkWallet, unlinkWallet, linking } = useIdentity();
+  const { clientId, walletAddress, linkWallet, unlinkWallet, linking } =
+    useIdentity();
+  const { address, isConnected } = useAccount();
+  const { connectors, connectAsync, status: connectStatus } = useConnect();
+  const { signMessageAsync } = useSignMessage();
   const [open, setOpen] = useState(false);
-  const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -24,18 +34,38 @@ export function ConnectWallet() {
 
   async function submit() {
     setError(null);
-    if (!isValidEvmAddress(input)) {
-      setError("paste a valid 0x… address");
-      return;
+    try {
+      let wallet = address;
+      if (!isConnected || !wallet) {
+        const injected = connectors.find((c) => c.type === "injected") ?? connectors[0];
+        if (!injected) {
+          throw new Error("No browser wallet found");
+        }
+        const connected = await connectAsync({ connector: injected });
+        wallet = connected.accounts[0];
+      }
+      if (!wallet || !isValidEvmAddress(wallet)) {
+        throw new Error("Connected wallet is not a valid EVM address");
+      }
+
+      const cid = clientId || getClientId();
+      const domain = window.location.host;
+      const issuedAt = Math.floor(Date.now() / 1000);
+      const message = buildWalletLinkMessage(cid, wallet, domain, issuedAt);
+      const signature = await signMessageAsync({ message });
+      const result = await linkWallet(wallet, {
+        domain,
+        issuedAt,
+        signature,
+      });
+      if (!result.ok) {
+        throw new Error(result.error || "link failed");
+      }
+      trackEvent("wallet_linked", { method: "signature" });
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "link failed");
     }
-    const result = await linkWallet(input);
-    if (!result.ok) {
-      setError(result.error || "link failed");
-      return;
-    }
-    trackEvent("wallet_linked", { method: "paste" });
-    setInput("");
-    setOpen(false);
   }
 
   if (walletAddress) {
@@ -56,9 +86,7 @@ export function ConnectWallet() {
               {walletAddress}
             </p>
             <p className="text-micro text-ink-400 mb-4 leading-relaxed">
-              Your watchlist and portfolio history is tied to this wallet.
-              Log in from another device with the same wallet and it&apos;ll
-              follow you.
+              Your watchlist and portfolio history is tied to this verified wallet.
             </p>
             <button
               onClick={() => {
@@ -76,48 +104,30 @@ export function ConnectWallet() {
     );
   }
 
+  const busy = linking || connectStatus === "pending";
+
   return (
     <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="btn-secondary"
-      >
+      <button onClick={() => setOpen((v) => !v)} className="btn-secondary">
         link wallet
       </button>
       {open && (
         <div className="absolute right-0 mt-2 w-72 surface-elevated rounded-md shadow-elevated p-4 z-50">
           <div className="eyebrow mb-2">link wallet</div>
           <p className="text-micro text-ink-400 mb-3 leading-relaxed">
-            Paste your Polymarket wallet address to carry your watchlist
-            and portfolio across devices. Read-only identity — we never
-            sign or send transactions.
+            Connect and sign a read-only message to carry your watchlist and
+            portfolio across devices. No transaction is sent.
           </p>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
-            placeholder="0x…"
-            spellCheck={false}
-            autoComplete="off"
-            className="w-full h-8 px-2.5 text-body-sm font-mono num bg-background border border-ink-700 text-ink-100 rounded-md focus:outline-none focus:border-scope-500/60 placeholder:text-ink-500 mb-2"
-            autoFocus
-          />
           {error && (
             <p className="text-micro text-alert-500 mb-2 font-mono">{error}</p>
           )}
           <button
             onClick={submit}
-            disabled={linking || !input}
+            disabled={busy}
             className="btn-primary w-full"
           >
-            {linking ? "linking…" : "link"}
+            {busy ? "linking..." : "connect and sign"}
           </button>
-          <p className="text-micro text-ink-500 mt-3 font-mono">
-            privy wallet connect · next release
-          </p>
         </div>
       )}
     </div>

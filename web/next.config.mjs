@@ -1,6 +1,23 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  poweredByHeader: false,
+  outputFileTracingRoot: __dirname,
+
+  async rewrites() {
+    const apiUrl = process.env.POLYSCOPE_API_URL || "http://localhost:8020";
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${apiUrl}/api/:path*`,
+      },
+    ];
+  },
 
   // @polymarket/clob-client-v2 imports `node:crypto` (and a few other Node
   // built-ins) from its utilities module. That breaks the browser bundle
@@ -9,6 +26,16 @@ const nextConfig = {
   // order) so we can't just externalize it server-side. Polyfill the
   // handful of Node built-ins that clob-client-v2 touches.
   webpack: (config, { isServer, webpack }) => {
+    // Silence optional wallet connector/logger deps. PolyScope only
+    // configures the injected connector; the other connector packages
+    // are lazy optional imports that webpack still tries to resolve.
+    config.plugins.push(
+      new webpack.IgnorePlugin({
+        resourceRegExp:
+          /^(pino-pretty|@react-native-async-storage\/async-storage|accounts|@base-org\/account|@coinbase\/wallet-sdk|@metamask\/connect-evm|porto|porto\/internal|@safe-global\/safe-apps-sdk|@safe-global\/safe-apps-provider|@walletconnect\/ethereum-provider)$/,
+      }),
+    );
+
     if (!isServer) {
       const NODE_PREFIX_MAP = {
         crypto: "crypto-browserify",
@@ -36,16 +63,6 @@ const nextConfig = {
         new webpack.ProvidePlugin({
           Buffer: ["buffer", "Buffer"],
           process: "process/browser",
-        }),
-      );
-      // Silence optional deps pulled in by @metamask/sdk and pino /
-      // walletconnect logger. The libraries gracefully degrade when these
-      // can't be required; webpack only complains because it tries to
-      // resolve every static import path. IgnorePlugin makes them missing
-      // at bundle time, matching what the libraries already expect.
-      config.plugins.push(
-        new webpack.IgnorePlugin({
-          resourceRegExp: /^(pino-pretty|@react-native-async-storage\/async-storage)$/,
         }),
       );
     }

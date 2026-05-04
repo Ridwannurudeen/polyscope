@@ -218,8 +218,10 @@ export default function PortfolioPage() {
   }
 
   const removeFromWatchlist = async (id: number) => {
+    const qs = new URLSearchParams({ client_id: clientId });
+    if (walletAddress) qs.set("wallet_address", walletAddress);
     const r = await fetch(
-      `/api/watchlist/${id}?client_id=${encodeURIComponent(clientId)}`,
+      `/api/watchlist/${id}?${qs.toString()}`,
       { method: "DELETE" },
     );
     if (r.ok) {

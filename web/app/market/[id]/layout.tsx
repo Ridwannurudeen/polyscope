@@ -7,8 +7,9 @@ const API_BASE =
 export async function generateMetadata({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }): Promise<Metadata> {
+  const { id } = await params;
   let title = "Market — PolyScope";
   let description =
     "Counter-consensus signal with full evidence trail on PolyScope.";
@@ -17,7 +18,7 @@ export async function generateMetadata({
   // get conditionally reassigned below from the fetched signal.
 
   try {
-    const r = await fetch(`${API_BASE}/api/signals/evidence/${params.id}`, {
+    const r = await fetch(`${API_BASE}/api/signals/evidence/${id}`, {
       cache: "no-store",
     });
     if (r.ok) {
@@ -33,8 +34,8 @@ export async function generateMetadata({
     // Use defaults
   }
 
-  const ogUrl = `${SITE}/og/signal/${params.id}`;
-  const pageUrl = `${SITE}/market/${params.id}`;
+  const ogUrl = `${SITE}/og/signal/${id}`;
+  const pageUrl = `${SITE}/market/${id}`;
 
   return {
     title,

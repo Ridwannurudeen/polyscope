@@ -36,6 +36,8 @@ interface LeaderboardResponse {
   min_signals: number;
 }
 
+const EMPTY_TRADER_ACCURACY: TraderAccuracy[] = [];
+
 function formatAddress(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
@@ -64,8 +66,8 @@ export default function TradersPage() {
     60_000,
   );
 
-  const predictiveTraders = predictive?.traders || [];
-  const antiTraders = antiPredictive?.traders || [];
+  const predictiveTraders = predictive?.traders ?? EMPTY_TRADER_ACCURACY;
+  const antiTraders = antiPredictive?.traders ?? EMPTY_TRADER_ACCURACY;
 
   if (loading) {
     return (

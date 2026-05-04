@@ -27,9 +27,9 @@ function directionColor(direction: string): string {
 
 export async function GET(
   _req: Request,
-  { params }: { params: { marketId: string } }
+  { params }: { params: Promise<{ marketId: string }> }
 ) {
-  const marketId = params.marketId;
+  const { marketId } = await params;
 
   let signal: {
     question: string;

@@ -21,9 +21,9 @@ function shortAddr(addr: string) {
 
 export async function GET(
   _req: Request,
-  { params }: { params: { address: string } }
+  { params }: { params: Promise<{ address: string }> }
 ) {
-  const address = params.address;
+  const { address } = await params;
   let accuracyPct: number | null = null;
   let totalSignals = 0;
   let correct = 0;
