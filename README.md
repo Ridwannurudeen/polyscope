@@ -53,7 +53,7 @@ The core insight driving the product: Polymarket's built-in leaderboard ranks by
             │             │             │
             ▼             ▼             ▼
    ┌───────────────┐ ┌─────────┐ ┌──────────────┐
-   │  Next.js 14   │ │ Telegram│ │  REST API    │
+   │  Next.js 15   │ │ Telegram│ │  REST API    │
    │  (web/)       │ │  Bot    │ │  /api/*      │
    │  Dashboard    │ │ Alerts  │ │              │
    └───────────────┘ └─────────┘ └──────────────┘
@@ -64,7 +64,7 @@ The core insight driving the product: Polymarket's built-in leaderboard ranks by
 | Component | Stack | Port | Role |
 |-----------|-------|------|------|
 | `api` | FastAPI + SQLite + APScheduler | 8020→8021 | Signal generation, data capture, REST API |
-| `web` | Next.js 14 + Tailwind + Recharts | 3020 | Dashboard UI |
+| `web` | Next.js 15 + Tailwind + Recharts + wagmi | 3020 | Dashboard UI + browser-signed CLOB orders |
 | `bot` | python-telegram-bot | — | Whale-flow alerts |
 
 All services run as Docker containers behind nginx with TLS.
@@ -146,7 +146,61 @@ Exposes api:8021, web:3020. Edit `docker-compose.yml` for local ports.
 
 ### Environment
 
-Copy `.env.example` to `.env` — see the bot container env for Telegram alert configuration.
+Copy `.env.example` to `.env`.
+
+Required for production:
+
+| Variable | Purpose |
+|----------|---------|
+| `TELEGRAM_BOT_TOKEN` | Telegram alert bot token |
+| `POLYMARKET_BUILDER_CODE` | Public Builder Code baked into browser-signed CLOB orders |
+| `POLYSCOPE_ADMIN_TOKEN` | Admin dashboard token, sent via `X-Admin-Token` header |
+
+Recommended for production:
+
+| Variable | Purpose |
+|----------|---------|
+| `POLYMARKET_BUILDER_API_KEY` | Builder API key for syncing attributed trades |
+| `POLYMARKET_BUILDER_API_SECRET` | Builder API secret for syncing attributed trades |
+| `POLYMARKET_BUILDER_PASSPHRASE` | Builder API passphrase for syncing attributed trades |
+| `POLYMARKET_CLOB_HOST` | CLOB host, defaults to `https://clob.polymarket.com` |
+
+Optional server-side/admin trading variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `POLYMARKET_PRIVATE_KEY` | Server-side admin order signer. Not required for browser trading |
+| `POLYMARKET_FUNDER_ADDRESS` | Server-side funder address |
+| `POLYMARKET_SIGNATURE_TYPE` | Server-side CLOB signature type |
+| `POLYMARKET_MAX_ORDER_USDC` | Server-side admin order notional cap |
+
+Browser trading is non-custodial: users sign wallet-link messages and CLOB
+orders in their own wallet. The removed `/api/sign` route is intentionally not
+part of the runtime.
+
+### Production smoke
+
+After deploy, run:
+
+```bash
+python scripts/production_smoke.py --base-url https://polyscope.gudman.xyz
+```
+
+With admin metrics:
+
+```bash
+python scripts/production_smoke.py \
+  --base-url https://polyscope.gudman.xyz \
+  --admin-token "$POLYSCOPE_ADMIN_TOKEN"
+```
+
+The smoke script checks the web pages, Builder Code identity, public builder
+trades, admin header auth when a token is provided, server-side trade metadata
+for a live market, and Polymarket's geoblock endpoint. Wallet-link signing and
+actual order placement remain manual checks because they require user approval.
+
+See [`docs/production-runbook.md`](docs/production-runbook.md) for the deploy,
+smoke, wallet, trading, demo, and security checklist.
 
 ---
 
