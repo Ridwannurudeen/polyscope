@@ -82,6 +82,29 @@ def check_web_pages(base_url: str) -> None:
         ok(f"GET {path}")
 
 
+def check_public_intelligence_endpoints(base_url: str) -> None:
+    checks = {
+        "/api/divergences": ("signals",),
+        "/api/methodology/stats": ("signals",),
+        "/api/signals/accuracy": ("overall", "by_tier"),
+        "/api/scan/latest": ("divergences", "sources"),
+        "/api/movers?timeframe=24h": ("movers",),
+        "/api/markets?limit=5": ("markets", "total"),
+    }
+    for path, required_keys in checks.items():
+        data = request_json(base_url, path)
+        for key in required_keys:
+            if key not in data:
+                raise SmokeFailure(f"{path}: missing {key}")
+        source = data.get("source")
+        if source is not None and not isinstance(source, str):
+            raise SmokeFailure(f"{path}: invalid source metadata")
+        stale = data.get("stale")
+        if stale is not None and not isinstance(stale, bool):
+            raise SmokeFailure(f"{path}: invalid stale metadata")
+        ok(path)
+
+
 def check_builder(base_url: str, require_builder: bool) -> str | None:
     status = request_json(base_url, "/api/builder/status")
     identity = request_json(base_url, "/api/builder/identity")
@@ -202,6 +225,7 @@ def main() -> int:
     base_url = args.base_url.rstrip("/")
     try:
         check_web_pages(base_url)
+        check_public_intelligence_endpoints(base_url)
         builder_code = check_builder(base_url, not args.allow_unconfigured_builder)
         check_orders_config(base_url, builder_code, args.require_server_trading)
         check_public_builder_trades(base_url)

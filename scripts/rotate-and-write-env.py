@@ -9,7 +9,9 @@ Stdout prints only an OK marker and key-length summaries — never the
 secret values. The fresh creds are appended to /app/.env.builder-fragment
 which the caller scps out and merges into /opt/polyscope/.env on the host.
 """
-import os, sys, traceback, json
+import os
+import sys
+import traceback
 
 
 def main():

@@ -26,8 +26,8 @@ export function ShareButton({
     question.length > 100 ? question.slice(0, 97) + "…" : question;
 
   const isVeryLopsided = marketPrice >= 0.9 || marketPrice <= 0.1;
-  const stance = isVeryLopsided ? "fades" : "follows";
-  const tweetText = `${shortQuestion}\n\nCrowd vs PolyScope — ${divPct}% divergence. PolyScope ${stance} SM: ${direction}.\n\n`;
+  const stance = isVeryLopsided ? "composition-risk" : "top-trader-side";
+  const tweetText = `${shortQuestion}\n\nCrowd vs PolyScope - ${divPct}% divergence. PolyScope labels ${direction} as ${stance}.\n\n`;
   const tweetIntent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}&url=${encodeURIComponent(marketUrl)}`;
 
   const tweet = () => {

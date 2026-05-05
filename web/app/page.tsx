@@ -162,8 +162,8 @@ export default function Dashboard() {
             cta="full"
           />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <TraderBoard side="predictive" title="follow" rows={predictive} />
-            <TraderBoard side="fade" title="fade" rows={fade} />
+            <TraderBoard side="predictive" title="highest accuracy" rows={predictive} />
+            <TraderBoard side="fade" title="lowest accuracy" rows={fade} />
           </div>
         </section>
       )}

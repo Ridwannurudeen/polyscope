@@ -147,8 +147,8 @@ app.add_middleware(
 )
 
 DISCLAIMER = (
-    "PolyScope provides market intelligence only. "
-    "It does not facilitate, recommend, or enable participation in prediction markets."
+    "PolyScope provides market intelligence and non-custodial workflow tools. "
+    "It is not financial advice and does not custody funds."
 )
 
 _CONDITION_ID_RE = re.compile(r"^[0-9a-zA-Z_-]{1,128}$")
@@ -188,6 +188,18 @@ def _with_public_cache_meta(
     else:
         data.pop("fallback_reason", None)
     return data
+
+
+def _cache_value_with_source(key: str, empty):
+    cached = cache.get(key)
+    if cached is not None:
+        return cached, "cache", False
+
+    stale = cache.get_stale(key)
+    if stale is not None:
+        return stale, "stale_cache", True
+
+    return empty, "unavailable", True
 
 
 async def _wait_for_public_task(
@@ -357,11 +369,14 @@ async def scan_latest():
     """Latest scan: divergences + movers + summary."""
     divergences = cache.get("divergences")
     source = "cache"
+    stale = False
+    fallback_reason = None
     if divergences is None:
         stale_divergences = cache.get_stale("divergences")
         if stale_divergences is not None:
             divergences = stale_divergences
             source = "stale_cache"
+            stale = True
         else:
             task = asyncio.create_task(_load_divergences_from_db())
             try:
@@ -377,29 +392,40 @@ async def scan_latest():
                         lambda done_task: _log_background_task_failure(
                             "Latest scan DB fallback", done_task
                         )
-                    )
+                )
                 divergences = []
                 source = "unavailable"
+                stale = True
+                fallback_reason = "timeout"
             else:
                 divergences, _expired_count = result
                 source = "db_fallback"
 
-    movers = cache.get("movers") or cache.get_stale("movers") or {}
-    markets = cache.get("markets") or cache.get_stale("markets") or []
+    movers, movers_source, movers_stale = _cache_value_with_source("movers", {})
+    markets, markets_source, markets_stale = _cache_value_with_source("markets", [])
 
     if source in {"db_fallback", "unavailable"}:
         div_out = divergences[:20]
     else:
         div_out = [asdict(d) for d in divergences[:20]]
 
-    return {
+    response = {
         "divergences": div_out,
         "movers_24h": [asdict(m) for m in (movers.get("24h") or [])[:10]],
         "total_markets": len(markets),
         "total_divergences": len(divergences),
         "source": source,
+        "stale": stale or movers_stale or markets_stale,
+        "sources": {
+            "divergences": source,
+            "movers": movers_source,
+            "markets": markets_source,
+        },
         "disclaimer": DISCLAIMER,
     }
+    if fallback_reason:
+        response["fallback_reason"] = fallback_reason
+    return response
 
 
 @app.get("/api/divergences")
@@ -470,12 +496,14 @@ async def divergences_history(limit: int = Query(50, le=200)):
 @app.get("/api/movers")
 async def get_movers(timeframe: str = Query("24h", pattern="^(1h|24h|7d)$")):
     """Biggest probability changes."""
-    movers = cache.get("movers") or {}
+    movers, source, stale = _cache_value_with_source("movers", {})
     tf_movers = movers.get(timeframe, [])
     return {
         "movers": [asdict(m) for m in tf_movers],
         "timeframe": timeframe,
         "count": len(tf_movers),
+        "source": source,
+        "stale": stale,
     }
 
 
@@ -486,7 +514,7 @@ async def list_markets(
     category: str | None = None,
 ):
     """Active markets with prices."""
-    markets = cache.get("markets") or []
+    markets, source, stale = _cache_value_with_source("markets", [])
     if category:
         markets = [m for m in markets if category.lower() in m.category.lower()]
     total = len(markets)
@@ -496,6 +524,8 @@ async def list_markets(
         "total": total,
         "limit": limit,
         "offset": offset,
+        "source": source,
+        "stale": stale,
     }
 
 
@@ -505,13 +535,15 @@ async def get_market(condition_id: str):
     if not _CONDITION_ID_RE.fullmatch(condition_id):
         return {"error": "Invalid condition ID"}
 
-    markets = cache.get("markets") or []
+    markets, _source, _stale = _cache_value_with_source("markets", [])
     market = next((m for m in markets if m.condition_id == condition_id), None)
     if not market:
         return {"error": "Market not found"}
 
     # Check for divergence signal on this market
-    divergences = cache.get("divergences") or []
+    divergences, _divergence_source, _divergence_stale = _cache_value_with_source(
+        "divergences", []
+    )
     signal = next((d for d in divergences if d.market_id == condition_id), None)
 
     # Get price history (cached 5 min to prevent upstream abuse)
@@ -619,7 +651,7 @@ async def get_market_trade(condition_id: str):
     if not _CONDITION_ID_RE.fullmatch(condition_id):
         raise HTTPException(status_code=400, detail="Invalid condition ID")
 
-    markets = cache.get("markets") or []
+    markets, _source, _stale = _cache_value_with_source("markets", [])
     market = next(
         (m for m in markets if m.condition_id.lower() == condition_id.lower()),
         None,
@@ -654,10 +686,12 @@ async def get_market_trade(condition_id: str):
 @app.get("/api/smart-money/feed")
 async def smart_money_feed():
     """Top trader positions (read-only)."""
-    leaderboard = cache.get("leaderboard") or []
+    leaderboard, source, stale = _cache_value_with_source("leaderboard", [])
     return {
         "traders": [asdict(t) for t in leaderboard[:50]],
         "count": len(leaderboard[:50]),
+        "source": source,
+        "stale": stale,
         "disclaimer": DISCLAIMER,
     }
 
@@ -665,10 +699,12 @@ async def smart_money_feed():
 @app.get("/api/smart-money/leaderboard")
 async def smart_money_leaderboard():
     """Top traders ranked by profit."""
-    leaderboard = cache.get("leaderboard") or []
+    leaderboard, source, stale = _cache_value_with_source("leaderboard", [])
     return {
         "traders": [asdict(t) for t in leaderboard],
         "count": len(leaderboard),
+        "source": source,
+        "stale": stale,
     }
 
 
@@ -680,8 +716,8 @@ async def traders_accuracy_leaderboard(
 ):
     """Traders ranked by per-signal predictive accuracy.
 
-    order=predictive      — highest accuracy first (the real smart money)
-    order=anti-predictive — lowest accuracy first (fade list)
+    order=predictive      — highest accuracy first
+    order=anti-predictive — lowest accuracy first
 
     Only traders with >= min_signals divergent positions are included.
     """
@@ -787,7 +823,7 @@ async def leaderboards_compare(
     leaders are missing from the P&L top entirely.
     """
     # P&L leaderboard from cache (kept fresh by fetch_leaderboard_job)
-    pl_traders = cache.get("leaderboard") or []
+    pl_traders, pl_source, pl_stale = _cache_value_with_source("leaderboard", [])
     pl_top = [
         {
             "rank": t.rank,
@@ -822,7 +858,7 @@ async def leaderboards_compare(
         else None
     )
 
-    # Which P&L leaders are anti-predictive (in fade list)?
+    # Which P&L leaders are low-accuracy on divergent signals?
     fade_addresses = {t["trader_address"].lower() for t in comp["accuracy_fade"]}
     pl_in_fade = [
         t for t in pl_top if t["address"].lower() in fade_addresses
@@ -846,6 +882,8 @@ async def leaderboards_compare(
         "accuracy_top_missing_from_pl": accuracy_missing_from_pl,
         "min_signals": min_signals,
         "limit": limit,
+        "pnl_source": pl_source,
+        "pnl_stale": pl_stale,
     }
 
 
@@ -1018,8 +1056,12 @@ async def calibration_by_category(category: str):
 @app.get("/api/events")
 async def list_events(limit: int = Query(20, le=50)):
     """Group markets by event — aggregate SM sentiment per event cluster."""
-    markets_list = cache.get("markets") or []
-    divergences = cache.get("divergences") or []
+    markets_list, _markets_source, _markets_stale = _cache_value_with_source(
+        "markets", []
+    )
+    divergences, _divergence_source, _divergence_stale = _cache_value_with_source(
+        "divergences", []
+    )
 
     # Build divergence lookup
     div_map = {d.market_id: d for d in divergences}

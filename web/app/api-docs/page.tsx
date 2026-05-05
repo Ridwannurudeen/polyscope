@@ -21,7 +21,7 @@ const ENDPOINTS: { group: string; items: Endpoint[] }[] = [
       {
         method: "GET",
         path: "/api/divergences",
-        desc: "Currently active counter-consensus signals. Each signal includes the contributors, the predictive-backed flag, market price, and SM-weighted consensus.",
+        desc: "Currently active counter-consensus signals. Each signal includes market price, top-trader weighted consensus, and a predictive_contributor when one clears the quality gate; full contributors are on the evidence endpoint.",
       },
       {
         method: "GET",
@@ -94,7 +94,7 @@ const ENDPOINTS: { group: string; items: Endpoint[] }[] = [
       {
         method: "GET",
         path: "/api/whale-flow",
-        desc: "Recent large-size smart-money trades. Empty until whales transact.",
+        desc: "Recent large-size top-trader entries. Empty until tracked leaderboard addresses transact.",
       },
     ],
   },

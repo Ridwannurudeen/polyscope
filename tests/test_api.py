@@ -106,6 +106,117 @@ async def test_markets_list(client):
 
 
 @pytest.mark.anyio
+async def test_markets_returns_stale_cache(client):
+    from api.cache import cache
+    from polyscope.models import Market
+
+    market = Market(
+        condition_id="stale-market",
+        question="Stale market?",
+        slug="stale-market",
+        category="crypto",
+        price_yes=0.52,
+        price_no=0.48,
+    )
+    cache.clear()
+    cache.set("markets", [market], ttl_seconds=-1)
+
+    try:
+        resp = await client.get("/api/markets?limit=5")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "stale_cache"
+    assert data["stale"] is True
+    assert data["total"] == 1
+    assert data["markets"][0]["condition_id"] == "stale-market"
+
+
+@pytest.mark.anyio
+async def test_movers_returns_stale_cache(client):
+    from api.cache import cache
+    from polyscope.models import MarketMover
+
+    mover = MarketMover(
+        market_id="stale-mover",
+        question="Stale mover?",
+        category="crypto",
+        price_now=0.61,
+        price_before=0.49,
+        change_pct=0.12,
+        timeframe="24h",
+        volume_24h=1000,
+    )
+    cache.clear()
+    cache.set("movers", {"24h": [mover]}, ttl_seconds=-1)
+
+    try:
+        resp = await client.get("/api/movers?timeframe=24h")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "stale_cache"
+    assert data["stale"] is True
+    assert data["count"] == 1
+    assert data["movers"][0]["market_id"] == "stale-mover"
+
+
+@pytest.mark.anyio
+async def test_scan_latest_exposes_component_sources(client):
+    from api.cache import cache
+    from polyscope.models import DivergenceSignal, Market, MarketMover
+
+    signal = DivergenceSignal(
+        market_id="stale-signal",
+        question="Stale signal?",
+        market_price=0.42,
+        sm_consensus=0.68,
+        divergence_pct=0.26,
+        score=72.0,
+        sm_trader_count=3,
+        sm_direction="YES",
+    )
+    market = Market(
+        condition_id="stale-signal",
+        question="Stale signal?",
+        slug="stale-signal",
+    )
+    mover = MarketMover(
+        market_id="stale-signal",
+        question="Stale signal?",
+        category="",
+        price_now=0.58,
+        price_before=0.42,
+        change_pct=0.16,
+        timeframe="24h",
+    )
+    cache.clear()
+    cache.set("divergences", [signal], ttl_seconds=-1)
+    cache.set("markets", [market], ttl_seconds=-1)
+    cache.set("movers", {"24h": [mover]}, ttl_seconds=-1)
+
+    try:
+        resp = await client.get("/api/scan/latest")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["stale"] is True
+    assert data["sources"] == {
+        "divergences": "stale_cache",
+        "movers": "stale_cache",
+        "markets": "stale_cache",
+    }
+    assert data["total_markets"] == 1
+    assert data["total_divergences"] == 1
+
+
+@pytest.mark.anyio
 async def test_trade_market_detail_validates_gamma_tokens(client, monkeypatch):
     from api.cache import cache
     import api.main as main

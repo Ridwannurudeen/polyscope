@@ -164,7 +164,7 @@ export async function GET() {
           </span>
           <span style={{ fontSize: 16, color: plInFade > 0 ? "#f87171" : "#6b7280" }}>
             {plInFade > 0
-              ? `${plInFade} P&L leader${plInFade === 1 ? "" : "s"} on the fade list`
+              ? `${plInFade} P&L leader${plInFade === 1 ? "" : "s"} in the lowest-accuracy set`
               : "Counter-consensus intelligence"}
           </span>
         </div>

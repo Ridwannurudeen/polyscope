@@ -258,7 +258,7 @@ export default function ComparePage() {
           <div className="surface rounded-lg">
             {data.pl_top_in_fade_list.length === 0 ? (
               <p className="px-4 py-4 text-body-sm text-ink-500 font-mono">
-                no overlap with the fade list yet
+                no overlap with the lowest-accuracy list yet
               </p>
             ) : (
               <table className="w-full text-body-sm">
@@ -280,7 +280,7 @@ export default function ComparePage() {
                         </Link>
                       </td>
                       <td className="px-3 py-3 text-right text-alert-500 font-mono text-eyebrow uppercase tracking-wider">
-                        on fade list
+                        lowest accuracy
                       </td>
                     </tr>
                   ))}

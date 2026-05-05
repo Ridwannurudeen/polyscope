@@ -51,10 +51,10 @@ export async function GET(
     accuracyPct === null
       ? "No scored signals yet"
       : accuracyPct >= 70
-        ? "Predictive smart money"
+        ? "High resolved accuracy"
         : accuracyPct >= 50
           ? "Mixed signal"
-          : "Anti-predictive — fade candidate";
+          : "Low resolved accuracy";
 
   return new ImageResponse(
     (

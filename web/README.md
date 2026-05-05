@@ -53,9 +53,9 @@ docker compose build web
 docker compose up -d web
 ```
 
-The project-level compose file sets `POLYSCOPE_API_URL=http://api:8020` for
-the web container so direct Docker access to `http://localhost:3020/api/*`
-rewrites to the API service.
+The project-level compose file passes `POLYSCOPE_API_URL=http://api:8020` into
+the web build and container so direct Docker access to
+`http://localhost:3020/api/*` rewrites to the API service.
 
 ## Conventions
 

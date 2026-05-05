@@ -77,8 +77,8 @@ def _esc(text: str) -> str:
     return text.translate(_MD_ESCAPE)
 
 DISCLAIMER = (
-    "\n\n_PolyScope provides market intelligence only\\. "
-    "It does not facilitate, recommend, or enable participation in prediction markets\\._"
+    "\n\n_PolyScope provides market intelligence and non\\-custodial workflow tools\\. "
+    "It is not financial advice and does not custody funds\\._"
 )
 
 
@@ -145,7 +145,7 @@ async def divergences(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(
             f"{arrow} *{q}*\n"
             f"  Market: {mp} YES\n"
-            f"  Smart Money: {sc} \\(favors {direction}\\)\n"
+            f"  Top traders: {sc} \\({direction}\\)\n"
             f"  Divergence: {dp} \\| Score: {score}/100\n"
             f"  Traders: {s['sm_trader_count']}\n"
         )
@@ -244,7 +244,7 @@ async def subscribe_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         finally:
             await db.close()
         await update.message.reply_text(
-            "Subscribed to whale alerts\\! You'll get notified when SM traders make large trades\\." + DISCLAIMER,
+            "Subscribed to whale alerts\\! You'll get notified when tracked top traders make large trades\\." + DISCLAIMER,
             parse_mode="MarkdownV2",
         )
     except Exception:
@@ -488,8 +488,8 @@ async def _build_digest() -> str:
     else:
         lines.append("_No active signals right now\\._")
 
-    # Predictive traders
-    lines.append("\n*Top Predictive Traders*")
+    # Highest-accuracy traders
+    lines.append("\n*Highest Accuracy Traders*")
     if predictive and predictive.get("traders"):
         for t in predictive["traders"]:
             addr = _esc(t["trader_address"][:6] + "…" + t["trader_address"][-4:])
@@ -499,8 +499,8 @@ async def _build_digest() -> str:
     else:
         lines.append("_Building leaderboard\\._")
 
-    # Fade traders
-    lines.append("\n*Top Traders to Fade*")
+    # Lowest-accuracy traders
+    lines.append("\n*Lowest Accuracy Traders*")
     if fade and fade.get("traders"):
         for t in fade["traders"]:
             addr = _esc(t["trader_address"][:6] + "…" + t["trader_address"][-4:])

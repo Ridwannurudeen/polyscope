@@ -22,6 +22,7 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
+        POLYSCOPE_API_URL: ${POLYSCOPE_API_URL:-http://api:8020}
         NEXT_PUBLIC_POLYMARKET_BUILDER_CODE: ${POLYMARKET_BUILDER_CODE:-}
         NEXT_PUBLIC_POLYMARKET_CLOB_HOST: ${POLYMARKET_CLOB_HOST:-https://clob.polymarket.com}
     environment:

@@ -13,8 +13,8 @@ Live: [polyscope.gudman.xyz](https://polyscope.gudman.xyz)
 - **Scans up to 500 active Polymarket markets every 5 minutes** for divergence between crowd consensus and top-100 trader positions
 - **Captures per-signal, per-trader attribution** — who positioned which way, at what size, at what rank
 - **Scores individual predictive accuracy** against resolved market outcomes
-- **Publishes two leaderboards**: genuinely predictive traders, and traders worth fading
-- **Surfaces full evidence trail** behind every divergence signal — contributors, hit rates, source, freshness
+- **Publishes two leaderboards**: highest-accuracy and lowest-accuracy traders on resolved divergent signals
+- **Surfaces the evidence trail** behind every divergence signal — contributor rows, hit rates, source, freshness
 
 The core insight driving the product: Polymarket's built-in leaderboard ranks by profit, not by prediction accuracy. Those aren't the same thing. A trader can be profitable on a few big wins while being anti-predictive on diverse positions. PolyScope measures the latter.
 
@@ -88,13 +88,13 @@ A signal fires when `|market_price - sm_consensus| ≥ 10%` AND the composite sc
 
 ### Contrarian direction
 
-Empirically validated on resolved signals: SM consensus is **skew-sensitive**, not mechanically contrarian. PolyScope fades very-lopsided aggregate SM consensus, follows stronger predictive contributors elsewhere, and exposes the market-skew caveats on [/methodology](https://polyscope.gudman.xyz/methodology).
+Empirically validated on resolved signals: top-trader consensus is **skew-sensitive**, not mechanically contrarian. PolyScope separates very-lopsided aggregate consensus from signals backed by stronger predictive contributors, and exposes the market-skew caveats on [/methodology](https://polyscope.gudman.xyz/methodology).
 
 ### Per-trader accuracy (live since Apr 12, 2026)
 
 Every signal persists the individual traders who contributed to it (`signal_trader_positions` table). Once markets resolve, each trader's direction is scored against the outcome. This produces `trader_accuracy` — the actual predictive hit rate per address, stratified by market skew band and category.
 
-The `/traders` page exposes this as two leaderboards: predictive (real smart money) and anti-predictive (systematic fade candidates).
+The `/traders` page exposes this as two leaderboards: highest-accuracy and lowest-accuracy addresses, with sample sizes and confidence intervals.
 
 ---
 
@@ -111,7 +111,7 @@ Selected public endpoints:
 | `GET /api/traders/{address}` | Individual trader profile with skew/category breakdown |
 | `GET /api/smart-money/leaderboard` | Raw Polymarket P&L leaderboard (for comparison) |
 | `GET /api/calibration` | Brier scores and calibration by category |
-| `GET /api/whale-flow` | Recent large-size smart money trades |
+| `GET /api/whale-flow` | Recent large-size entries from tracked top-trader addresses |
 
 Full OpenAPI spec at `/api/docs`.
 
@@ -221,7 +221,7 @@ PolyScope has converted from read-only analytics into an **execution-native inte
 
 - **Evidence Layer** ✓ — per-signal attribution with contributor accuracy
 - **Methodology Page** ✓ — honest public documentation of findings, dynamic stats
-- **Decision Cards** ✓ — workflow-grade signal display with thesis, invalidators, confidence tier
+- **Decision Cards** ✓ — workflow-grade signal display with thesis, invalidators, confidence tier, and historical exposure context
 - **Portfolio Layer** ✓ — anonymous client_id watchlist + trade log, PnL estimate, outcome scoring
 - **Builder Integration** ✓ — Builder Code attribution configured, browser wallet-connect CLOB order construction for EOA and user-provided Safe funder paths, user geoblock check, server-side Gamma token validation, attributed-trade sync job
 - **Predictive-contributor filter** ✓ — Wilson-95% gated trader leaderboard surfaces signals backed by genuinely predictive addresses

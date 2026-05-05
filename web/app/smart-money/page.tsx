@@ -205,7 +205,7 @@ export default function SmartMoneyPage() {
                   ? "bg-scope-500/15 border border-scope-500/45 text-scope-300"
                   : "border border-ink-700 text-ink-400 hover:text-ink-100 hover:border-ink-600"
               }`}
-              title="Backtest · predictive-backed signals: +14.9% ROI on 33 signals vs +4.2% unfiltered"
+              title="Show only signals with a qualifying predictive contributor"
             >
               predictive-backed only
               {predictiveCount > 0 && (

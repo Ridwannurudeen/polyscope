@@ -20,7 +20,7 @@ import { useBandStats } from "@/lib/hooks";
  *  2. Question    — promoted to h3 so it dominates
  *  3. Readout grid — crowd · polyscope · divergence (3 mono cells, the data, no prose)
  *  4. Action bar  — watch · trade · log · share
- *  5. Size hint   — quarter-Kelly suggestion when band has resolved samples
+ *  5. Size hint   — historical exposure context when band has resolved samples
  *  6. Disclosure  — single mono row "[+] evidence"
  *
  * Compared to the previous version: 6 stacked padded sections collapsed to
@@ -42,12 +42,12 @@ function tierFromScore(score: number): {
 function skewFromPrice(price: number): {
   band: "tight" | "moderate" | "lopsided" | "very_lopsided";
   label: string;
-  followSm: boolean;
+  skewRisk: boolean;
 } {
-  if (price >= 0.9 || price <= 0.1) return { band: "very_lopsided", label: "very lopsided", followSm: false };
-  if (price >= 0.75 || price <= 0.25) return { band: "lopsided", label: "lopsided", followSm: true };
-  if (price >= 0.6 || price <= 0.4) return { band: "moderate", label: "moderate", followSm: true };
-  return { band: "tight", label: "tight", followSm: true };
+  if (price >= 0.9 || price <= 0.1) return { band: "very_lopsided", label: "very lopsided", skewRisk: true };
+  if (price >= 0.75 || price <= 0.25) return { band: "lopsided", label: "lopsided", skewRisk: false };
+  if (price >= 0.6 || price <= 0.4) return { band: "moderate", label: "moderate", skewRisk: false };
+  return { band: "tight", label: "tight", skewRisk: false };
 }
 
 function freshness(timestamp: string): { label: string; stale: boolean } {
@@ -189,7 +189,7 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
       <div className="px-4 pb-4 grid grid-cols-3 gap-4">
         <ReadoutCell label="crowd" value={crowdPct} />
         <ReadoutCell
-          label={`polyscope · ${skew.followSm ? "follow" : "fade"}`}
+          label={`polyscope · ${skew.skewRisk ? "skew risk" : "top-trader side"}`}
           value={`${signal.sm_direction} ${smPct}`}
           tone={dirTone}
         />

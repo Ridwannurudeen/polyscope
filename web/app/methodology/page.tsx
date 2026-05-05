@@ -250,10 +250,10 @@ export default function MethodologyPage() {
           almost always wins anyway.
         </p>
         <p>
-          The live strategy now follows that finding:{" "}
+          The live signal view now labels that finding:{" "}
           <span className="text-ink-100 font-medium">
-            fade SM on very-lopsided (composition play), follow SM everywhere
-            else (real alpha).
+            very-lopsided markets as composition-risk, and other bands as
+            top-trader-side observations.
           </span>{" "}
           On the 1,556-market backtest at finalization, this flipped net ROI
           from −2.6% to +3.9% at the same 97% headline hit rate. §4 below

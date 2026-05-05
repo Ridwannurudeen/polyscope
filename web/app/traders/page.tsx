@@ -101,7 +101,7 @@ export default function TradersPage() {
     <div>
       <PageHeader
         title="leaderboard"
-        sub="Top-100 Polymarket addresses ranked by accuracy on resolved counter-consensus positions, not P&L."
+        sub="Top-100 Polymarket addresses ranked by resolved counter-consensus accuracy, not P&L. Low sample sizes are provisional."
         right={
           <div className="flex items-center gap-2">
             <span className="eyebrow">min signals</span>
@@ -133,14 +133,14 @@ export default function TradersPage() {
       ) : (
         <div className="grid lg:grid-cols-2 gap-6">
           <TraderTable
-            title="predictive · follow"
-            sub="positions match actual outcomes — real smart money"
+            title="highest accuracy"
+            sub="resolved divergent positions ranked best first"
             rows={predictiveTraders}
             side="predictive"
           />
           <TraderTable
-            title="anti-predictive · fade"
-            sub="consistently wrong when they diverge from market"
+            title="lowest accuracy"
+            sub="resolved divergent positions ranked worst first"
             rows={antiTraders}
             side="fade"
           />
