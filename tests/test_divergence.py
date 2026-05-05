@@ -272,6 +272,24 @@ class TestComputeDivergence:
         if signal:
             assert signal.divergence_pct < 0.15
 
+    def test_signal_carries_market_quality_metrics(self):
+        """Signal records market OI + 24h volume so the methodology query
+        can apply the quality gate without aggregating market_snapshots."""
+        market = _make_market(
+            price_yes=0.70, open_interest=420_000, volume_24h=85_000
+        )
+        traders = {f"0x{i}": _make_trader(f"0x{i}", i + 1) for i in range(10)}
+        positions = [
+            _make_position(f"0x{i}", "0xabc123", "NO", size=5000, avg_price=0.70)
+            for i in range(10)
+        ]
+        config = DivergenceConfig(min_sm_traders=3, min_score=0)
+
+        signal = compute_divergence(market, positions, traders, config)
+        assert signal is not None
+        assert signal.open_interest == 420_000.0
+        assert signal.volume_24h == 85_000.0
+
     def test_insufficient_traders(self):
         """Too few SM traders — no signal."""
         market = _make_market(price_yes=0.70)

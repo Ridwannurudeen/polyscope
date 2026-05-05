@@ -140,6 +140,8 @@ def compute_divergence(
         sm_direction=sm_direction,
         category=market.category,
         signal_source=signal_source,
+        open_interest=float(market.open_interest or 0.0),
+        volume_24h=float(market.volume_24h or 0.0),
     )
 
 

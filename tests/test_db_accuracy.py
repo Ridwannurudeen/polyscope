@@ -7,6 +7,7 @@ import aiosqlite
 from api.database import (
     _compute_predictive_filter_stats,
     add_to_watchlist,
+    cleanup_old_snapshots,
     emit_follow_alerts_for_signal,
     expire_converged_signals,
     follow_trader,
@@ -391,6 +392,105 @@ async def test_save_divergence_signal_returns_id(db):
     signal_id = await save_divergence_signal(db, signal)
     await db.commit()
     assert signal_id > 0
+
+
+@pytest.mark.anyio
+async def test_save_divergence_signal_persists_market_quality(db):
+    """OI/volume on the signal dict get written to the new columns so the
+    methodology query can drop the market_snapshots aggregate JOIN."""
+    signal = {
+        "market_id": "m_q",
+        "timestamp": "2026-04-12T00:00:00+00:00",
+        "market_price": 0.6,
+        "sm_consensus": 0.8,
+        "divergence_pct": 0.2,
+        "score": 75.0,
+        "sm_trader_count": 3,
+        "sm_direction": "NO",
+        "question": "Test?",
+        "category": "crypto",
+        "signal_source": "positions",
+        "open_interest": 123_456.0,
+        "volume_24h": 78_900.0,
+    }
+    signal_id = await save_divergence_signal(db, signal)
+    await db.commit()
+    cursor = await db.execute(
+        "SELECT open_interest, volume_24h FROM divergence_signals WHERE id = ?",
+        (signal_id,),
+    )
+    row = await cursor.fetchone()
+    assert row[0] == 123_456.0
+    assert row[1] == 78_900.0
+
+
+@pytest.mark.anyio
+async def test_cleanup_old_snapshots_chunked_deletes_old_only(db):
+    """Cleanup deletes rows older than the threshold and returns the count.
+    Recent rows survive so live data isn't lost."""
+    await db.execute(
+        """INSERT INTO market_snapshots
+           (market_id, timestamp, question, category, price_yes, volume_24h,
+            open_interest, sm_yes_pct, sm_trader_count, divergence_score)
+           VALUES
+           ('mA', '2024-01-01T00:00:00+00:00', 'Q', 'c', 0.5, 1, 1, 0.5, 1, 0),
+           ('mA', '2024-06-01T00:00:00+00:00', 'Q', 'c', 0.5, 1, 1, 0.5, 1, 0),
+           ('mB', strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'Q', 'c', 0.5, 1, 1, 0.5, 1, 0),
+           ('mB', strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 days'), 'Q', 'c', 0.5, 1, 1, 0.5, 1, 0)"""
+    )
+    await db.commit()
+
+    deleted = await cleanup_old_snapshots(db, days=30, batch_size=1)
+
+    assert deleted == 2
+    cursor = await db.execute("SELECT COUNT(*) FROM market_snapshots")
+    remaining = (await cursor.fetchone())[0]
+    assert remaining == 2
+
+
+@pytest.mark.anyio
+async def test_cleanup_old_snapshots_noop_when_all_recent(db):
+    """If nothing matches the threshold, return 0 and don't loop forever."""
+    await db.execute(
+        """INSERT INTO market_snapshots
+           (market_id, timestamp, question, category, price_yes, volume_24h,
+            open_interest, sm_yes_pct, sm_trader_count, divergence_score)
+           VALUES ('mA', strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                   'Q', 'c', 0.5, 1, 1, 0.5, 1, 0)"""
+    )
+    await db.commit()
+
+    deleted = await cleanup_old_snapshots(db, days=30)
+
+    assert deleted == 0
+
+
+@pytest.mark.anyio
+async def test_save_divergence_signal_market_quality_optional(db):
+    """Legacy callers that don't set OI/volume produce NULL columns, which
+    the methodology query coerces to 0 via COALESCE."""
+    signal = {
+        "market_id": "m_legacy",
+        "timestamp": "2026-04-12T00:00:00+00:00",
+        "market_price": 0.6,
+        "sm_consensus": 0.8,
+        "divergence_pct": 0.2,
+        "score": 75.0,
+        "sm_trader_count": 3,
+        "sm_direction": "NO",
+        "question": "Test?",
+        "category": "crypto",
+        "signal_source": "positions",
+    }
+    signal_id = await save_divergence_signal(db, signal)
+    await db.commit()
+    cursor = await db.execute(
+        "SELECT open_interest, volume_24h FROM divergence_signals WHERE id = ?",
+        (signal_id,),
+    )
+    row = await cursor.fetchone()
+    assert row[0] is None
+    assert row[1] is None
 
 
 @pytest.mark.anyio
@@ -1375,10 +1475,12 @@ async def _insert_resolved_signal(
         """INSERT INTO divergence_signals
            (market_id, timestamp, market_price, sm_consensus, divergence_pct,
             signal_strength, sm_trader_count, sm_direction, question, category,
-            resolved, outcome_correct, expired, signal_source)
+            resolved, outcome_correct, expired, signal_source,
+            open_interest, volume_24h)
            VALUES (?, datetime('now'), ?, 0.7, 0.2, ?, 3, ?, 'Q', 'crypto',
-                   1, ?, 0, 'positions')""",
-        (market_id, market_price, score, sm_direction, outcome_correct),
+                   1, ?, 0, 'positions', ?, ?)""",
+        (market_id, market_price, score, sm_direction, outcome_correct,
+         open_interest, volume_24h),
     )
     signal_id = cursor.lastrowid
     await db.execute(

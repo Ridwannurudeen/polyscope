@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS divergence_signals (
     question TEXT,
     category TEXT,
     resolved INTEGER DEFAULT 0,
-    outcome_correct INTEGER
+    outcome_correct INTEGER,
+    open_interest REAL,
+    volume_24h REAL
 );
 
 CREATE TABLE IF NOT EXISTS sm_trades (
@@ -266,6 +268,7 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_market_ts ON market_snapshots(market_id
 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON market_snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_ts ON divergence_signals(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_market ON divergence_signals(market_id);
+CREATE INDEX IF NOT EXISTS idx_signals_resolved ON divergence_signals(resolved, outcome_correct);
 CREATE INDEX IF NOT EXISTS idx_sm_market ON sm_positions(market_id);
 CREATE INDEX IF NOT EXISTS idx_sm_trader ON sm_positions(trader_address);
 CREATE INDEX IF NOT EXISTS idx_sm_trades_market ON sm_trades(market_id);
@@ -320,6 +323,12 @@ async def migrate_db(db: aiosqlite.Connection):
         await db.execute("ALTER TABLE divergence_signals ADD COLUMN expired_at TEXT")
     if "signal_source" not in cols:
         await db.execute("ALTER TABLE divergence_signals ADD COLUMN signal_source TEXT DEFAULT 'positions'")
+    # OI/volume snapshot at signal time. Lets the methodology backtest
+    # apply quality gates without aggregating market_snapshots (4M+ rows).
+    if "open_interest" not in cols:
+        await db.execute("ALTER TABLE divergence_signals ADD COLUMN open_interest REAL")
+    if "volume_24h" not in cols:
+        await db.execute("ALTER TABLE divergence_signals ADD COLUMN volume_24h REAL")
 
     # Wallet-linked identity — watchlist + user_actions get wallet_address.
     # client_id stays for anonymous fallback and as the merge key when a
@@ -469,8 +478,8 @@ async def save_divergence_signal(db: aiosqlite.Connection, signal: dict) -> int:
         """INSERT INTO divergence_signals
            (market_id, timestamp, market_price, sm_consensus, divergence_pct,
             signal_strength, sm_trader_count, sm_direction, question, category,
-            signal_source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            signal_source, open_interest, volume_24h)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             signal["market_id"],
             signal["timestamp"],
@@ -483,6 +492,8 @@ async def save_divergence_signal(db: aiosqlite.Connection, signal: dict) -> int:
             signal.get("question"),
             signal.get("category"),
             signal.get("signal_source", "positions"),
+            signal.get("open_interest"),
+            signal.get("volume_24h"),
         ),
     )
     return cursor.lastrowid or 0
@@ -695,13 +706,41 @@ async def get_resolved_markets(db: aiosqlite.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def cleanup_old_snapshots(db: aiosqlite.Connection, days: int = 30):
-    """Remove snapshots older than N days to control DB size."""
-    await db.execute(
-        "DELETE FROM market_snapshots WHERE timestamp < datetime('now', ?)",
-        (f"-{days} days",),
+async def cleanup_old_snapshots(
+    db: aiosqlite.Connection, days: int = 30, batch_size: int = 5000
+) -> int:
+    """Remove snapshots older than N days to control DB size.
+
+    Deletes in batches so the writer doesn't hold the lock long enough to
+    starve readers. App timestamps are ISO with `T` separator; we use the
+    same format for the threshold so string comparison works correctly.
+    Returns total rows deleted.
+    """
+    threshold = (
+        await (
+            await db.execute(
+                "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)",
+                (f"-{days} days",),
+            )
+        ).fetchone()
     )
-    await db.commit()
+    cutoff = threshold[0] if threshold else None
+    if not cutoff:
+        return 0
+
+    total = 0
+    while True:
+        cursor = await db.execute(
+            "DELETE FROM market_snapshots WHERE id IN ("
+            "SELECT id FROM market_snapshots WHERE timestamp < ? LIMIT ?)",
+            (cutoff, batch_size),
+        )
+        deleted = cursor.rowcount or 0
+        await db.commit()
+        total += deleted
+        if deleted < batch_size:
+            break
+    return total
 
 
 async def save_resolved_market(db: aiosqlite.Connection, market: dict):
@@ -1679,24 +1718,18 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
         {qualifying_traders, signals, hits, win_pct, roi_pct, by_band}
     """
     # Resolved signals (best per market by signal_strength to mirror backtest).
-    # Joins market_snapshots so we can apply the same OI/volume gate the
-    # backtest uses — without it, thin markets with prices near 0 pollute
-    # the ROI tally with returns that wouldn't be fillable in reality.
+    # OI/volume are denormalized onto divergence_signals at signal-creation
+    # time, so this is a simple scan of resolved rows. Pre-denorm rows
+    # (open_interest IS NULL) get backfilled by scripts/backfill_signal_market_quality.py;
+    # any still-NULL rows are excluded from the quality gate (treated as 0).
     cursor = await db.execute(
-        """SELECT ds.id, ds.market_id, ds.market_price, ds.sm_direction,
-                  ds.outcome_correct, ds.signal_strength,
-                  COALESCE(ms.open_interest, 0) AS open_interest,
-                  COALESCE(ms.volume_24h, 0) AS volume_24h
-           FROM divergence_signals ds
-           LEFT JOIN (
-               SELECT market_id,
-                      MAX(open_interest) AS open_interest,
-                      MAX(volume_24h) AS volume_24h
-               FROM market_snapshots
-               GROUP BY market_id
-           ) ms ON ms.market_id = ds.market_id
-           WHERE ds.resolved = 1 AND ds.outcome_correct IS NOT NULL
-                 AND (ds.expired = 0 OR ds.expired IS NULL)"""
+        """SELECT id, market_id, market_price, sm_direction,
+                  outcome_correct, signal_strength,
+                  COALESCE(open_interest, 0) AS open_interest,
+                  COALESCE(volume_24h, 0) AS volume_24h
+           FROM divergence_signals
+           WHERE resolved = 1 AND outcome_correct IS NOT NULL
+                 AND (expired = 0 OR expired IS NULL)"""
     )
     raw = await cursor.fetchall()
     if not raw:
