@@ -5,16 +5,63 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 
 import httpx
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 API_BASE = os.getenv("POLYSCOPE_API_URL", "http://localhost:8020")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+
+_TELEGRAM_API_URL_RE = re.compile(r"https://api\.telegram\.org/bot[^\s\"'<>)]*")
+_TELEGRAM_BOT_TOKEN_RE = re.compile(r"\b\d{5,}:[A-Za-z0-9_-]{20,}\b")
+_THIRD_PARTY_LOGGERS = ("httpx", "httpcore", "telegram")
+
+
+def _redact_log_value(value: object, bot_token: str | None = None) -> object:
+    if not isinstance(value, str):
+        return value
+
+    token = BOT_TOKEN if bot_token is None else bot_token
+    redacted = _TELEGRAM_API_URL_RE.sub("[telegram-api-url-redacted]", value)
+    if token:
+        redacted = redacted.replace(token, "[telegram-bot-token-redacted]")
+    return _TELEGRAM_BOT_TOKEN_RE.sub("[telegram-bot-token-redacted]", redacted)
+
+
+class _TelegramLogSanitizer(logging.Filter):
+    def __init__(self, bot_token: str) -> None:
+        super().__init__()
+        self.bot_token = bot_token
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _redact_log_value(record.getMessage(), self.bot_token)
+        record.args = ()
+        if record.exc_info:
+            record.exc_text = _redact_log_value(
+                logging.Formatter().formatException(record.exc_info),
+                self.bot_token,
+            )
+        if record.stack_info:
+            record.stack_info = _redact_log_value(record.stack_info, self.bot_token)
+        return True
+
+
+def _configure_logging() -> None:
+    logging.basicConfig(level=logging.INFO)
+
+    sanitizer = _TelegramLogSanitizer(BOT_TOKEN)
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, _TelegramLogSanitizer) for f in handler.filters):
+            handler.addFilter(sanitizer)
+
+    for logger_name in _THIRD_PARTY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
+_configure_logging()
+logger = logging.getLogger(__name__)
 
 _MD_ESCAPE = str.maketrans({
     "_": r"\_", "*": r"\*", "[": r"\[", "]": r"\]",

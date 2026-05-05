@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import re
 import time
 from contextlib import asynccontextmanager
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -22,7 +24,6 @@ from .database import (
     get_db,
     get_divergence_history,
     get_divergence_signals,
-    get_predictive_contributors_for_markets,
     get_expired_signal_count,
     get_follow_alerts,
     get_followed_traders,
@@ -47,7 +48,6 @@ from .database import (
     builder_trades_stats,
     list_builder_orders,
     list_builder_trades,
-    mark_alerts_notified,
     mark_alerts_seen,
     record_builder_order_attempt,
     record_event,
@@ -85,6 +85,7 @@ async def _run_initial_scans():
         logger.exception("Initial scan failed")
 
 scheduler = AsyncIOScheduler()
+SCHEDULER_DISABLED_VALUES = {"1", "true", "yes", "on"}
 
 
 @asynccontextmanager
@@ -92,32 +93,38 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
 
-    # Schedule jobs
-    scheduler.add_job(fetch_markets_job, "interval", minutes=5, id="fetch_markets")
-    scheduler.add_job(fetch_leaderboard_job, "interval", minutes=10, id="fetch_leaderboard")
-    scheduler.add_job(compute_divergences_job, "interval", minutes=5, id="compute_divergences")
-    scheduler.add_job(detect_movers_job, "interval", minutes=5, id="detect_movers")
-    scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes")
-    scheduler.add_job(detect_whale_trades_job, "interval", minutes=2, id="detect_whales")
-    scheduler.add_job(sync_builder_orders_job, "interval", seconds=60, id="sync_builder_orders")
-    scheduler.add_job(sync_attributed_trades_job, "interval", minutes=3, id="sync_builder_trades")
-    scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
-    scheduler.start()
+    scheduler_disabled = (
+        os.getenv("POLYSCOPE_DISABLE_SCHEDULER", "").strip().lower()
+        in SCHEDULER_DISABLED_VALUES
+    )
+    if scheduler_disabled:
+        logger.info("Scheduler disabled by POLYSCOPE_DISABLE_SCHEDULER")
+    else:
+        # Schedule jobs
+        scheduler.add_job(fetch_markets_job, "interval", minutes=5, id="fetch_markets")
+        scheduler.add_job(fetch_leaderboard_job, "interval", minutes=10, id="fetch_leaderboard")
+        scheduler.add_job(compute_divergences_job, "interval", minutes=5, id="compute_divergences")
+        scheduler.add_job(detect_movers_job, "interval", minutes=5, id="detect_movers")
+        scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes")
+        scheduler.add_job(detect_whale_trades_job, "interval", minutes=2, id="detect_whales")
+        scheduler.add_job(sync_builder_orders_job, "interval", seconds=60, id="sync_builder_orders")
+        scheduler.add_job(sync_attributed_trades_job, "interval", minutes=3, id="sync_builder_trades")
+        scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
+        scheduler.start()
 
-    # Run initial fetch (markets + leaderboard synchronously so API has data)
-    logger.info("Running initial data fetch...")
-    await fetch_markets_job()
-    await fetch_leaderboard_job()
+        # Run initial fetch (markets + leaderboard synchronously so API has data)
+        logger.info("Running initial data fetch...")
+        await fetch_markets_job()
+        await fetch_leaderboard_job()
 
-    # Run heavy scans in background so uvicorn starts immediately
-    import asyncio
-
-    asyncio.create_task(_run_initial_scans())
+        # Run heavy scans in background so uvicorn starts immediately
+        asyncio.create_task(_run_initial_scans())
 
     yield
 
     # Shutdown
-    scheduler.shutdown(wait=False)
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
     await close_client()
     cache.clear()
 
@@ -148,6 +155,196 @@ _CONDITION_ID_RE = re.compile(r"^[0-9a-zA-Z_-]{1,128}$")
 _GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 _WALLET_LINK_TTL_SECONDS = 300
 _WALLET_LINK_DOMAINS = {"polyscope.gudman.xyz", "testserver"}
+_PUBLIC_READ_BUSY_TIMEOUT_MS = 1000
+_PUBLIC_STATS_TTL_SECONDS = 600
+_PUBLIC_PARTIAL_STATS_TTL_SECONDS = 60
+_PUBLIC_STATS_DEADLINE_SECONDS = 2.0
+_PUBLIC_CACHE_REFRESH_TASKS: dict[str, asyncio.Task] = {}
+
+
+async def _get_public_read_db():
+    db = await get_db()
+    await db.execute(f"PRAGMA busy_timeout={_PUBLIC_READ_BUSY_TIMEOUT_MS}")
+    return db
+
+
+def _with_public_cache_meta(
+    payload: dict,
+    *,
+    source: str,
+    stale: bool,
+    partial: bool | None = None,
+    fallback_reason: str | None = None,
+) -> dict:
+    data = dict(payload)
+    data["source"] = source
+    data["stale"] = stale
+    if partial is not None:
+        data["partial"] = partial
+    elif "partial" in data:
+        data["partial"] = bool(data["partial"])
+    if fallback_reason:
+        data["fallback_reason"] = fallback_reason
+    else:
+        data.pop("fallback_reason", None)
+    return data
+
+
+async def _wait_for_public_task(
+    task: asyncio.Task, timeout_seconds: float
+) -> dict | tuple[list[dict], int] | None:
+    done, _pending = await asyncio.wait({task}, timeout=timeout_seconds)
+    if task not in done:
+        return None
+    return task.result()
+
+
+def _log_background_task_failure(task_name: str, done_task: asyncio.Task) -> None:
+    if done_task.cancelled():
+        return
+    try:
+        done_task.result()
+    except Exception:
+        logger.warning("%s failed", task_name, exc_info=True)
+
+
+def _ensure_public_cache_refresh(
+    cache_key: str, loader, ttl_seconds: int
+) -> asyncio.Task:
+    existing = _PUBLIC_CACHE_REFRESH_TASKS.get(cache_key)
+    if existing is not None and not existing.done():
+        return existing
+
+    async def _refresh():
+        result = await loader()
+        cache.set(cache_key, result, ttl_seconds=ttl_seconds)
+        return result
+
+    task = asyncio.create_task(_refresh())
+    _PUBLIC_CACHE_REFRESH_TASKS[cache_key] = task
+
+    def _on_done(done_task: asyncio.Task):
+        if _PUBLIC_CACHE_REFRESH_TASKS.get(cache_key) is done_task:
+            _PUBLIC_CACHE_REFRESH_TASKS.pop(cache_key, None)
+        _log_background_task_failure(f"Public cache refresh for {cache_key}", done_task)
+
+    task.add_done_callback(_on_done)
+    return task
+
+
+async def _load_methodology_stats(include_predictive_filter: bool = True) -> dict:
+    db = await _get_public_read_db()
+    try:
+        return await get_methodology_stats(
+            db, include_predictive_filter=include_predictive_filter
+        )
+    finally:
+        await db.close()
+
+
+async def _load_signals_accuracy(include_simulation: bool = True) -> dict:
+    db = await _get_public_read_db()
+    try:
+        stats = await get_signal_accuracy(db)
+        if include_simulation:
+            stats["simulation"] = await get_signal_pnl_simulation(db)
+        return stats
+    finally:
+        await db.close()
+
+
+def _empty_methodology_stats() -> dict:
+    return {
+        "available": False,
+        "signals": {
+            "total": 0,
+            "resolved": 0,
+            "correct": 0,
+            "overall_win_rate_pct": None,
+            "first_captured": None,
+            "latest_captured": None,
+        },
+        "skew_breakdown": {},
+        "resolved_markets": 0,
+        "per_trader": {
+            "records_captured": 0,
+            "traders_scored": 0,
+            "avg_accuracy_pct": None,
+        },
+    }
+
+
+def _empty_signals_accuracy() -> dict:
+    empty_tier = {"total": 0, "correct": 0, "win_rate": 0.0}
+    return {
+        "available": False,
+        "overall": {
+            "total_signals": 0,
+            "correct": 0,
+            "win_rate": 0.0,
+            "avg_score": 0.0,
+        },
+        "by_tier": {
+            "high": dict(empty_tier),
+            "medium": dict(empty_tier),
+            "low": dict(empty_tier),
+        },
+        "by_skew": {
+            "very_lopsided": dict(empty_tier),
+            "lopsided": dict(empty_tier),
+            "moderate": dict(empty_tier),
+            "tight": dict(empty_tier),
+        },
+        "rolling_30d": dict(empty_tier),
+    }
+
+
+def _serialize_divergence_signals(
+    divergences, predictive: dict[str, dict] | None = None
+) -> list[dict]:
+    predictive = predictive or {}
+    signals = []
+    for item in divergences:
+        signal = asdict(item) if is_dataclass(item) else dict(item)
+        signal.setdefault(
+            "predictive_contributor",
+            predictive.get(signal.get("market_id")),
+        )
+        signals.append(signal)
+    return signals
+
+
+def _divergences_response(
+    signals: list[dict],
+    *,
+    source: str,
+    stale: bool,
+    expired_count: int | None,
+    fallback_reason: str | None = None,
+) -> dict:
+    response = {
+        "signals": signals,
+        "count": len(signals),
+        "expired_count": expired_count,
+        "expired_count_source": "db" if expired_count is not None else "unavailable",
+        "source": source,
+        "stale": stale,
+        "disclaimer": DISCLAIMER,
+    }
+    if fallback_reason:
+        response["fallback_reason"] = fallback_reason
+    return response
+
+
+async def _load_divergences_from_db() -> tuple[list[dict], int]:
+    db = await _get_public_read_db()
+    try:
+        rows = await get_divergence_signals(db, limit=50, hours=1)
+        expired_count = await get_expired_signal_count(db)
+        cache.set("divergences_expired_count", expired_count, ttl_seconds=300)
+        return rows, expired_count
+    finally:
+        await db.close()
 
 
 @app.get("/")
@@ -161,18 +358,36 @@ async def scan_latest():
     divergences = cache.get("divergences")
     source = "cache"
     if divergences is None:
-        db = await get_db()
-        try:
-            rows = await get_divergence_signals(db, limit=50, hours=1)
-            divergences = rows
-            source = "db_fallback"
-        finally:
-            await db.close()
+        stale_divergences = cache.get_stale("divergences")
+        if stale_divergences is not None:
+            divergences = stale_divergences
+            source = "stale_cache"
+        else:
+            task = asyncio.create_task(_load_divergences_from_db())
+            try:
+                result = await _wait_for_public_task(
+                    task, _PUBLIC_STATS_DEADLINE_SECONDS
+                )
+            except Exception as e:
+                logger.warning("Latest scan DB fallback failed: %s", e)
+                result = None
+            if result is None:
+                if not task.done():
+                    task.add_done_callback(
+                        lambda done_task: _log_background_task_failure(
+                            "Latest scan DB fallback", done_task
+                        )
+                    )
+                divergences = []
+                source = "unavailable"
+            else:
+                divergences, _expired_count = result
+                source = "db_fallback"
 
-    movers = cache.get("movers") or {}
-    markets = cache.get("markets") or []
+    movers = cache.get("movers") or cache.get_stale("movers") or {}
+    markets = cache.get("markets") or cache.get_stale("markets") or []
 
-    if source == "db_fallback":
+    if source in {"db_fallback", "unavailable"}:
         div_out = divergences[:20]
     else:
         div_out = [asdict(d) for d in divergences[:20]]
@@ -191,53 +406,54 @@ async def scan_latest():
 async def get_divergences():
     """Current counter-consensus signals."""
     divergences = cache.get("divergences")
-    source = "cache"
+    expired_count = cache.get("divergences_expired_count")
+    predictive = cache.get("divergence_predictive_contributors") or {}
 
-    db = await get_db()
+    if divergences is not None:
+        return _divergences_response(
+            _serialize_divergence_signals(divergences, predictive),
+            source="cache",
+            stale=False,
+            expired_count=expired_count,
+        )
+
+    stale_divergences = cache.get_stale("divergences")
+    if stale_divergences is not None:
+        return _divergences_response(
+            _serialize_divergence_signals(stale_divergences, predictive),
+            source="stale_cache",
+            stale=True,
+            expired_count=expired_count,
+        )
+
+    task = asyncio.create_task(_load_divergences_from_db())
     try:
-        expired_count = await get_expired_signal_count(db)
-    finally:
-        await db.close()
-
-    if divergences is None:
-        db = await get_db()
-        try:
-            rows = await get_divergence_signals(db, limit=50, hours=1)
-            market_ids = [r.get("market_id") for r in rows if r.get("market_id")]
-            predictive = await get_predictive_contributors_for_markets(
-                db, market_ids
+        result = await _wait_for_public_task(task, _PUBLIC_STATS_DEADLINE_SECONDS)
+    except Exception as e:
+        logger.warning("Divergence DB fallback failed: %s", e)
+        result = None
+    if result is None:
+        if not task.done():
+            task.add_done_callback(
+                lambda done_task: _log_background_task_failure(
+                    "Divergence DB fallback", done_task
+                )
             )
-            for r in rows:
-                r["predictive_contributor"] = predictive.get(r.get("market_id"))
-            return {
-                "signals": rows,
-                "count": len(rows),
-                "expired_count": expired_count,
-                "source": "db_fallback",
-                "disclaimer": DISCLAIMER,
-            }
-        finally:
-            await db.close()
+        return _divergences_response(
+            [],
+            source="unavailable",
+            stale=True,
+            expired_count=None,
+            fallback_reason="timeout",
+        )
 
-    signals = [asdict(d) for d in divergences]
-    market_ids = [s["market_id"] for s in signals if s.get("market_id")]
-    if market_ids:
-        db = await get_db()
-        try:
-            predictive = await get_predictive_contributors_for_markets(
-                db, market_ids
-            )
-        finally:
-            await db.close()
-        for s in signals:
-            s["predictive_contributor"] = predictive.get(s.get("market_id"))
-    return {
-        "signals": signals,
-        "count": len(signals),
-        "expired_count": expired_count,
-        "source": source,
-        "disclaimer": DISCLAIMER,
-    }
+    rows, db_expired_count = result
+    return _divergences_response(
+        _serialize_divergence_signals(rows),
+        source="db_fallback",
+        stale=False,
+        expired_count=db_expired_count,
+    )
 
 
 @app.get("/api/divergences/history")
@@ -504,14 +720,49 @@ async def methodology_stats():
     """Live dataset statistics for the public methodology page."""
     cached = cache.get("methodology_stats")
     if cached is not None:
-        return cached
-    db = await get_db()
+        return _with_public_cache_meta(cached, source="cache", stale=False)
+
+    stale = cache.get_stale("methodology_stats")
+    _ensure_public_cache_refresh(
+        "methodology_stats",
+        _load_methodology_stats,
+        _PUBLIC_STATS_TTL_SECONDS,
+    )
+    if stale is not None:
+        return _with_public_cache_meta(stale, source="stale_cache", stale=True)
+
+    task = asyncio.create_task(
+        _load_methodology_stats(include_predictive_filter=False)
+    )
     try:
-        result = await get_methodology_stats(db)
-    finally:
-        await db.close()
-    cache.set("methodology_stats", result, ttl_seconds=600)
-    return result
+        result = await _wait_for_public_task(task, _PUBLIC_STATS_DEADLINE_SECONDS)
+    except Exception as e:
+        logger.warning("Methodology partial stats failed: %s", e)
+        result = None
+
+    if result is None:
+        if not task.done():
+            task.add_done_callback(
+                lambda done_task: _log_background_task_failure(
+                    "Methodology partial stats", done_task
+                )
+            )
+        return _with_public_cache_meta(
+            _empty_methodology_stats(),
+            source="unavailable",
+            stale=True,
+            partial=True,
+            fallback_reason="timeout",
+        )
+
+    result["partial"] = True
+    if cache.get("methodology_stats") is None:
+        cache.set(
+            "methodology_stats",
+            result,
+            ttl_seconds=_PUBLIC_PARTIAL_STATS_TTL_SECONDS,
+        )
+    return _with_public_cache_meta(result, source="db_partial", stale=False)
 
 
 @app.get("/api/search")
@@ -688,17 +939,47 @@ async def signals_accuracy():
     """Signal track record — win rates by tier, rolling 30-day, and simulated P&L."""
     cached = cache.get("signals_accuracy")
     if cached is not None:
-        return cached
+        return _with_public_cache_meta(cached, source="cache", stale=False)
 
-    db = await get_db()
+    stale = cache.get_stale("signals_accuracy")
+    _ensure_public_cache_refresh(
+        "signals_accuracy",
+        _load_signals_accuracy,
+        _PUBLIC_STATS_TTL_SECONDS,
+    )
+    if stale is not None:
+        return _with_public_cache_meta(stale, source="stale_cache", stale=True)
+
+    task = asyncio.create_task(_load_signals_accuracy(include_simulation=False))
     try:
-        stats = await get_signal_accuracy(db)
-        simulation = await get_signal_pnl_simulation(db)
-        stats["simulation"] = simulation
-        cache.set("signals_accuracy", stats, ttl_seconds=600)
-        return stats
-    finally:
-        await db.close()
+        stats = await _wait_for_public_task(task, _PUBLIC_STATS_DEADLINE_SECONDS)
+    except Exception as e:
+        logger.warning("Signals accuracy partial stats failed: %s", e)
+        stats = None
+
+    if stats is None:
+        if not task.done():
+            task.add_done_callback(
+                lambda done_task: _log_background_task_failure(
+                    "Signals accuracy partial stats", done_task
+                )
+            )
+        return _with_public_cache_meta(
+            _empty_signals_accuracy(),
+            source="unavailable",
+            stale=True,
+            partial=True,
+            fallback_reason="timeout",
+        )
+
+    stats["partial"] = True
+    if cache.get("signals_accuracy") is None:
+        cache.set(
+            "signals_accuracy",
+            stats,
+            ttl_seconds=_PUBLIC_PARTIAL_STATS_TTL_SECONDS,
+        )
+    return _with_public_cache_meta(stats, source="db_partial", stale=False)
 
 
 @app.get("/api/calibration/category/{category}")
@@ -818,7 +1099,7 @@ async def whale_flow_pending():
 # convenience layer, not an identity system.
 
 
-import re as _re
+import re as _re  # noqa: E402
 
 # EVM address: 0x + 40 hex chars. Case-insensitive; we lower() on write.
 _EVM_ADDR_RE = r"^0x[a-fA-F0-9]{40}$"
@@ -1001,8 +1282,8 @@ async def portfolio(
         await db.close()
 
 
-import asyncio as _asyncio
-import sqlite3 as _sqlite3
+import asyncio as _asyncio  # noqa: E402
+import sqlite3 as _sqlite3  # noqa: E402
 
 
 async def _retry_on_locked(op_name: str, coro_factory):
@@ -1174,7 +1455,7 @@ async def follow_alerts_mark_seen(
 
 # ── Polymarket builder-attribution signing ─────────────────
 
-from .polymarket_signing import (
+from .polymarket_signing import (  # noqa: E402
     get_builder_code,
     is_builder_code_configured,
 )
@@ -1201,11 +1482,11 @@ async def builder_identity():
 
 # ── Attributed order submission (Phase B) ──────────────────
 
-import os as _os
-import json as _json
-from fastapi import Header
+import os as _os  # noqa: E402
+import json as _json  # noqa: E402
+from fastapi import Header  # noqa: E402
 
-from .polymarket_trading import (
+from .polymarket_trading import (  # noqa: E402
     OrderCapExceeded,
     TradingConfigError,
     is_trading_configured,

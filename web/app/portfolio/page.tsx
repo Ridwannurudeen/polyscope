@@ -242,8 +242,8 @@ export default function PortfolioPage() {
         title="portfolio"
         sub={
           walletAddress
-            ? `Watched signals and logged trades · linked to ${shortAddress(walletAddress)}.`
-            : "Watched signals and logged trades · stored anonymously on this browser. Link a wallet to sync."
+            ? `Watchlist, followed-trader alerts, and manual trade log linked to ${shortAddress(walletAddress)}.`
+            : "Watchlist, followed-trader alerts, and manual trade log stored on this browser. Link a wallet to sync."
         }
       />
 
@@ -252,14 +252,14 @@ export default function PortfolioPage() {
           <div className="eyebrow mb-3">empty</div>
           <p className="text-body text-ink-300 mb-2">nothing here yet</p>
           <p className="text-caption text-ink-400 font-mono">
-            watch signals from{" "}
+            Use the watch or log trade buttons on signal cards from{" "}
             <Link
               href="/smart-money"
               className="text-scope-500 hover:text-scope-400 underline underline-offset-2"
             >
               /smart-money
             </Link>
-            , or log trades from any decision card
+            .
           </p>
         </div>
       ) : (

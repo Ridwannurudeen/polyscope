@@ -31,6 +31,50 @@ export interface DivergenceSignal {
   predictive_contributor?: PredictiveContributor | null;
 }
 
+function signalTimestampMs(signal: { timestamp?: string }): number {
+  const ms = Date.parse(signal.timestamp ?? "");
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+function isPreferredSignal(
+  candidate: { timestamp?: string; score?: number; divergence_pct?: number },
+  current: { timestamp?: string; score?: number; divergence_pct?: number },
+): boolean {
+  const candidateTs = signalTimestampMs(candidate);
+  const currentTs = signalTimestampMs(current);
+  if (candidateTs !== currentTs) return candidateTs > currentTs;
+
+  const candidateScore = candidate.score ?? Number.NEGATIVE_INFINITY;
+  const currentScore = current.score ?? Number.NEGATIVE_INFINITY;
+  if (candidateScore !== currentScore) return candidateScore > currentScore;
+
+  const candidateDiv = candidate.divergence_pct ?? Number.NEGATIVE_INFINITY;
+  const currentDiv = current.divergence_pct ?? Number.NEGATIVE_INFINITY;
+  return candidateDiv > currentDiv;
+}
+
+export function dedupeSignalsByMarket<
+  T extends {
+    market_id: string;
+    timestamp?: string;
+    score?: number;
+    divergence_pct?: number;
+  },
+>(signals: readonly T[]): T[] {
+  const bestByMarket = new Map<string, T>();
+  for (const signal of signals) {
+    const current = bestByMarket.get(signal.market_id);
+    if (!current || isPreferredSignal(signal, current)) {
+      bestByMarket.set(signal.market_id, signal);
+    }
+  }
+  return Array.from(bestByMarket.values()).sort((a, b) => {
+    if (isPreferredSignal(a, b)) return -1;
+    if (isPreferredSignal(b, a)) return 1;
+    return 0;
+  });
+}
+
 export interface WhaleAlert {
   id: number;
   trader_address: string;

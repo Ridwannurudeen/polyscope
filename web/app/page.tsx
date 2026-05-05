@@ -11,6 +11,7 @@ import { SignalTrackRecord } from "@/components/signal-track-record";
 import { DashboardSkeleton } from "@/components/skeleton";
 import { WhaleFlow } from "@/components/whale-flow";
 import { usePollingFetch } from "@/lib/hooks";
+import { dedupeSignalsByMarket } from "@/lib/api";
 import type { ScanResult, DivergenceSignal, MarketMover } from "@/lib/api";
 
 interface EventCluster {
@@ -127,7 +128,7 @@ export default function Dashboard() {
     );
   }
 
-  const divergences = data?.divergences || [];
+  const divergences = dedupeSignalsByMarket(data?.divergences || []);
   const movers = data?.movers_24h || [];
   const predictiveStrict = predictiveData?.traders || [];
   const fadeStrict = fadeData?.traders || [];
@@ -183,9 +184,9 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="surface rounded-lg overflow-hidden divide-y divide-ink-800">
-            {divergences.slice(0, 8).map((d: DivergenceSignal, i: number) => (
+            {divergences.slice(0, 8).map((d: DivergenceSignal) => (
               <Link
-                key={d.market_id + i}
+                key={d.market_id}
                 href={`/market/${d.market_id}`}
                 className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_auto] items-center gap-x-6 gap-y-2 px-5 py-4 row-hover-reveal"
               >

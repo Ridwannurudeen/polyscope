@@ -9,6 +9,7 @@ import { TableSkeleton } from "@/components/skeleton";
 import { useViewMode, ViewToggle } from "@/components/view-toggle";
 import { WhaleFlow } from "@/components/whale-flow";
 import { usePollingFetch } from "@/lib/hooks";
+import { dedupeSignalsByMarket } from "@/lib/api";
 import type { Trader, DivergenceSignal } from "@/lib/api";
 
 type DirectionFilter = "all" | "YES" | "NO";
@@ -86,8 +87,14 @@ export default function SmartMoneyPage() {
   );
 
   const traders = lbData?.traders ?? EMPTY_TRADERS;
-  const divergences = divData?.signals ?? EMPTY_DIVERGENCES;
-  const history = histData?.history ?? EMPTY_HISTORY;
+  const divergences = useMemo(
+    () => dedupeSignalsByMarket(divData?.signals ?? EMPTY_DIVERGENCES),
+    [divData?.signals],
+  );
+  const history = useMemo(
+    () => dedupeSignalsByMarket(histData?.history ?? EMPTY_HISTORY),
+    [histData?.history],
+  );
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -274,8 +281,8 @@ export default function SmartMoneyPage() {
                   : "space-y-3"
               }
             >
-              {filtered.map((d, i) => (
-                <DecisionCard key={d.market_id + i} signal={d} />
+              {filtered.map((d) => (
+                <DecisionCard key={d.market_id} signal={d} />
               ))}
             </div>
           )}
@@ -301,9 +308,9 @@ export default function SmartMoneyPage() {
                 </tr>
               </thead>
               <tbody>
-                {history.map((h, i) => (
+                {history.map((h) => (
                   <tr
-                    key={h.market_id + i}
+                    key={h.market_id}
                     className="border-b border-ink-800/60 last:border-0 row-hover"
                   >
                     <td className="px-4 py-3 text-ink-400 text-caption font-mono num whitespace-nowrap">

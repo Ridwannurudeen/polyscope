@@ -2,19 +2,16 @@
 
 import Link from "next/link";
 import { usePollingFetch } from "@/lib/hooks";
-import type { ScanResult, DivergenceSignal } from "@/lib/api";
+import { dedupeSignalsByMarket } from "@/lib/api";
+import type { ScanResult } from "@/lib/api";
 
 /**
- * Continuous horizontal marquee of live divergence signals. Pauses on
- * hover. Edges fade out via mask. Each item links to the market.
- *
- * Critical: we render the same items twice and translate -50% so the
- * loop is seamless. CSS animation with `prefers-reduced-motion` guard
- * (handled in globals).
+ * Horizontal strip of live divergence signals. Edges fade out via mask.
+ * Each item links to the market.
  */
 export function LiveTicker() {
   const { data } = usePollingFetch<ScanResult>("/api/scan/latest", 60_000);
-  const signals = (data?.divergences || []).slice(0, 14);
+  const signals = dedupeSignalsByMarket(data?.divergences || []).slice(0, 14);
 
   if (signals.length === 0) {
     return (
@@ -36,10 +33,10 @@ export function LiveTicker() {
         </span>
         <span className="eyebrow text-scope-500">live</span>
       </div>
-      <div className="marquee-track gap-10 pl-28">
-        {[...signals, ...signals].map((s: DivergenceSignal, i) => (
+      <div className="flex gap-10 pl-28">
+        {signals.map((s) => (
           <Link
-            key={`${s.market_id}-${i}`}
+            key={s.market_id}
             href={`/market/${s.market_id}`}
             className="flex items-center gap-3 text-body-sm text-ink-300 hover:text-ink-100 transition-colors shrink-0"
           >

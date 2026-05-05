@@ -10,6 +10,7 @@ from api.database import (
     emit_follow_alerts_for_signal,
     expire_converged_signals,
     follow_trader,
+    get_divergence_signals,
     get_expired_signal_count,
     get_follow_alerts,
     get_followed_traders,
@@ -21,7 +22,6 @@ from api.database import (
     get_trader_accuracy_leaderboard,
     get_trader_profile,
     get_watchlist,
-    init_db,
     is_following,
     link_wallet_to_client,
     mark_alerts_seen,
@@ -34,7 +34,6 @@ from api.database import (
     save_signal_trader_positions,
     unfollow_trader,
     update_signal_outcomes,
-    DB_PATH,
     SCHEMA,
 )
 
@@ -392,6 +391,31 @@ async def test_save_divergence_signal_returns_id(db):
     signal_id = await save_divergence_signal(db, signal)
     await db.commit()
     assert signal_id > 0
+
+
+@pytest.mark.anyio
+async def test_get_divergence_signals_returns_latest_active_per_market(db):
+    await db.execute(
+        """INSERT INTO divergence_signals
+           (market_id, timestamp, market_price, sm_consensus, divergence_pct,
+            signal_strength, sm_trader_count, sm_direction, question, category,
+            resolved, outcome_correct, expired, signal_source)
+           VALUES
+           ('m1', datetime('now', '-2 minutes'), 0.40, 0.70, 0.30, 90, 2,
+            'YES', 'old m1', 'crypto', 0, NULL, 0, 'positions'),
+           ('m1', datetime('now', '-1 minutes'), 0.42, 0.72, 0.30, 80, 2,
+            'YES', 'new m1', 'crypto', 0, NULL, 0, 'positions'),
+           ('m2', datetime('now', '-1 minutes'), 0.30, 0.60, 0.30, 95, 3,
+            'YES', 'resolved m2', 'crypto', 1, 1, 0, 'positions'),
+           ('m3', datetime('now', '-1 minutes'), 0.30, 0.60, 0.30, 95, 3,
+            'YES', 'expired m3', 'crypto', 0, NULL, 1, 'positions')"""
+    )
+    await db.commit()
+
+    rows = await get_divergence_signals(db, limit=10, hours=1)
+
+    assert [r["market_id"] for r in rows] == ["m1"]
+    assert rows[0]["question"] == "new m1"
 
 
 @pytest.mark.anyio
@@ -1131,7 +1155,7 @@ async def test_portfolio_handles_wrong_call(db):
 
 @pytest.mark.anyio
 async def test_get_signal_evidence_contributors_ordered_by_weight(db):
-    signal_id = await _seed_signal_with_traders(
+    await _seed_signal_with_traders(
         db, "mev3", 0.65, "crypto",
         [("0xlow", "YES"), ("0xhigh", "NO")],
     )
@@ -1161,7 +1185,7 @@ async def test_predictive_contributors_threshold(db):
     market = "mpred1"
 
     # One signal that attributes all three contributors to the same market.
-    signal_id = await _seed_signal_with_traders(
+    await _seed_signal_with_traders(
         db, market, 0.55, "crypto",
         [(strong, "YES"), (weak, "NO"), (thin, "YES")],
     )

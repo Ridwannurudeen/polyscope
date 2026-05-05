@@ -46,6 +46,7 @@ export default function MarketsPage() {
 
   const markets = data?.markets ?? EMPTY_MARKETS;
   const total = data?.total || 0;
+  const loadedCount = markets.length;
 
   const categorized = useMemo(
     () => markets.map((m) => ({ ...m, _cat: autoCategory(m.question) })),
@@ -85,6 +86,13 @@ export default function MarketsPage() {
             <p className="text-body-lg text-ink-300 mt-3 max-w-2xl">
               <span className="num text-ink-100">{total}</span> active
               prediction markets.
+              {loadedCount > 0 && total > loadedCount && (
+                <>
+                  {" "}Loaded{" "}
+                  <span className="num text-ink-100">{loadedCount}</span> for
+                  this view.
+                </>
+              )}
               {category && (
                 <>
                   {" "}showing <span className="num text-ink-100">{filtered.length}</span> in{" "}
@@ -127,9 +135,15 @@ export default function MarketsPage() {
 
       {searchQuery && (
         <p className="text-caption text-ink-400 font-mono mb-3">
-          <span className="num text-ink-200">{filtered.length}</span> of{" "}
-          <span className="num text-ink-200">{markets.length}</span> matching
-          “{searchQuery}”
+          <span className="num text-ink-200">{filtered.length}</span> results
+          in the loaded set (
+          <span className="num text-ink-200">{loadedCount}</span>
+          {total > loadedCount && (
+            <>
+              {" "}of <span className="num text-ink-200">{total}</span>
+            </>
+          )}{" "}
+          markets) for &quot;{searchQuery}&quot;
         </p>
       )}
 

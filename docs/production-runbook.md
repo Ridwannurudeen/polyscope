@@ -23,6 +23,12 @@ python scripts/production_smoke.py \
   --admin-token "$POLYSCOPE_ADMIN_TOKEN"
 ```
 
+For local smoke tests that should not kick off Polymarket polling jobs:
+
+```bash
+POLYSCOPE_DISABLE_SCHEDULER=1 python -m uvicorn api.main:app --port 8020
+```
+
 What it verifies:
 
 - Web routes: `/`, `/builder`, `/methodology`, `/terms`
@@ -75,6 +81,8 @@ For judges or grant review, lead with the implemented trust boundary:
 - Wallet-scoped watchlist, portfolio, follow, and alert endpoints reject unlinked wallet/client pairs.
 - The public `/api/sign` signing oracle is removed.
 - Admin metrics use `X-Admin-Token`; the token is not sent in the URL.
+- Bot logs redact Telegram Bot API URLs/tokens by default; rotate
+  `TELEGRAM_BOT_TOKEN` immediately if historical logs contain `/bot<token>/`.
 - Browser CLOB credentials are held in memory, not sessionStorage/localStorage.
 - Server-side private-key trading is optional and admin-gated; browser trading does not require server custody.
 - Nginx sets frame, content-type, referrer, and permissions-policy headers.

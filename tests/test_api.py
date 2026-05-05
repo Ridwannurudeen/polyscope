@@ -39,6 +39,41 @@ async def test_root(client):
 
 
 @pytest.mark.anyio
+async def test_lifespan_can_disable_scheduler(monkeypatch):
+    import api.main as main
+
+    calls = []
+
+    async def fake_init_db():
+        calls.append("init_db")
+
+    async def fake_close_client():
+        calls.append("close_client")
+
+    class FailScheduler:
+        running = False
+
+        def add_job(self, *args, **kwargs):
+            raise AssertionError("scheduler should be disabled")
+
+        def start(self):
+            raise AssertionError("scheduler should be disabled")
+
+        def shutdown(self, wait=False):
+            raise AssertionError("scheduler should not be running")
+
+    monkeypatch.setenv("POLYSCOPE_DISABLE_SCHEDULER", "1")
+    monkeypatch.setattr(main, "init_db", fake_init_db)
+    monkeypatch.setattr(main, "close_client", fake_close_client)
+    monkeypatch.setattr(main, "scheduler", FailScheduler())
+
+    async with main.lifespan(main.app):
+        calls.append("inside")
+
+    assert calls == ["init_db", "inside", "close_client"]
+
+
+@pytest.mark.anyio
 async def test_divergences_empty(client):
     resp = await client.get("/api/divergences")
     assert resp.status_code == 200
@@ -226,5 +261,148 @@ async def test_signals_accuracy(client):
     assert "rolling_30d" in data
     assert "total_signals" in data["overall"]
     assert "win_rate" in data["overall"]
+    for tier in ("high", "medium", "low"):
+        assert tier in data["by_tier"]
+
+
+def test_cache_get_stale_returns_expired_entry():
+    from api.cache import MemoryCache
+
+    local_cache = MemoryCache()
+    payload = {"signals": {"total": 12}}
+    local_cache.set("stats", payload, ttl_seconds=-1)
+
+    assert local_cache.get("stats") is None
+    assert local_cache.get_stale("stats") == payload
+
+
+@pytest.mark.anyio
+async def test_divergences_cache_hit_skips_predictive_enrichment(client, monkeypatch):
+    from api.cache import cache
+    import api.main as main
+    from polyscope.models import DivergenceSignal
+
+    signal = DivergenceSignal(
+        market_id="m-cache",
+        question="Cached market?",
+        market_price=0.41,
+        sm_consensus=0.72,
+        divergence_pct=0.31,
+        score=81.0,
+        sm_trader_count=4,
+        sm_direction="YES",
+        category="crypto",
+    )
+
+    async def fail_expired_count(*_args, **_kwargs):
+        raise AssertionError("expired count DB query should not run on cache hit")
+
+    cache.clear()
+    cache.set("divergences", [signal], ttl_seconds=60)
+    monkeypatch.setattr(main, "get_expired_signal_count", fail_expired_count)
+
+    try:
+        resp = await client.get("/api/divergences")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "cache"
+    assert data["stale"] is False
+    assert data["expired_count"] is None
+    assert data["signals"][0]["market_id"] == "m-cache"
+    assert data["signals"][0]["predictive_contributor"] is None
+
+
+@pytest.mark.anyio
+async def test_methodology_stats_returns_marked_stale_cache(client, monkeypatch):
+    from api.cache import cache
+    import api.main as main
+
+    stale_payload = {
+        "signals": {
+            "total": 123,
+            "resolved": 45,
+            "correct": 30,
+            "overall_win_rate_pct": 66.7,
+            "first_captured": "2026-05-01T00:00:00Z",
+            "latest_captured": "2026-05-02T00:00:00Z",
+        },
+        "skew_breakdown": {},
+        "resolved_markets": 40,
+        "per_trader": {
+            "records_captured": 500,
+            "traders_scored": 25,
+            "avg_accuracy_pct": 52.5,
+        },
+    }
+    refreshes = []
+
+    def fake_refresh(cache_key, loader, ttl_seconds):
+        refreshes.append((cache_key, ttl_seconds))
+
+    cache.clear()
+    cache.set("methodology_stats", stale_payload, ttl_seconds=-1)
+    monkeypatch.setattr(main, "_ensure_public_cache_refresh", fake_refresh)
+
+    try:
+        resp = await client.get("/api/methodology/stats")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "stale_cache"
+    assert data["stale"] is True
+    assert data["signals"]["total"] == 123
+    assert refreshes == [("methodology_stats", 600)]
+
+
+@pytest.mark.anyio
+async def test_signals_accuracy_cold_partial_keeps_shape(client, monkeypatch):
+    from api.cache import cache
+    import api.main as main
+
+    async def fake_accuracy(_db):
+        return {
+            "overall": {"total_signals": 7, "correct": 4, "win_rate": 0.5714, "avg_score": 62.1},
+            "by_tier": {
+                "high": {"total": 2, "correct": 1, "win_rate": 0.5},
+                "medium": {"total": 3, "correct": 2, "win_rate": 0.6667},
+                "low": {"total": 2, "correct": 1, "win_rate": 0.5},
+            },
+            "by_skew": {
+                "very_lopsided": {"total": 1, "correct": 1, "win_rate": 1.0},
+                "lopsided": {"total": 1, "correct": 0, "win_rate": 0.0},
+                "moderate": {"total": 2, "correct": 1, "win_rate": 0.5},
+                "tight": {"total": 3, "correct": 2, "win_rate": 0.6667},
+            },
+            "rolling_30d": {"total": 3, "correct": 2, "win_rate": 0.6667},
+        }
+
+    async def fail_simulation(_db):
+        raise AssertionError("partial cold response should skip simulation")
+
+    def fake_refresh(_cache_key, _loader, _ttl_seconds):
+        return None
+
+    cache.clear()
+    monkeypatch.setattr(main, "_ensure_public_cache_refresh", fake_refresh)
+    monkeypatch.setattr(main, "get_signal_accuracy", fake_accuracy)
+    monkeypatch.setattr(main, "get_signal_pnl_simulation", fail_simulation)
+
+    try:
+        resp = await client.get("/api/signals/accuracy")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "db_partial"
+    assert data["stale"] is False
+    assert data["partial"] is True
+    assert "simulation" not in data
+    assert data["overall"]["total_signals"] == 7
     for tier in ("high", "medium", "low"):
         assert tier in data["by_tier"]

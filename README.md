@@ -173,6 +173,7 @@ Optional server-side/admin trading variables:
 | `POLYMARKET_FUNDER_ADDRESS` | Server-side funder address |
 | `POLYMARKET_SIGNATURE_TYPE` | Server-side CLOB signature type |
 | `POLYMARKET_MAX_ORDER_USDC` | Server-side admin order notional cap |
+| `POLYSCOPE_DISABLE_SCHEDULER` | Set to `1` for local smoke tests that should skip startup polling jobs |
 
 Browser trading is non-custodial: users sign wallet-link messages and CLOB
 orders in their own wallet. The removed `/api/sign` route is intentionally not

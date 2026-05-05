@@ -147,10 +147,11 @@ export default function MethodologyPage() {
     "/api/methodology/stats",
     60_000,
   );
-  const { data: identity } = usePollingFetch<BuilderIdentity>(
-    "/api/builder/identity",
-    300_000,
-  );
+  const {
+    data: identity,
+    loading: identityLoading,
+    error: identityError,
+  } = usePollingFetch<BuilderIdentity>("/api/builder/identity", 300_000);
 
   const spanDays = daysBetween(
     data?.signals?.first_captured,
@@ -198,7 +199,8 @@ export default function MethodologyPage() {
         <ol className="space-y-2 list-decimal list-inside marker:text-ink-500 marker:font-mono">
           <li>
             Every 5 minutes, scan 500 active Polymarket markets meeting
-            liquidity thresholds (≥$50K open interest, ≥$10K 24h volume).
+            quality thresholds (max open interest or 24h volume ≥$50K, and
+            ≥$10K 24h volume).
           </li>
           <li>
             For each market, fetch current positions held by the top-100 ranked
@@ -506,17 +508,30 @@ export default function MethodologyPage() {
         title="builder identity"
       >
         <p>
-          PolyScope is a registered Polymarket builder. Our builder code is a
-          public <code className="text-micro bg-surface border border-ink-800 px-1.5 py-0.5 rounded-sm font-mono text-ink-100">bytes32</code>{" "}
-          identifier tied to our builder profile; orders routed through
-          PolyScope carry this code and attribute volume to us on-chain.
+          The builder identity endpoint reports whether this deployment exposes
+          PolyScope&apos;s public Polymarket builder code. When configured,
+          orders routed through PolyScope carry a{" "}
+          <code className="text-micro bg-surface border border-ink-800 px-1.5 py-0.5 rounded-sm font-mono text-ink-100">bytes32</code>{" "}
+          identifier and attribute volume to us on-chain.
         </p>
-        {identity?.configured && identity.code ? (
+        {identityLoading && !identity ? (
+          <div className="surface rounded-md p-4 text-body-sm text-ink-400 font-mono mt-3">
+            checking builder identity...
+          </div>
+        ) : identityError && !identity ? (
+          <div className="surface rounded-md p-4 text-body-sm text-alert-500 font-mono mt-3">
+            builder identity unavailable: {identityError}
+          </div>
+        ) : identity?.configured && identity.code ? (
           <div className="surface rounded-md p-4 mt-3">
             <div className="eyebrow mb-2">builder code</div>
             <p className="font-mono text-body-sm text-scope-400 break-all num">
               {identity.code}
             </p>
+          </div>
+        ) : identity?.configured ? (
+          <div className="surface rounded-md p-4 text-body-sm text-alert-500 font-mono mt-3">
+            builder identity configured, but no public code was returned
           </div>
         ) : (
           <div className="surface rounded-md p-4 text-body-sm text-ink-400 font-mono mt-3">

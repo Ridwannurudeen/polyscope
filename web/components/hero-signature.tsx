@@ -45,14 +45,25 @@ export function HeroSignature() {
     "/api/scan/latest",
     60_000,
   );
-  const { data: stats } = usePollingFetch<MethodologyStats>(
-    "/api/methodology/stats",
-    300_000,
-  );
+  const {
+    data: stats,
+    loading: statsLoading,
+    error: statsError,
+  } = usePollingFetch<MethodologyStats>("/api/methodology/stats", 300_000);
 
   const markets = scan?.total_markets ?? null;
   const signals = scan?.total_divergences ?? null;
   const filter = stats?.predictive_filter;
+  const filterFallback = statsError
+    ? "unavailable"
+    : statsLoading
+      ? "loading"
+      : "unavailable";
+  const qualifyingTraders = filter?.qualifying_traders ?? 0;
+  const hasQualifyingTraders = Boolean(filter && qualifyingTraders > 0);
+  const hasFilterRoi = Boolean(
+    filter && filter.signals > 0 && filter.roi_pct != null,
+  );
 
   return (
     <section className="pt-3 pb-8 mb-8">
@@ -76,26 +87,42 @@ export function HeroSignature() {
         </span>
         <StatInline
           label="markets"
-          value={markets !== null ? markets.toLocaleString() : "—"}
+          value={markets !== null ? markets.toLocaleString() : "loading"}
+          muted={markets === null}
         />
         <StatInline
           label="signals"
-          value={signals !== null ? signals.toLocaleString() : "—"}
+          value={signals !== null ? signals.toLocaleString() : "loading"}
+          muted={signals === null}
         />
         <StatInline
-          label="qualifying traders"
-          value={filter?.qualifying_traders != null ? String(filter.qualifying_traders) : "—"}
+          label={hasQualifyingTraders ? "qualifying traders" : "trader filter"}
+          value={
+            filter
+              ? hasQualifyingTraders
+                ? String(qualifyingTraders)
+                : "no qualifiers"
+              : filterFallback
+          }
+          muted={!hasQualifyingTraders}
         />
         <StatInline
-          label="filter roi · backtest"
-          value={formatRoi(filter?.roi_pct)}
+          label={hasFilterRoi ? "filter roi · backtest" : "filter roi"}
+          value={
+            hasFilterRoi
+              ? formatRoi(filter?.roi_pct)
+              : filter
+                ? "no sample"
+                : filterFallback
+          }
           accent={
-            filter?.roi_pct != null
+            hasFilterRoi && filter?.roi_pct != null
               ? filter.roi_pct >= 0
                 ? "scope"
                 : "fade"
               : undefined
           }
+          muted={!hasFilterRoi}
         />
         <Link
           href="/methodology"
@@ -126,21 +153,28 @@ function StatInline({
   label,
   value,
   accent,
+  muted,
 }: {
   label: string;
   value: string;
   accent?: "scope" | "fade";
+  muted?: boolean;
 }) {
   const tone =
-    accent === "scope"
+    muted
+      ? "text-ink-500"
+      : accent === "scope"
       ? "text-scope-400"
       : accent === "fade"
       ? "text-fade-500"
       : "text-ink-200";
+  const valueClass = muted
+    ? `text-body-sm font-medium ${tone}`
+    : `num text-body font-medium ${tone}`;
   return (
     <span className="inline-flex items-baseline gap-2">
       <span className="eyebrow">{label}</span>
-      <span className={`num text-body font-medium ${tone}`}>{value}</span>
+      <span className={valueClass}>{value}</span>
     </span>
   );
 }

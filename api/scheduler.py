@@ -22,6 +22,7 @@ from .database import (
     get_category_weights,
     get_db,
     get_pending_builder_orders,
+    get_predictive_contributors_for_markets,
     rebuild_trader_accuracy,
     emit_follow_alerts_for_signal,
     rebuild_trader_category_stats,
@@ -294,7 +295,22 @@ async def compute_divergences_job():
         await expire_converged_signals(db, divergences_map)
 
         await db.commit()
+        signal_market_ids = [s.market_id for s in signals if s.market_id]
+        try:
+            predictive = await get_predictive_contributors_for_markets(
+                db, signal_market_ids
+            )
+        except Exception:
+            logger.warning(
+                "predictive contributor cache refresh failed", exc_info=True
+            )
+            predictive = {}
         cache.set("divergences", signals, ttl_seconds=600)
+        cache.set(
+            "divergence_predictive_contributors",
+            predictive,
+            ttl_seconds=600,
+        )
         logger.info(
             "Divergence scan complete: %d signals from %d markets "
             "(%d markets with SM positions, %d total SM matches, %d trade candidates)",

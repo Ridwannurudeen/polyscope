@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from bot.main import (
+    _TelegramLogSanitizer,
+    _redact_log_value,
     accuracy,
     calibration,
     divergences,
@@ -14,7 +18,6 @@ from bot.main import (
     movers,
     start,
     subscribe_cmd,
-    threshold_cmd,
     unsubscribe_cmd,
     whales_cmd,
 )
@@ -34,6 +37,77 @@ def _make_context(**kwargs):
     ctx = MagicMock()
     ctx.args = kwargs.get("args", [])
     return ctx
+
+
+def test_redact_log_value_removes_telegram_tokens_and_urls():
+    token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+    message = (
+        f"token={token} "
+        f"url=https://api.telegram.org/bot{token}/sendMessage?chat_id=123"
+    )
+
+    redacted = _redact_log_value(message, bot_token=token)
+
+    assert token not in redacted
+    assert "https://api.telegram.org/bot" not in redacted
+    assert "[telegram-api-url-redacted]" in redacted
+    assert "[telegram-bot-token-redacted]" in redacted
+
+
+def test_logging_filter_redacts_formatted_telegram_url_args():
+    token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.addFilter(_TelegramLogSanitizer(token))
+    test_logger = logging.getLogger("polyscope.test.bot.redaction")
+    test_logger.addHandler(handler)
+    test_logger.setLevel(logging.INFO)
+    test_logger.propagate = False
+
+    try:
+        test_logger.info(
+            "HTTP Request: POST %s",
+            f"https://api.telegram.org/bot{token}/getMe",
+        )
+    finally:
+        test_logger.removeHandler(handler)
+        test_logger.propagate = True
+
+    logged = stream.getvalue()
+    assert token not in logged
+    assert "https://api.telegram.org/bot" not in logged
+    assert "[telegram-api-url-redacted]" in logged
+
+
+def test_logging_filter_redacts_exception_text():
+    token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.addFilter(_TelegramLogSanitizer(token))
+    test_logger = logging.getLogger("polyscope.test.bot.exception_redaction")
+    test_logger.addHandler(handler)
+    test_logger.setLevel(logging.ERROR)
+    test_logger.propagate = False
+
+    try:
+        try:
+            raise RuntimeError(f"https://api.telegram.org/bot{token}/getMe failed")
+        except RuntimeError:
+            test_logger.exception("Telegram send failed")
+    finally:
+        test_logger.removeHandler(handler)
+        test_logger.propagate = True
+
+    logged = stream.getvalue()
+    assert token not in logged
+    assert "https://api.telegram.org/bot" not in logged
+    assert "[telegram-api-url-redacted]" in logged
+
+
+def test_noisy_bot_dependencies_default_to_warning():
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING
+    assert logging.getLogger("telegram").level == logging.WARNING
 
 
 @pytest.mark.asyncio

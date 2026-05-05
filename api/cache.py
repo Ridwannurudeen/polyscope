@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -24,9 +24,12 @@ class MemoryCache:
         if entry is None:
             return None
         if time.time() > entry.expires_at:
-            del self._store[key]
             return None
         return entry.data
+
+    def get_stale(self, key: str) -> Any | None:
+        entry = self._store.get(key)
+        return entry.data if entry is not None else None
 
     def set(self, key: str, data: Any, ttl_seconds: int = 120):
         self._store[key] = CacheEntry(

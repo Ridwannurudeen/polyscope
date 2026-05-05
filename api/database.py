@@ -637,14 +637,36 @@ async def get_divergence_signals(
 ) -> list[dict]:
     if hours:
         cursor = await db.execute(
-            """SELECT * FROM divergence_signals
-               WHERE timestamp >= datetime('now', ?)
+            """WITH ranked AS (
+                   SELECT *,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY market_id
+                              ORDER BY timestamp DESC, signal_strength DESC
+                          ) AS rn
+                   FROM divergence_signals
+                   WHERE timestamp >= datetime('now', ?)
+                     AND resolved = 0
+                     AND (expired = 0 OR expired IS NULL)
+               )
+               SELECT * FROM ranked
+               WHERE rn = 1
                ORDER BY signal_strength DESC LIMIT ?""",
             (f"-{hours} hours", limit),
         )
     else:
         cursor = await db.execute(
-            """SELECT * FROM divergence_signals
+            """WITH ranked AS (
+                   SELECT *,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY market_id
+                              ORDER BY timestamp DESC, signal_strength DESC
+                          ) AS rn
+                   FROM divergence_signals
+                   WHERE resolved = 0
+                     AND (expired = 0 OR expired IS NULL)
+               )
+               SELECT * FROM ranked
+               WHERE rn = 1
                ORDER BY timestamp DESC LIMIT ?""",
             (limit,),
         )
@@ -1712,7 +1734,7 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
 
     # First-observed (trader, market) → trader_accuracy join, applying the gates
     cursor = await db.execute(
-        f"""
+        """
         WITH first_pos AS (
             SELECT stp.signal_id, stp.trader_address
             FROM signal_trader_positions stp
@@ -1838,7 +1860,9 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
     }
 
 
-async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
+async def get_methodology_stats(
+    db: aiosqlite.Connection, include_predictive_filter: bool = True
+) -> dict:
     """Live dataset stats for the public methodology page."""
     # Signal counts and time range
     cursor = await db.execute(
@@ -1899,9 +1923,7 @@ async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
     cursor = await db.execute("SELECT COUNT(*) FROM signal_trader_positions")
     trader_records = (await cursor.fetchone())[0] or 0
 
-    predictive_filter = await _compute_predictive_filter_stats(db)
-
-    return {
+    result = {
         "signals": {
             "total": total or 0,
             "resolved": resolved,
@@ -1917,8 +1939,10 @@ async def get_methodology_stats(db: aiosqlite.Connection) -> dict:
             "traders_scored": traders_scored,
             "avg_accuracy_pct": avg_trader_accuracy,
         },
-        "predictive_filter": predictive_filter,
     }
+    if include_predictive_filter:
+        result["predictive_filter"] = await _compute_predictive_filter_stats(db)
+    return result
 
 
 async def get_signal_evidence(
