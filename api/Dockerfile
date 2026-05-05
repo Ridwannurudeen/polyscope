@@ -8,6 +8,7 @@ COPY src/ src/
 RUN pip install --no-cache-dir .
 
 COPY api/ api/
+COPY scripts/ scripts/
 
 RUN adduser --disabled-password --gecos "" --uid 1000 appuser && \
     mkdir -p data && chown -R appuser:appuser /app
