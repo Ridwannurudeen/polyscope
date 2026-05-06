@@ -1,5 +1,6 @@
 """Tests for FastAPI endpoints."""
 
+import os
 import time
 
 import pytest
@@ -9,6 +10,11 @@ from httpx import ASGITransport, AsyncClient
 import api.scheduler as sched
 
 sched._client = None
+
+# Tests sign wallet-link payloads with `domain: "testserver"` (the default
+# host header from httpx's ASGI transport). Production rejects that domain
+# unless POLYSCOPE_ALLOW_DEV_DOMAINS is set, so opt in for the test session.
+os.environ.setdefault("POLYSCOPE_ALLOW_DEV_DOMAINS", "1")
 
 
 @pytest.fixture
@@ -27,6 +33,39 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+def _signed_wallet_link_payload(client_id: str):
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    account = Account.create()
+    domain = "testserver"
+    issued_at = int(time.time())
+    wallet = account.address.lower()
+    message = "\n".join(
+        [
+            "PolyScope wallet link",
+            f"Domain: {domain}",
+            f"Client ID: {client_id}",
+            f"Wallet: {wallet}",
+            f"Issued At: {issued_at}",
+        ]
+    )
+    signature = Account.sign_message(
+        encode_defunct(text=message),
+        account.key,
+    ).signature.hex()
+    if not signature.startswith("0x"):
+        signature = f"0x{signature}"
+
+    return wallet, {
+        "client_id": client_id,
+        "wallet_address": wallet,
+        "domain": domain,
+        "issued_at": issued_at,
+        "signature": signature,
+    }
 
 
 @pytest.mark.anyio
@@ -217,6 +256,50 @@ async def test_scan_latest_exposes_component_sources(client):
 
 
 @pytest.mark.anyio
+async def test_events_accepts_db_warmed_divergence_dicts(client):
+    from api.cache import cache
+    from polyscope.models import Market
+
+    markets = [
+        Market(
+            condition_id="m-event-1",
+            question="Will the event cluster resolve before June yes?",
+            slug="event-1",
+            category="crypto",
+            price_yes=0.52,
+            price_no=0.48,
+            volume_24h=1000,
+        ),
+        Market(
+            condition_id="m-event-2",
+            question="Will the event cluster resolve before June no?",
+            slug="event-2",
+            category="crypto",
+            price_yes=0.42,
+            price_no=0.58,
+            volume_24h=2000,
+        ),
+    ]
+    cache.clear()
+    cache.set("markets", markets, ttl_seconds=60)
+    cache.set(
+        "divergences",
+        [{"market_id": "m-event-1", "divergence_pct": 0.31}],
+        ttl_seconds=60,
+    )
+
+    try:
+        resp = await client.get("/api/events?limit=5")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["events"][0]["divergence_signals"] == 1
+    assert data["events"][0]["avg_divergence"] == 0.31
+
+
+@pytest.mark.anyio
 async def test_trade_market_detail_validates_gamma_tokens(client, monkeypatch):
     from api.cache import cache
     import api.main as main
@@ -295,27 +378,8 @@ async def test_admin_metrics_requires_header_not_query_token(client, monkeypatch
 
 @pytest.mark.anyio
 async def test_wallet_link_requires_valid_wallet_signature(client):
-    from eth_account import Account
-    from eth_account.messages import encode_defunct
-
-    account = Account.create()
     client_id = "test-client-123"
-    domain = "testserver"
-    issued_at = int(time.time())
-    wallet = account.address.lower()
-    message = "\n".join(
-        [
-            "PolyScope wallet link",
-            f"Domain: {domain}",
-            f"Client ID: {client_id}",
-            f"Wallet: {wallet}",
-            f"Issued At: {issued_at}",
-        ]
-    )
-    signature = Account.sign_message(
-        encode_defunct(text=message),
-        account.key,
-    ).signature.hex()
+    wallet, payload = _signed_wallet_link_payload(client_id)
 
     unsigned_resp = await client.post(
         "/api/wallet/link",
@@ -329,13 +393,7 @@ async def test_wallet_link_requires_valid_wallet_signature(client):
 
     signed_resp = await client.post(
         "/api/wallet/link",
-        json={
-            "client_id": client_id,
-            "wallet_address": wallet,
-            "domain": domain,
-            "issued_at": issued_at,
-            "signature": signature,
-        },
+        json=payload,
     )
     assert signed_resp.status_code == 200
     assert signed_resp.json()["wallet_address"] == wallet
@@ -343,6 +401,150 @@ async def test_wallet_link_requires_valid_wallet_signature(client):
         f"/api/watchlist?client_id={client_id}&wallet_address={wallet}",
     )
     assert linked_resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_wallet_link_rejects_signature_without_eip191_shape(client):
+    client_id = "test-client-sig-shape"
+    _wallet, payload = _signed_wallet_link_payload(client_id)
+    payload["signature"] = payload["signature"][2:]
+
+    resp = await client.post("/api/wallet/link", json=payload)
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_wallet_scoped_routes_reject_unlinked_wallet(client):
+    client_id = "test-client-456"
+    wallet, payload = _signed_wallet_link_payload(client_id)
+    trader = "0x" + "1" * 40
+
+    guarded_requests = [
+        ("GET", f"/api/watchlist?client_id={client_id}&wallet_address={wallet}", None),
+        (
+            "POST",
+            "/api/watchlist/add",
+            {
+                "client_id": client_id,
+                "market_id": "market-wallet-auth",
+                "wallet_address": wallet,
+            },
+        ),
+        (
+            "DELETE",
+            f"/api/watchlist/999?client_id={client_id}&wallet_address={wallet}",
+            None,
+        ),
+        ("GET", f"/api/portfolio?client_id={client_id}&wallet_address={wallet}", None),
+        (
+            "POST",
+            "/api/portfolio/act",
+            {
+                "client_id": client_id,
+                "market_id": "market-wallet-auth",
+                "action_direction": "YES",
+                "size": 1,
+                "price": 0.5,
+                "wallet_address": wallet,
+            },
+        ),
+        (
+            "POST",
+            "/api/follow/trader",
+            {
+                "client_id": client_id,
+                "trader_address": trader,
+                "wallet_address": wallet,
+            },
+        ),
+        (
+            "DELETE",
+            f"/api/follow/trader/{trader}?client_id={client_id}&wallet_address={wallet}",
+            None,
+        ),
+        ("GET", f"/api/follow/list?client_id={client_id}&wallet_address={wallet}", None),
+        (
+            "GET",
+            f"/api/follow/is-following/{trader}?client_id={client_id}&wallet_address={wallet}",
+            None,
+        ),
+        ("GET", f"/api/follow/alerts?client_id={client_id}&wallet_address={wallet}", None),
+        (
+            "POST",
+            f"/api/follow/alerts/mark-seen?client_id={client_id}&wallet_address={wallet}",
+            None,
+        ),
+    ]
+
+    for method, path, json_body in guarded_requests:
+        if json_body is None:
+            response = await client.request(method, path)
+        else:
+            response = await client.request(method, path, json=json_body)
+        assert response.status_code == 401, path
+
+    link_resp = await client.post("/api/wallet/link", json=payload)
+    assert link_resp.status_code == 200
+
+    for method, path, json_body in guarded_requests:
+        if json_body is None:
+            response = await client.request(method, path)
+        else:
+            response = await client.request(method, path, json=json_body)
+        assert response.status_code != 401, path
+
+    replay_resp = await client.get(
+        f"/api/portfolio?client_id=attacker-client-456&wallet_address={wallet}",
+    )
+    assert replay_resp.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_linked_client_id_without_wallet_address_is_rejected(client):
+    """Once a client_id has linked a wallet, the legacy client_id-only path
+    is sealed off — leaking the client_id alone must not grant access."""
+    import uuid
+
+    # Tests share a persistent SQLite DB; uniquify so prior runs don't
+    # poison this assertion.
+    client_id = f"test-client-sealed-{uuid.uuid4().hex[:12]}"
+    wallet, payload = _signed_wallet_link_payload(client_id)
+
+    pre_link = await client.get(f"/api/watchlist?client_id={client_id}")
+    assert pre_link.status_code == 200
+
+    link_resp = await client.post("/api/wallet/link", json=payload)
+    assert link_resp.status_code == 200
+
+    sealed_off = [
+        ("GET", f"/api/watchlist?client_id={client_id}", None),
+        ("GET", f"/api/portfolio?client_id={client_id}", None),
+        ("GET", f"/api/follow/list?client_id={client_id}", None),
+        ("GET", f"/api/follow/alerts?client_id={client_id}", None),
+        (
+            "POST",
+            "/api/watchlist/add",
+            {"client_id": client_id, "market_id": "market-sealed"},
+        ),
+        (
+            "POST",
+            "/api/portfolio/act",
+            {
+                "client_id": client_id,
+                "market_id": "market-sealed",
+                "action_direction": "YES",
+                "size": 1,
+                "price": 0.5,
+            },
+        ),
+    ]
+    for method, path, json_body in sealed_off:
+        if json_body is None:
+            response = await client.request(method, path)
+        else:
+            response = await client.request(method, path, json=json_body)
+        assert response.status_code == 401, path
 
 
 @pytest.mark.anyio
@@ -424,6 +626,60 @@ async def test_divergences_cache_hit_skips_predictive_enrichment(client, monkeyp
     assert data["expired_count"] is None
     assert data["signals"][0]["market_id"] == "m-cache"
     assert data["signals"][0]["predictive_contributor"] is None
+
+
+@pytest.mark.anyio
+async def test_divergences_db_fallback_enriches_predictive_contributor(client, monkeypatch):
+    from api.cache import cache
+    import api.main as main
+
+    async def fake_load_from_db():
+        return (
+            [
+                {
+                    "market_id": "m-db-predictive",
+                    "question": "DB market?",
+                    "market_price": 0.41,
+                    "sm_consensus": 0.72,
+                    "divergence_pct": 0.31,
+                    "score": 81.0,
+                    "sm_trader_count": 4,
+                    "sm_direction": "YES",
+                    "category": "crypto",
+                }
+            ],
+            0,
+        )
+
+    async def fake_predictive(_db, market_ids):
+        assert market_ids == ["m-db-predictive"]
+        return {
+            "m-db-predictive": {
+                "trader_address": "0x" + "a" * 40,
+                "pct": 76.4,
+                "ci_lo": 61.2,
+                "ci_hi": 84.8,
+                "n": 80,
+            }
+        }
+
+    cache.clear()
+    monkeypatch.setattr(main, "_load_divergences_from_db", fake_load_from_db)
+    monkeypatch.setattr(
+        main,
+        "get_predictive_contributors_for_markets",
+        fake_predictive,
+    )
+
+    try:
+        resp = await client.get("/api/divergences")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "db_fallback"
+    assert data["signals"][0]["predictive_contributor"]["n"] == 80
 
 
 @pytest.mark.anyio
@@ -517,3 +773,91 @@ async def test_signals_accuracy_cold_partial_keeps_shape(client, monkeypatch):
     assert data["overall"]["total_signals"] == 7
     for tier in ("high", "medium", "low"):
         assert tier in data["by_tier"]
+
+
+@pytest.mark.anyio
+async def test_events_rejects_unsafe_path_and_referrer(client):
+    valid = await client.post(
+        "/api/events",
+        json={
+            "event_type": "page_view",
+            "client_id": "test-client-events",
+            "path": "/smart-money?market=%3Cencoded%3E",
+            "referrer": "https://polymarket.com/markets?tag=crypto",
+        },
+    )
+    assert valid.status_code == 200
+
+    bad_path = await client.post(
+        "/api/events",
+        json={
+            "event_type": "page_view",
+            "path": "/smart-money?<script>alert(1)</script>",
+        },
+    )
+    assert bad_path.status_code == 422
+
+    bad_referrer = await client.post(
+        "/api/events",
+        json={
+            "event_type": "page_view",
+            "path": "/smart-money",
+            "referrer": "javascript:alert(1)",
+        },
+    )
+    assert bad_referrer.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_events_drops_analytics_event_when_database_is_locked(client, monkeypatch):
+    import sqlite3
+
+    import api.main as main
+
+    async def locked_record_event(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(main, "record_event", locked_record_event)
+
+    resp = await client.post(
+        "/api/events",
+        json={
+            "event_type": "page_view",
+            "client_id": "test-client-events",
+            "path": "/",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": False, "dropped": True}
+
+
+@pytest.mark.anyio
+async def test_place_order_hides_raw_clob_error_from_response(client, monkeypatch):
+    import api.main as main
+
+    monkeypatch.setenv("POLYSCOPE_ADMIN_TOKEN", "secret-token")
+    monkeypatch.setattr(main, "is_trading_configured", lambda: True)
+    monkeypatch.setattr(main, "max_order_usdc", lambda: 1_000.0)
+    monkeypatch.setattr(main, "get_builder_code", lambda: "0x" + "1" * 64)
+
+    def fail_order(**_kwargs):
+        raise RuntimeError("funder 0xdeadbeefdeadbeef leaked")
+
+    monkeypatch.setattr(main, "place_attributed_order", fail_order)
+
+    resp = await client.post(
+        "/api/orders/place",
+        headers={"X-Admin-Token": "secret-token"},
+        json={
+            "token_id": "token-test",
+            "side": "BUY",
+            "price": 0.5,
+            "size": 1.0,
+            "market_id": "market-test",
+        },
+    )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "CLOB order placement failed"
+    assert "deadbeef" not in resp.text

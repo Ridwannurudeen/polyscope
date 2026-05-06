@@ -25,8 +25,10 @@ from api.database import (
     get_watchlist,
     is_following,
     link_wallet_to_client,
+    mark_stale_pending_builder_orders,
     mark_alerts_seen,
     rebuild_trader_accuracy,
+    record_builder_order_attempt,
     record_event,
     record_user_action,
     remove_from_watchlist,
@@ -425,7 +427,7 @@ async def test_save_divergence_signal_persists_market_quality(db):
 
 
 @pytest.mark.anyio
-async def test_cleanup_old_snapshots_chunked_deletes_old_only(db):
+async def test_cleanup_old_snapshots_chunked_deletes_old_only(db, monkeypatch):
     """Cleanup deletes rows older than the threshold and returns the count.
     Recent rows survive so live data isn't lost."""
     await db.execute(
@@ -440,9 +442,19 @@ async def test_cleanup_old_snapshots_chunked_deletes_old_only(db):
     )
     await db.commit()
 
+    import api.database as database
+
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(database.asyncio, "sleep", fake_sleep)
+
     deleted = await cleanup_old_snapshots(db, days=30, batch_size=1)
 
     assert deleted == 2
+    assert sleeps == [0, 0, 0]
     cursor = await db.execute("SELECT COUNT(*) FROM market_snapshots")
     remaining = (await cursor.fetchone())[0]
     assert remaining == 2
@@ -463,6 +475,46 @@ async def test_cleanup_old_snapshots_noop_when_all_recent(db):
     deleted = await cleanup_old_snapshots(db, days=30)
 
     assert deleted == 0
+
+
+@pytest.mark.anyio
+async def test_mark_stale_pending_builder_orders_times_out_old_only(db):
+    old_id = await record_builder_order_attempt(
+        db,
+        token_id="token-old",
+        side="BUY",
+        price=0.5,
+        size=1.0,
+        order_type="GTC",
+        builder_code="0x" + "1" * 64,
+        market_id="market-old",
+    )
+    recent_id = await record_builder_order_attempt(
+        db,
+        token_id="token-recent",
+        side="BUY",
+        price=0.5,
+        size=1.0,
+        order_type="GTC",
+        builder_code="0x" + "2" * 64,
+        market_id="market-recent",
+    )
+    await db.execute(
+        "UPDATE builder_orders SET created_at = ? WHERE id = ?",
+        ("2000-01-01T00:00:00+00:00", old_id),
+    )
+    await db.commit()
+
+    updated = await mark_stale_pending_builder_orders(db, minutes=10)
+
+    assert updated == 1
+    cursor = await db.execute(
+        "SELECT id, status, error FROM builder_orders ORDER BY id"
+    )
+    rows = {row["id"]: dict(row) for row in await cursor.fetchall()}
+    assert rows[old_id]["status"] == "timeout"
+    assert "timed out" in rows[old_id]["error"]
+    assert rows[recent_id]["status"] == "pending"
 
 
 @pytest.mark.anyio
@@ -1630,3 +1682,43 @@ async def test_methodology_stats_includes_predictive_filter(db):
     assert {"qualifying_traders", "signals", "hits", "by_band", "baseline"}.issubset(
         pf.keys()
     )
+
+
+@pytest.mark.anyio
+async def test_predictive_filter_stats_matches_when_best_signal_differs_from_first(db):
+    """Regression: prior implementation gated qualifying signals by
+    signal_id, joining best[mid].id (strongest signal per market) against
+    first_pos.signal_id (earliest signal_trader_positions row per
+    trader,market). Production has MANY signals per market — those two
+    ids almost never matched, so the filter under-counted.
+
+    Seed two signals on one market: signal A (weaker, has the qualifying
+    trader) and signal B (stronger, no positions recorded). best picks B,
+    but the trader did appear on the market. The signal must be counted.
+    """
+    good = "0x" + "e" * 40
+    await _seed_trader_accuracy(db, good, correct=80, total=100)
+
+    # Signal A — weaker, has the qualifying trader attributed.
+    await _insert_resolved_signal(
+        db,
+        "m_multi",
+        0.45,
+        "YES",
+        1,
+        score=55.0,
+        trader_addresses=[good],
+    )
+    # Signal B — same market, stronger, no per-trader attribution recorded.
+    # best[mid] picks B; the gate must still recognize the market because
+    # the qualifying trader appeared on it.
+    await _insert_resolved_signal(
+        db, "m_multi", 0.45, "YES", 1, score=85.0
+    )
+    await db.commit()
+
+    stats = await _compute_predictive_filter_stats(db)
+    assert stats["qualifying_traders"] == 1
+    # The market is counted exactly once (best per market).
+    assert stats["signals"] == 1
+    assert stats["hits"] == 1

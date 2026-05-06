@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import { AccBar } from "@/components/acc-bar";
 import { Disclaimer } from "@/components/disclaimer";
 import { DivergenceBar } from "@/components/divergence-bar";
@@ -112,6 +113,11 @@ export default function Dashboard() {
     "/api/traders/leaderboard?order=anti-predictive&min_signals=5&limit=6",
     120_000,
   );
+  const rawDivergences = data?.divergences;
+  const divergences = useMemo(
+    () => dedupeSignalsByMarket(rawDivergences || []),
+    [rawDivergences],
+  );
 
   if (loading) return <DashboardSkeleton />;
 
@@ -128,7 +134,6 @@ export default function Dashboard() {
     );
   }
 
-  const divergences = dedupeSignalsByMarket(data?.divergences || []);
   const movers = data?.movers_24h || [];
   const predictiveStrict = predictiveData?.traders || [];
   const fadeStrict = fadeData?.traders || [];

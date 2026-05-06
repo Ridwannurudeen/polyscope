@@ -9,11 +9,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useAccount } from "wagmi";
 import { getClientId } from "@/lib/client-id";
 
 const WALLET_KEY = "polyscope_wallet_address";
+const IDENTITY_VERSION_EVENT = "polyscope_identity_version";
 
 const _EVM_ADDR = /^0x[a-fA-F0-9]{40}$/;
+let identityVersion = 0;
+
+function bumpIdentityVersion() {
+  identityVersion += 1;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(IDENTITY_VERSION_EVENT));
+  }
+}
 
 export function isValidEvmAddress(addr: string): boolean {
   return _EVM_ADDR.test(addr.trim());
@@ -62,15 +72,64 @@ export function buildWalletLinkMessage(
   ].join("\n");
 }
 
+export function useIdentityVersion(): number {
+  const [version, setVersion] = useState(identityVersion);
+
+  useEffect(() => {
+    const onVersion = () => setVersion(identityVersion);
+    window.addEventListener(IDENTITY_VERSION_EVENT, onVersion);
+    return () => window.removeEventListener(IDENTITY_VERSION_EVENT, onVersion);
+  }, []);
+
+  return version;
+}
+
 export function useIdentity(): Identity {
   const [clientId, setClientId] = useState("");
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
+  const { address: wagmiAddress, isConnected } = useAccount();
 
   useEffect(() => {
     setClientId(getClientId());
     setWalletAddress(storedWallet());
   }, []);
+
+  // Reconcile localStorage with wagmi state. Failure modes this prevents:
+  //   1. User disconnects in MetaMask → wagmi reports !isConnected, but
+  //      localStorage still has the address → every API write would send
+  //      a wallet_address that's no longer signing. Clear localStorage.
+  //   2. User switches accounts in MetaMask → wagmi address ≠ stored
+  //      address → submitOrder would sign with B against A's funder
+  //      cache. Clear so the user must re-link.
+  useEffect(() => {
+    if (!clientId) return;
+    const stored = storedWallet();
+    if (!isConnected) {
+      if (stored !== null) {
+        try {
+          window.localStorage.removeItem(WALLET_KEY);
+        } catch {
+          // localStorage unavailable; in-memory clear still applies.
+        }
+        setWalletAddress(null);
+        bumpIdentityVersion();
+      }
+      return;
+    }
+    if (wagmiAddress) {
+      const lower = wagmiAddress.toLowerCase();
+      if (stored !== null && stored !== lower) {
+        try {
+          window.localStorage.removeItem(WALLET_KEY);
+        } catch {
+          // ignore
+        }
+        setWalletAddress(null);
+        bumpIdentityVersion();
+      }
+    }
+  }, [clientId, isConnected, wagmiAddress]);
 
   const linkWallet = useCallback(
     async (
@@ -103,6 +162,7 @@ export function useIdentity(): Identity {
         }
         window.localStorage.setItem(WALLET_KEY, trimmed);
         setWalletAddress(trimmed);
+        bumpIdentityVersion();
         return { ok: true };
       } catch (e) {
         return {
@@ -123,6 +183,7 @@ export function useIdentity(): Identity {
       // localStorage can be unavailable; in-memory state still unlinks.
     }
     setWalletAddress(null);
+    bumpIdentityVersion();
   }, []);
 
   return { clientId, walletAddress, linkWallet, unlinkWallet, linking };

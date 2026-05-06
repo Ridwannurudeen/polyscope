@@ -21,8 +21,10 @@ from .database import (
     expire_converged_signals,
     get_category_weights,
     get_db,
+    get_low_priority_write_db,
     get_pending_builder_orders,
     get_predictive_contributors_for_markets,
+    mark_stale_pending_builder_orders,
     rebuild_trader_accuracy,
     emit_follow_alerts_for_signal,
     rebuild_trader_category_stats,
@@ -107,7 +109,8 @@ async def compute_divergences_job():
         logger.warning("No traders cached, skipping divergence computation")
         return
 
-    signals = []
+    signals_by_market = {}
+    weights = _category_weights
     db = await get_db()
     now = datetime.now(timezone.utc).isoformat()
     total_sm_matches = 0
@@ -142,7 +145,7 @@ async def compute_divergences_job():
 
             signal = compute_divergence(
                 market, positions, _traders, _divergence_config,
-                category_weights=_category_weights,
+                category_weights=weights,
             )
             if positions and not signal and len(positions) >= 1:
                 from polyscope.divergence import _weighted_consensus
@@ -158,7 +161,7 @@ async def compute_divergences_job():
 
             if signal:
                 divergences_map[market.condition_id] = signal.divergence_pct
-                signals.append(signal)
+                signals_by_market[signal.market_id] = signal
                 signal_dict = asdict(signal)
                 signal_id = await save_divergence_signal(db, signal_dict)
 
@@ -167,7 +170,7 @@ async def compute_divergences_job():
                     contributions = compute_trader_contributions(
                         positions, _traders,
                         category=market.category,
-                        category_weights=_category_weights,
+                        category_weights=weights,
                     )
                     records = [
                         {
@@ -243,24 +246,20 @@ async def compute_divergences_job():
                     trade_signal = compute_divergence(
                         market, positions, _traders, _divergence_config,
                         trades=sm_trades,
-                        category_weights=_category_weights,
+                        category_weights=weights,
                     )
                     if trade_signal and trade_signal.signal_source == "trades":
                         # Replace position-based signal if trade-based is stronger
-                        existing = next(
-                            (s for s in signals if s.market_id == market.condition_id),
-                            None,
-                        )
+                        existing = signals_by_market.get(market.condition_id)
                         trade_signal_id = 0
                         if existing:
                             if trade_signal.score > existing.score:
-                                signals.remove(existing)
-                                signals.append(trade_signal)
+                                signals_by_market[market.condition_id] = trade_signal
                                 trade_signal_id = await save_divergence_signal(
                                     db, asdict(trade_signal)
                                 )
                         else:
-                            signals.append(trade_signal)
+                            signals_by_market[market.condition_id] = trade_signal
                             trade_signal_id = await save_divergence_signal(
                                 db, asdict(trade_signal)
                             )
@@ -270,7 +269,7 @@ async def compute_divergences_job():
                             contributions = compute_trader_contributions(
                                 positions, _traders,
                                 category=market.category,
-                                category_weights=_category_weights,
+                                category_weights=weights,
                             )
                             stp_records = [
                                 {
@@ -295,6 +294,7 @@ async def compute_divergences_job():
         await expire_converged_signals(db, divergences_map)
 
         await db.commit()
+        signals = list(signals_by_market.values())
         signal_market_ids = [s.market_id for s in signals if s.market_id]
         try:
             predictive = await get_predictive_contributors_for_markets(
@@ -541,6 +541,23 @@ async def sync_builder_orders_job():
     from .polymarket_trading import get_client as get_trading_client
     from .polymarket_trading import is_trading_configured
     import json
+
+    try:
+        sweep_db = await get_low_priority_write_db(500)
+        try:
+            timed_out = await mark_stale_pending_builder_orders(
+                sweep_db,
+                minutes=10,
+            )
+            if timed_out:
+                logger.warning(
+                    "sync_builder_orders_job: timed out %d stale pending orders",
+                    timed_out,
+                )
+        finally:
+            await sweep_db.close()
+    except Exception:
+        logger.exception("sync_builder_orders_job stale-pending sweep failed")
 
     if not is_trading_configured():
         return

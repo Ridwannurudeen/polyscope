@@ -43,10 +43,7 @@ docker compose ps
 echo "[7/8] Post-deploy smoke tests"
 ADMIN_TOKEN=$(grep '^POLYSCOPE_ADMIN_TOKEN=' .env | cut -d= -f2- || true)
 SMOKE_ARGS=(--base-url "https://$DOMAIN")
-if [[ -n "$ADMIN_TOKEN" ]]; then
-  SMOKE_ARGS+=(--admin-token "$ADMIN_TOKEN")
-fi
-python3 scripts/production_smoke.py "${SMOKE_ARGS[@]}"
+POLYSCOPE_ADMIN_TOKEN="$ADMIN_TOKEN" python3 scripts/production_smoke.py "${SMOKE_ARGS[@]}"
 
 echo "[8/8] Deploy complete."
 echo

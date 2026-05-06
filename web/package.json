@@ -33,6 +33,7 @@
     "typescript": "^5"
   },
   "overrides": {
+    "axios": "^1.16.0",
     "postcss": "^8.5.13"
   }
 }

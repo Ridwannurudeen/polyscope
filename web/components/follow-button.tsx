@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { trackEvent } from "@/lib/analytics";
 import { getClientId } from "@/lib/client-id";
-import { useIdentity } from "@/lib/identity";
+import { useIdentity, useIdentityVersion } from "@/lib/identity";
 
 interface FollowItem {
   trader_address: string;
@@ -21,16 +21,21 @@ interface FollowCacheEntry {
 
 const followCache = new Map<string, FollowCacheEntry>();
 
-function cacheKey(clientId: string, walletAddress: string | null): string {
-  return `${clientId}|${walletAddress ?? ""}`;
+function cacheKey(
+  clientId: string,
+  walletAddress: string | null,
+  identityVersion: number,
+): string {
+  return `${identityVersion}|${clientId}|${walletAddress ?? ""}`;
 }
 
 function updateFollowCache(
   clientId: string,
   walletAddress: string | null,
+  identityVersion: number,
   update: (addresses: Set<string>) => Set<string>,
 ) {
-  const key = cacheKey(clientId, walletAddress);
+  const key = cacheKey(clientId, walletAddress, identityVersion);
   const entry = followCache.get(key) ?? {};
   entry.addresses = update(new Set(entry.addresses ?? []));
   entry.promise = undefined;
@@ -40,8 +45,9 @@ function updateFollowCache(
 async function loadFollowedTraders(
   clientId: string,
   walletAddress: string | null,
+  identityVersion: number,
 ): Promise<Set<string>> {
-  const key = cacheKey(clientId, walletAddress);
+  const key = cacheKey(clientId, walletAddress, identityVersion);
   const cached = followCache.get(key);
   if (cached?.addresses) return cached.addresses;
   if (cached?.promise) return cached.promise;
@@ -72,6 +78,7 @@ export function FollowButton({
   size?: "sm" | "md";
 }) {
   const { walletAddress } = useIdentity();
+  const identityVersion = useIdentityVersion();
   const [following, setFollowing] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const normalizedTrader = traderAddress.toLowerCase();
@@ -80,7 +87,7 @@ export function FollowButton({
     const cid = getClientId();
     if (!cid) return;
     let cancelled = false;
-    loadFollowedTraders(cid, walletAddress)
+    loadFollowedTraders(cid, walletAddress, identityVersion)
       .then((addresses) => {
         if (!cancelled) setFollowing(addresses.has(normalizedTrader));
       })
@@ -90,7 +97,7 @@ export function FollowButton({
     return () => {
       cancelled = true;
     };
-  }, [normalizedTrader, walletAddress]);
+  }, [normalizedTrader, walletAddress, identityVersion]);
 
   const sizeClass = size === "sm" ? "h-7 px-2 text-eyebrow" : "h-8 px-3 text-eyebrow";
 
@@ -106,10 +113,15 @@ export function FollowButton({
           { method: "DELETE" },
         );
         if (r.ok) {
-          updateFollowCache(cid, walletAddress, (addresses) => {
-            addresses.delete(normalizedTrader);
-            return addresses;
-          });
+          updateFollowCache(
+            cid,
+            walletAddress,
+            identityVersion,
+            (addresses) => {
+              addresses.delete(normalizedTrader);
+              return addresses;
+            },
+          );
           setFollowing(false);
           trackEvent("trader_unfollowed", { trader_address: traderAddress });
         }
@@ -124,10 +136,15 @@ export function FollowButton({
           }),
         });
         if (r.ok) {
-          updateFollowCache(cid, walletAddress, (addresses) => {
-            addresses.add(normalizedTrader);
-            return addresses;
-          });
+          updateFollowCache(
+            cid,
+            walletAddress,
+            identityVersion,
+            (addresses) => {
+              addresses.add(normalizedTrader);
+              return addresses;
+            },
+          );
           setFollowing(true);
           trackEvent("trader_followed", { trader_address: traderAddress });
         }

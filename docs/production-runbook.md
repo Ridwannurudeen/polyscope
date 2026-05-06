@@ -18,9 +18,8 @@ domain.
 ## Automated Smoke
 
 ```bash
-python scripts/production_smoke.py \
-  --base-url https://polyscope.gudman.xyz \
-  --admin-token "$POLYSCOPE_ADMIN_TOKEN"
+POLYSCOPE_ADMIN_TOKEN="$POLYSCOPE_ADMIN_TOKEN" \
+  python scripts/production_smoke.py --base-url https://polyscope.gudman.xyz
 ```
 
 For local smoke tests that should not kick off Polymarket polling jobs:

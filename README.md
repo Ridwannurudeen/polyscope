@@ -190,13 +190,12 @@ python scripts/production_smoke.py --base-url https://polyscope.gudman.xyz
 With admin metrics:
 
 ```bash
-python scripts/production_smoke.py \
-  --base-url https://polyscope.gudman.xyz \
-  --admin-token "$POLYSCOPE_ADMIN_TOKEN"
+POLYSCOPE_ADMIN_TOKEN="$POLYSCOPE_ADMIN_TOKEN" \
+  python scripts/production_smoke.py --base-url https://polyscope.gudman.xyz
 ```
 
 The smoke script checks the web pages, Builder Code identity, public builder
-trades, admin header auth when a token is provided, server-side trade metadata
+trades, admin header auth when `POLYSCOPE_ADMIN_TOKEN` is set, server-side trade metadata
 for a live market, and Polymarket's geoblock endpoint. Wallet-link signing and
 actual order placement remain manual checks because they require user approval.
 

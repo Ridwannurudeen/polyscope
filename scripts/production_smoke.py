@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
@@ -142,10 +143,9 @@ def check_public_builder_trades(base_url: str) -> None:
 
 def check_admin_metrics(base_url: str, admin_token: str | None) -> None:
     if not admin_token:
-        print("skip - admin metrics (no --admin-token)")
+        print("skip - admin metrics (no admin token)")
         return
-    quoted = urllib.parse.quote(admin_token)
-    request_json(base_url, f"/api/admin/metrics?token={quoted}", expected_status=401)
+    request_json(base_url, "/api/admin/metrics?token=smoke-rejected", expected_status=401)
     data = request_json(
         base_url,
         "/api/admin/metrics?days=1",
@@ -210,7 +210,6 @@ def check_polymarket_geoblock() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run PolyScope production smoke tests.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--admin-token", default=None)
     parser.add_argument("--market-id", default=None)
     parser.add_argument("--allow-unconfigured-builder", action="store_true")
     parser.add_argument("--require-server-trading", action="store_true")
@@ -222,6 +221,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    admin_token = os.getenv("POLYSCOPE_ADMIN_TOKEN")
     base_url = args.base_url.rstrip("/")
     try:
         check_web_pages(base_url)
@@ -232,7 +232,7 @@ def main() -> int:
         if args.skip_admin:
             print("skip - admin metrics (--skip-admin)")
         else:
-            check_admin_metrics(base_url, args.admin_token)
+            check_admin_metrics(base_url, admin_token)
         if args.skip_trade:
             print("skip - trade metadata (--skip-trade)")
         else:

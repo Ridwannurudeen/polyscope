@@ -8,6 +8,7 @@ Strategy: do the aggregate once into a temp table (the same scan the old
 methodology query used to do on every call), then UPDATE divergence_signals
 via JOIN. One slow scan beats N small queries.
 """
+import argparse
 import asyncio
 import sys
 import time
@@ -18,7 +19,7 @@ sys.path.insert(0, "/app")
 from api.database import DB_PATH
 
 
-async def main():
+async def main(dry_run: bool = False):
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA journal_mode=WAL")
@@ -42,6 +43,9 @@ async def main():
         )
         distinct_markets = (await cursor.fetchone())[0]
         print(f"distinct markets to aggregate: {distinct_markets}")
+        if dry_run:
+            print("dry run: no rows updated")
+            return
 
         t0 = time.time()
         print("step 1/3: aggregating market_snapshots into temp table...")
@@ -59,7 +63,7 @@ async def main():
                GROUP BY market_id"""
         )
         await db.execute(
-            "CREATE INDEX _idx_mq_mid ON _market_quality(market_id)"
+            "CREATE INDEX IF NOT EXISTS _idx_mq_mid ON _market_quality(market_id)"
         )
         cursor = await db.execute("SELECT COUNT(*) FROM _market_quality")
         agg_rows = (await cursor.fetchone())[0]
@@ -101,4 +105,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(
+        description="Backfill divergence signal market quality fields."
+    )
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    asyncio.run(main(dry_run=args.dry_run))

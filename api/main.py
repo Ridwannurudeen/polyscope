@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -30,6 +31,9 @@ from .database import (
     get_metrics_summary,
     get_pending_whale_alerts,
     get_portfolio,
+    get_predictive_contributors_for_markets,
+    get_low_priority_write_db,
+    get_public_read_db,
     get_resolved_markets,
     get_signal_accuracy,
     get_leaderboard_comparison,
@@ -43,6 +47,7 @@ from .database import (
     get_whale_alerts,
     init_db,
     is_following,
+    client_has_linked_wallet,
     is_wallet_linked_to_client,
     link_wallet_to_client,
     builder_trades_stats,
@@ -53,7 +58,6 @@ from .database import (
     record_event,
     record_user_action,
     remove_from_watchlist,
-    search_universal,
     unfollow_trader,
     update_builder_order_result,
 )
@@ -101,21 +105,26 @@ async def lifespan(app: FastAPI):
         logger.info("Scheduler disabled by POLYSCOPE_DISABLE_SCHEDULER")
     else:
         # Schedule jobs
-        scheduler.add_job(fetch_markets_job, "interval", minutes=5, id="fetch_markets")
-        scheduler.add_job(fetch_leaderboard_job, "interval", minutes=10, id="fetch_leaderboard")
-        scheduler.add_job(compute_divergences_job, "interval", minutes=5, id="compute_divergences")
-        scheduler.add_job(detect_movers_job, "interval", minutes=5, id="detect_movers")
-        scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes")
-        scheduler.add_job(detect_whale_trades_job, "interval", minutes=2, id="detect_whales")
-        scheduler.add_job(sync_builder_orders_job, "interval", seconds=60, id="sync_builder_orders")
-        scheduler.add_job(sync_attributed_trades_job, "interval", minutes=3, id="sync_builder_trades")
-        scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup")
+        # max_instances=1 + coalesce=True prevents overlap when a long
+        # job overruns its interval; misfire_grace_time runs a missed
+        # tick if the scheduler was momentarily blocked.
+        _job_kwargs = dict(max_instances=1, coalesce=True, misfire_grace_time=60)
+        scheduler.add_job(fetch_markets_job, "interval", minutes=5, id="fetch_markets", **_job_kwargs)
+        scheduler.add_job(fetch_leaderboard_job, "interval", minutes=10, id="fetch_leaderboard", **_job_kwargs)
+        scheduler.add_job(compute_divergences_job, "interval", minutes=5, id="compute_divergences", **_job_kwargs)
+        scheduler.add_job(detect_movers_job, "interval", minutes=5, id="detect_movers", **_job_kwargs)
+        scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes", **_job_kwargs)
+        scheduler.add_job(detect_whale_trades_job, "interval", minutes=2, id="detect_whales", **_job_kwargs)
+        scheduler.add_job(sync_builder_orders_job, "interval", seconds=60, id="sync_builder_orders", **_job_kwargs)
+        scheduler.add_job(sync_attributed_trades_job, "interval", minutes=3, id="sync_builder_trades", **_job_kwargs)
+        scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup", **_job_kwargs)
         scheduler.start()
 
         # Run initial fetch (markets + leaderboard synchronously so API has data)
         logger.info("Running initial data fetch...")
         await fetch_markets_job()
         await fetch_leaderboard_job()
+        await _warm_public_stats_caches()
 
         # Run heavy scans in background so uvicorn starts immediately
         asyncio.create_task(_run_initial_scans())
@@ -154,18 +163,24 @@ DISCLAIMER = (
 _CONDITION_ID_RE = re.compile(r"^[0-9a-zA-Z_-]{1,128}$")
 _GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 _WALLET_LINK_TTL_SECONDS = 300
-_WALLET_LINK_DOMAINS = {"polyscope.gudman.xyz", "testserver"}
+_WALLET_LINK_DOMAINS = {"polyscope.gudman.xyz"}
+_DEV_DOMAIN_FLAGS = {"1", "true", "yes", "on"}
+
+
+def _dev_wallet_domains_allowed() -> bool:
+    return (
+        os.getenv("POLYSCOPE_ALLOW_DEV_DOMAINS", "").strip().lower()
+        in _DEV_DOMAIN_FLAGS
+    )
 _PUBLIC_READ_BUSY_TIMEOUT_MS = 1000
 _PUBLIC_STATS_TTL_SECONDS = 600
 _PUBLIC_PARTIAL_STATS_TTL_SECONDS = 60
-_PUBLIC_STATS_DEADLINE_SECONDS = 2.0
+_PUBLIC_STATS_DEADLINE_SECONDS = 6.0
 _PUBLIC_CACHE_REFRESH_TASKS: dict[str, asyncio.Task] = {}
 
 
 async def _get_public_read_db():
-    db = await get_db()
-    await db.execute(f"PRAGMA busy_timeout={_PUBLIC_READ_BUSY_TIMEOUT_MS}")
-    return db
+    return await get_public_read_db(_PUBLIC_READ_BUSY_TIMEOUT_MS)
 
 
 def _with_public_cache_meta(
@@ -265,6 +280,23 @@ async def _load_signals_accuracy(include_simulation: bool = True) -> dict:
         await db.close()
 
 
+async def _warm_public_stats_caches() -> None:
+    for cache_key, loader in (
+        ("divergences", _warm_divergences_cache),
+        ("methodology_stats", _load_methodology_stats),
+        ("signals_accuracy", _load_signals_accuracy),
+    ):
+        try:
+            cache.set(
+                cache_key,
+                await asyncio.wait_for(loader(), 120.0),
+                ttl_seconds=_PUBLIC_STATS_TTL_SECONDS,
+            )
+            logger.info("Warmed public stats cache: %s", cache_key)
+        except Exception:
+            logger.exception("Failed to warm public stats cache: %s", cache_key)
+
+
 def _empty_methodology_stats() -> dict:
     return {
         "available": False,
@@ -359,6 +391,49 @@ async def _load_divergences_from_db() -> tuple[list[dict], int]:
         await db.close()
 
 
+async def _predictive_for_divergences(
+    divergences,
+    cached: dict[str, dict] | None = None,
+) -> dict[str, dict]:
+    predictive = dict(cached or {})
+    missing: list[str] = []
+    for item in divergences:
+        market_id = getattr(item, "market_id", None)
+        if market_id is None and isinstance(item, dict):
+            market_id = item.get("market_id")
+        if isinstance(market_id, str) and market_id and market_id not in predictive:
+            missing.append(market_id)
+    if not missing:
+        return predictive
+
+    db = await _get_public_read_db()
+    try:
+        predictive.update(
+            await get_predictive_contributors_for_markets(
+                db,
+                list(dict.fromkeys(missing)),
+            )
+        )
+    finally:
+        await db.close()
+    return predictive
+
+
+async def _warm_divergences_cache() -> list[dict]:
+    rows, expired_count = await _load_divergences_from_db()
+    predictive = await _predictive_for_divergences(
+        rows,
+        cache.get("divergence_predictive_contributors") or {},
+    )
+    cache.set("divergences_expired_count", expired_count, ttl_seconds=300)
+    cache.set(
+        "divergence_predictive_contributors",
+        predictive,
+        ttl_seconds=_PUBLIC_STATS_TTL_SECONDS,
+    )
+    return rows
+
+
 @app.get("/")
 async def root():
     return {"name": "PolyScope", "version": "0.3.0", "disclaimer": DISCLAIMER}
@@ -368,6 +443,7 @@ async def root():
 async def scan_latest():
     """Latest scan: divergences + movers + summary."""
     divergences = cache.get("divergences")
+    predictive = cache.get("divergence_predictive_contributors") or {}
     source = "cache"
     stale = False
     fallback_reason = None
@@ -399,15 +475,19 @@ async def scan_latest():
                 fallback_reason = "timeout"
             else:
                 divergences, _expired_count = result
+                predictive = await _predictive_for_divergences(
+                    divergences[:20],
+                    predictive,
+                )
                 source = "db_fallback"
 
     movers, movers_source, movers_stale = _cache_value_with_source("movers", {})
     markets, markets_source, markets_stale = _cache_value_with_source("markets", [])
 
-    if source in {"db_fallback", "unavailable"}:
+    if source == "unavailable":
         div_out = divergences[:20]
     else:
-        div_out = [asdict(d) for d in divergences[:20]]
+        div_out = _serialize_divergence_signals(divergences[:20], predictive)
 
     response = {
         "divergences": div_out,
@@ -474,8 +554,9 @@ async def get_divergences():
         )
 
     rows, db_expired_count = result
+    predictive = await _predictive_for_divergences(rows, predictive)
     return _divergences_response(
-        _serialize_divergence_signals(rows),
+        _serialize_divergence_signals(rows, predictive),
         source="db_fallback",
         stale=False,
         expired_count=db_expired_count,
@@ -803,12 +884,63 @@ async def methodology_stats():
 
 @app.get("/api/search")
 async def search(q: str = Query(..., min_length=1, max_length=128)):
-    """Universal search across markets (by question) and traders (by address)."""
-    db = await get_db()
-    try:
-        return await search_universal(db, q, limit=8)
-    finally:
-        await db.close()
+    """Universal search across markets (by question) and traders (by address).
+
+    Markets: scanned in-memory from the active `divergences` cache.
+    DB-side LIKE on `divergence_signals.question` was 15+ seconds even
+    bounded to 28 days because the planner couldn't use an index for the
+    leading-wildcard substring match. The active-divergences cache is
+    ~50 entries, so a Python scan is microseconds.
+
+    Traders: small prefix lookup against `trader_accuracy`.
+    """
+    needle = q.strip().lower()
+    if not needle:
+        return {"markets": [], "traders": []}
+
+    cached_signals = cache.get("divergences") or []
+    market_matches: list[dict] = []
+    seen_market_ids: set[str] = set()
+    for signal in cached_signals:
+        record = asdict(signal) if is_dataclass(signal) else dict(signal)
+        question = (record.get("question") or "").lower()
+        if needle not in question:
+            continue
+        market_id = record.get("market_id")
+        if market_id in seen_market_ids:
+            continue
+        seen_market_ids.add(market_id)
+        market_matches.append({
+            "market_id": market_id,
+            "question": record.get("question"),
+            "category": record.get("category"),
+            "sm_direction": record.get("sm_direction"),
+            "market_price": record.get("market_price"),
+            "sm_consensus": record.get("sm_consensus"),
+            "divergence_pct": record.get("divergence_pct"),
+            "signal_strength": record.get("signal_strength"),
+            "latest_ts": record.get("timestamp"),
+        })
+        if len(market_matches) >= 8:
+            break
+
+    traders: list[dict] = []
+    if needle.startswith("0x"):
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                """SELECT trader_address, accuracy_pct, total_divergent_signals,
+                          correct_predictions
+                   FROM trader_accuracy
+                   WHERE trader_address LIKE ? COLLATE NOCASE
+                   ORDER BY accuracy_pct DESC, total_divergent_signals DESC
+                   LIMIT ?""",
+                (f"{needle}%", 8),
+            )
+            traders = [dict(r) for r in await cursor.fetchall()]
+        finally:
+            await db.close()
+    return {"markets": market_matches, "traders": traders}
 
 
 @app.get("/api/leaderboards/compare")
@@ -937,7 +1069,16 @@ async def trader_profile(trader_address: str):
 
 @app.get("/api/calibration")
 async def calibration_overview():
-    """Brier scores + calibration by category."""
+    """Brier scores + calibration by category.
+
+    Cached for 10 minutes — the underlying scan over `resolved_markets`
+    plus per-row Brier computation takes ~14s on the live dataset, far
+    over the public-stats deadline. Frontend polls every 600s.
+    """
+    cached = cache.get("calibration_overview")
+    if cached is not None:
+        return cached
+
     from polyscope.calibration import (
         category_brier_scores,
         compute_calibration,
@@ -964,12 +1105,14 @@ async def calibration_overview():
         for r in rows
     ]
 
-    return {
+    result = {
         "overall_brier": overall_brier(markets),
         "calibration": [asdict(b) for b in compute_calibration(markets)],
         "by_category": category_brier_scores(markets),
         "total_resolved": len(markets),
     }
+    cache.set("calibration_overview", result, ttl_seconds=600)
+    return result
 
 
 @app.get("/api/signals/accuracy")
@@ -1063,8 +1206,26 @@ async def list_events(limit: int = Query(20, le=50)):
         "divergences", []
     )
 
-    # Build divergence lookup
-    div_map = {d.market_id: d for d in divergences}
+    def _signal_market_id(signal) -> str | None:
+        if isinstance(signal, dict):
+            return signal.get("market_id")
+        return getattr(signal, "market_id", None)
+
+    def _signal_divergence_pct(signal) -> float:
+        value = (
+            signal.get("divergence_pct")
+            if isinstance(signal, dict)
+            else getattr(signal, "divergence_pct", 0)
+        )
+        return float(value or 0)
+
+    # Build divergence lookup. Startup DB warm-cache stores dict rows;
+    # scheduler scans store DivergenceSignal dataclasses.
+    div_map = {
+        market_id: d
+        for d in divergences
+        if (market_id := _signal_market_id(d))
+    }
 
     # Group by question prefix (first 40 chars) as a heuristic
     from collections import defaultdict
@@ -1082,7 +1243,7 @@ async def list_events(limit: int = Query(20, le=50)):
         total_vol = sum(m.volume_24h for m in mkts)
         div_signals = [div_map[m.condition_id] for m in mkts if m.condition_id in div_map]
         avg_div = (
-            sum(d.divergence_pct for d in div_signals) / len(div_signals)
+            sum(_signal_divergence_pct(d) for d in div_signals) / len(div_signals)
             if div_signals
             else 0
         )
@@ -1169,7 +1330,11 @@ class LinkWalletRequest(BaseModel):
     wallet_address: str = Field(pattern=_EVM_ADDR_RE)
     domain: str = Field(min_length=1, max_length=128, pattern=r"^[^\s/]+$")
     issued_at: int = Field(gt=0)
-    signature: str = Field(min_length=1, max_length=512)
+    signature: str = Field(
+        min_length=132,
+        max_length=132,
+        pattern=r"^0x[0-9a-fA-F]{130}$",
+    )
 
 
 def _wallet_link_message(
@@ -1188,11 +1353,15 @@ def _wallet_link_message(
 
 
 def _verify_wallet_link_signature(body: LinkWalletRequest) -> None:
-    if (
-        body.domain not in _WALLET_LINK_DOMAINS
-        and not body.domain.startswith("localhost:")
-        and not body.domain.startswith("127.0.0.1:")
-    ):
+    dev_allowed = _dev_wallet_domains_allowed()
+    domain_allowed = body.domain in _WALLET_LINK_DOMAINS
+    if not domain_allowed and dev_allowed:
+        domain_allowed = (
+            body.domain == "testserver"
+            or body.domain.startswith("localhost:")
+            or body.domain.startswith("127.0.0.1:")
+        )
+    if not domain_allowed:
         raise HTTPException(status_code=400, detail="wallet link domain not allowed")
 
     now = int(time.time())
@@ -1221,10 +1390,25 @@ def _verify_wallet_link_signature(body: LinkWalletRequest) -> None:
 
 
 async def _require_wallet_link(db, client_id: str, wallet_address: str | None) -> None:
-    if not wallet_address:
+    """Enforce wallet-signature ownership once a client_id has linked a wallet.
+
+    Anonymous (pre-link) clients keep working with client_id alone — the
+    wallet-link flow is opt-in. Once a wallet is linked, that client_id is
+    permanently sealed: every subsequent read/write must present the
+    matching wallet_address. Without this, a leaked client_id would grant
+    unrestricted access to wallet-bound state (watchlist, follows, portfolio).
+    """
+    if wallet_address:
+        if not await is_wallet_linked_to_client(db, client_id, wallet_address):
+            raise HTTPException(
+                status_code=401, detail="wallet is not linked to client"
+            )
         return
-    if not await is_wallet_linked_to_client(db, client_id, wallet_address):
-        raise HTTPException(status_code=401, detail="wallet is not linked to client")
+    if await client_has_linked_wallet(db, client_id):
+        raise HTTPException(
+            status_code=401,
+            detail="wallet signature required for this client_id",
+        )
 
 
 @app.post("/api/watchlist/add")
@@ -1555,7 +1739,7 @@ def _require_admin(x_admin_token: str | None):
             status_code=503,
             detail="Admin endpoint disabled (POLYSCOPE_ADMIN_TOKEN not set)",
         )
-    if not x_admin_token or x_admin_token != expected:
+    if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
 
@@ -1619,8 +1803,13 @@ async def place_order(
         await _finalize_order(row_id, "rejected", error=str(e))
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:  # CLOB/network errors
+        logger.warning(
+            "CLOB order placement failed for builder order %s",
+            row_id,
+            exc_info=True,
+        )
         await _finalize_order(row_id, "failed", error=f"{type(e).__name__}: {e}")
-        raise HTTPException(status_code=502, detail=f"CLOB error: {e}")
+        raise HTTPException(status_code=502, detail="CLOB order placement failed")
 
     clob_id = (
         resp.get("orderID")
@@ -1645,11 +1834,11 @@ async def place_order(
 
 
 async def _finalize_order(row_id: int, status: str, **kwargs):
-    db = await get_db()
-    try:
+    async def _op(db):
         await update_builder_order_result(db, row_id, status=status, **kwargs)
-    finally:
-        await db.close()
+        return None
+
+    await _retry_on_locked("finalize_order", _op)
 
 
 @app.get("/api/orders/recent")
@@ -1756,27 +1945,42 @@ async def orders_public(limit: int = Query(default=20, ge=1, le=100)):
 # ── Instrumentation ────────────────────────────────────────
 
 
+_EVENT_PATH_RE = r"^/[^\s<>\"'`\\]{0,255}$"
+_EVENT_REFERRER_RE = r"^(https?://[^\s<>\"'`\\]{1,500}|/[^\s<>\"'`\\]{0,511})$"
+
+
 class EventRequest(BaseModel):
     event_type: str = Field(min_length=1, max_length=64)
     client_id: str | None = Field(default=None, max_length=64)
     properties: dict | None = None
-    path: str | None = Field(default=None, max_length=256)
-    referrer: str | None = Field(default=None, max_length=512)
+    path: str | None = Field(default=None, max_length=256, pattern=_EVENT_PATH_RE)
+    referrer: str | None = Field(
+        default=None,
+        max_length=512,
+        pattern=_EVENT_REFERRER_RE,
+    )
 
 
 @app.post("/api/events")
 async def events_ingest(body: EventRequest):
-    db = await get_db()
+    db = await get_low_priority_write_db(500)
     try:
-        await record_event(
-            db,
-            event_type=body.event_type,
-            client_id=body.client_id,
-            properties=body.properties,
-            path=body.path,
-            referrer=body.referrer,
-        )
-        await db.commit()
+        try:
+            await record_event(
+                db,
+                event_type=body.event_type,
+                client_id=body.client_id,
+                properties=body.properties,
+                path=body.path,
+                referrer=body.referrer,
+            )
+            await db.commit()
+        except _sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower():
+                raise
+            await db.rollback()
+            logger.info("events_ingest dropped event while database was locked")
+            return {"ok": False, "dropped": True}
     finally:
         await db.close()
     return {"ok": True}

@@ -37,9 +37,9 @@ export function ConnectWallet() {
     try {
       let wallet = address;
       if (!isConnected || !wallet) {
-        const injected = connectors.find((c) => c.type === "injected") ?? connectors[0];
+        const injected = connectors.find((c) => c.type === "injected");
         if (!injected) {
-          throw new Error("No browser wallet found");
+          throw new Error("Install or unlock a browser wallet, then try again");
         }
         const connected = await connectAsync({ connector: injected });
         wallet = connected.accounts[0];

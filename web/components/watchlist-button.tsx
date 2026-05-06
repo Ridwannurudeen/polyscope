@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { trackEvent } from "@/lib/analytics";
 import { getClientId } from "@/lib/client-id";
-import { useIdentity } from "@/lib/identity";
+import { useIdentity, useIdentityVersion } from "@/lib/identity";
 
 interface WatchlistItem {
   id: number;
@@ -22,16 +22,21 @@ interface WatchlistCacheEntry {
 
 const watchlistCache = new Map<string, WatchlistCacheEntry>();
 
-function cacheKey(clientId: string, walletAddress: string | null): string {
-  return `${clientId}|${walletAddress ?? ""}`;
+function cacheKey(
+  clientId: string,
+  walletAddress: string | null,
+  identityVersion: number,
+): string {
+  return `${identityVersion}|${clientId}|${walletAddress ?? ""}`;
 }
 
 function updateWatchlistCache(
   clientId: string,
   walletAddress: string | null,
+  identityVersion: number,
   update: (items: WatchlistItem[]) => WatchlistItem[],
 ) {
-  const key = cacheKey(clientId, walletAddress);
+  const key = cacheKey(clientId, walletAddress, identityVersion);
   const entry = watchlistCache.get(key) ?? {};
   entry.items = update(entry.items ?? []);
   entry.promise = undefined;
@@ -41,8 +46,9 @@ function updateWatchlistCache(
 async function loadWatchlist(
   clientId: string,
   walletAddress: string | null,
+  identityVersion: number,
 ): Promise<WatchlistItem[]> {
-  const key = cacheKey(clientId, walletAddress);
+  const key = cacheKey(clientId, walletAddress, identityVersion);
   const cached = watchlistCache.get(key);
   if (cached?.items) return cached.items;
   if (cached?.promise) return cached.promise;
@@ -65,6 +71,7 @@ async function loadWatchlist(
 
 export function WatchlistButton({ marketId }: { marketId: string }) {
   const { walletAddress } = useIdentity();
+  const identityVersion = useIdentityVersion();
   const [watchedId, setWatchedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -72,7 +79,7 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
     const clientId = getClientId();
     if (!clientId) return;
     let cancelled = false;
-    loadWatchlist(clientId, walletAddress)
+    loadWatchlist(clientId, walletAddress, identityVersion)
       .then((items) => {
         if (cancelled) return;
         const hit = items.find((x) => x.market_id === marketId);
@@ -84,7 +91,7 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [marketId, walletAddress]);
+  }, [marketId, walletAddress, identityVersion]);
 
   const add = async () => {
     const clientId = getClientId();
@@ -101,10 +108,15 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
       });
       if (r.ok) {
         const d: WatchlistItem = await r.json();
-        updateWatchlistCache(clientId, walletAddress, (items) => [
-          d,
-          ...items.filter((x) => x.market_id !== marketId),
-        ]);
+        updateWatchlistCache(
+          clientId,
+          walletAddress,
+          identityVersion,
+          (items) => [
+            d,
+            ...items.filter((x) => x.market_id !== marketId),
+          ],
+        );
         setWatchedId(d.id);
         trackEvent("watchlist_added", { market_id: marketId });
       }
@@ -125,8 +137,11 @@ export function WatchlistButton({ marketId }: { marketId: string }) {
         { method: "DELETE" },
       );
       if (r.ok) {
-        updateWatchlistCache(clientId, walletAddress, (items) =>
-          items.filter((x) => x.id !== watchedId),
+        updateWatchlistCache(
+          clientId,
+          walletAddress,
+          identityVersion,
+          (items) => items.filter((x) => x.id !== watchedId),
         );
         setWatchedId(null);
         trackEvent("watchlist_removed", { market_id: marketId });

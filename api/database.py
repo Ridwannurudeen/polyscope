@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sqlite3
 from pathlib import Path
 
 import aiosqlite
@@ -276,6 +278,7 @@ CREATE INDEX IF NOT EXISTS idx_whale_alerts_detected ON whale_alerts(detected_at
 CREATE INDEX IF NOT EXISTS idx_whale_alerts_notified ON whale_alerts(notified);
 CREATE INDEX IF NOT EXISTS idx_stp_signal ON signal_trader_positions(signal_id);
 CREATE INDEX IF NOT EXISTS idx_stp_trader ON signal_trader_positions(trader_address);
+CREATE INDEX IF NOT EXISTS idx_stp_trader_market ON signal_trader_positions(trader_address, market_id);
 CREATE INDEX IF NOT EXISTS idx_stp_market ON signal_trader_positions(market_id);
 CREATE INDEX IF NOT EXISTS idx_trader_accuracy_pct ON trader_accuracy(accuracy_pct);
 CREATE INDEX IF NOT EXISTS idx_watchlist_client ON watchlist(client_id);
@@ -305,6 +308,29 @@ async def get_db() -> aiosqlite.Connection:
     # 30s gives user-facing endpoints (portfolio, wallet-link, watchlist)
     # enough room to wait instead of 500-ing on contention.
     await db.execute("PRAGMA busy_timeout=30000")
+    await db.execute("PRAGMA synchronous=NORMAL")
+    await db.execute("PRAGMA cache_size=-64000")
+    db.row_factory = aiosqlite.Row
+    return db
+
+
+async def get_public_read_db(busy_timeout_ms: int = 1000) -> aiosqlite.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    db = await aiosqlite.connect(str(DB_PATH))
+    await db.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
+    await db.execute("PRAGMA query_only=ON")
+    await db.execute("PRAGMA synchronous=NORMAL")
+    await db.execute("PRAGMA cache_size=-64000")
+    db.row_factory = aiosqlite.Row
+    return db
+
+
+async def get_low_priority_write_db(
+    busy_timeout_ms: int = 500,
+) -> aiosqlite.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    db = await aiosqlite.connect(str(DB_PATH))
+    await db.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
     await db.execute("PRAGMA synchronous=NORMAL")
     await db.execute("PRAGMA cache_size=-64000")
     db.row_factory = aiosqlite.Row
@@ -737,6 +763,7 @@ async def cleanup_old_snapshots(
         )
         deleted = cursor.rowcount or 0
         await db.commit()
+        await asyncio.sleep(0)
         total += deleted
         if deleted < batch_size:
             break
@@ -1106,11 +1133,16 @@ async def add_to_watchlist(
             ),
         )
         row_id = cursor.lastrowid
-    except Exception:
-        # Likely UNIQUE constraint — already watchlisted
+    except aiosqlite.IntegrityError:
+        # UNIQUE constraint — already watchlisted. The conflict can be on
+        # either (client_id, market_id) OR (wallet_address, market_id);
+        # match on either so wallet-linked rows resolve cleanly.
         cursor = await db.execute(
-            "SELECT id FROM watchlist WHERE client_id = ? AND market_id = ?",
-            (client_id, market_id),
+            """SELECT id FROM watchlist
+               WHERE market_id = ?
+                 AND (client_id = ? OR
+                      (? IS NOT NULL AND wallet_address = ?))""",
+            (market_id, client_id, wallet_address, wallet_address),
         )
         existing = await cursor.fetchone()
         row_id = existing["id"] if existing else None
@@ -1321,6 +1353,24 @@ async def is_wallet_linked_to_client(
            WHERE wallet_address = ? AND client_id = ?
            LIMIT 1""",
         (wallet, client_id, wallet, client_id),
+    )
+    return await cursor.fetchone() is not None
+
+
+async def client_has_linked_wallet(
+    db: aiosqlite.Connection, client_id: str
+) -> bool:
+    """True if any wallet has been linked to this client_id via /api/wallet/link.
+
+    Used to seal off the legacy client_id-only access path once ownership
+    has been proven by signature.
+    """
+    cursor = await db.execute(
+        """SELECT 1 FROM wallet_client_links WHERE client_id = ?
+           UNION
+           SELECT 1 FROM wallets WHERE client_id = ?
+           LIMIT 1""",
+        (client_id, client_id),
     )
     return await cursor.fetchone() is not None
 
@@ -1635,18 +1685,28 @@ async def search_universal(
 
     Returns up to `limit` of each. Case-insensitive substring match
     on question; case-insensitive prefix match on trader_address.
+
+    Market search is bounded to recent signals (28 days) so the leading-
+    wildcard ``LIKE`` does not scan 400K+ historical rows. The frontend
+    use case is "find the active market I'm looking for"; resolved
+    markets older than a month are surfaced via the resolved-markets
+    page, not search.
     """
     q = query.strip()
     if not q:
         return {"markets": [], "traders": []}
 
-    # Markets — pick the latest signal row per matching market
+    # Markets — pick the latest signal row per matching market, restricted
+    # to the last 28 days. Index `idx_signals_ts` makes the timestamp gate
+    # the dominant filter, so the substring scan runs over thousands of
+    # rows, not hundreds of thousands.
     cursor = await db.execute(
         """SELECT market_id, question, category, sm_direction,
                   market_price, sm_consensus, divergence_pct, signal_strength,
                   MAX(timestamp) AS latest_ts
            FROM divergence_signals
-           WHERE question LIKE ? COLLATE NOCASE
+           WHERE timestamp >= datetime('now', '-28 days')
+                 AND question LIKE ? COLLATE NOCASE
            GROUP BY market_id
            ORDER BY latest_ts DESC
            LIMIT ?""",
@@ -1765,46 +1825,36 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
         if cur is None or (d["signal_strength"] or 0) > (cur["signal_strength"] or 0):
             best[mid] = d
 
-    # First-observed (trader, market) → trader_accuracy join, applying the gates
+    # Qualifying-trader population. Apply the Wilson gate before touching
+    # signal_trader_positions; production has only a few qualifying traders
+    # but hundreds of thousands of position rows.
     cursor = await db.execute(
-        """
-        WITH first_pos AS (
-            SELECT stp.signal_id, stp.trader_address
-            FROM signal_trader_positions stp
-            JOIN (
-                SELECT trader_address, market_id, MIN(id) AS first_id
-                FROM signal_trader_positions
-                GROUP BY trader_address, market_id
-            ) f ON f.first_id = stp.id
-        )
-        SELECT fp.signal_id, ta.accuracy_pct, ta.correct_predictions,
-               ta.total_divergent_signals
-        FROM first_pos fp
-        JOIN trader_accuracy ta ON ta.trader_address = fp.trader_address
-        WHERE ta.total_divergent_signals >= ?
-              AND ta.accuracy_pct >= ?
-        """,
-        (PREDICTIVE_MIN_N, PREDICTIVE_MIN_PCT),
-    )
-    contrib_rows = await cursor.fetchall()
-
-    qualifying_signal_ids: set[int] = set()
-    for r in contrib_rows:
-        lo = _wilson_lower_pct(int(r[2] or 0), int(r[3] or 0))
-        if lo >= PREDICTIVE_MIN_WILSON_LO:
-            qualifying_signal_ids.add(int(r[0]))
-
-    # Qualifying-trader population
-    cursor = await db.execute(
-        """SELECT correct_predictions, total_divergent_signals, accuracy_pct
+        """SELECT trader_address, correct_predictions, total_divergent_signals
            FROM trader_accuracy
            WHERE total_divergent_signals >= ? AND accuracy_pct >= ?""",
         (PREDICTIVE_MIN_N, PREDICTIVE_MIN_PCT),
     )
-    qualifying_traders = 0
+    qualifying_trader_addresses: list[str] = []
     for r in await cursor.fetchall():
-        if _wilson_lower_pct(int(r[0] or 0), int(r[1] or 0)) >= PREDICTIVE_MIN_WILSON_LO:
-            qualifying_traders += 1
+        if _wilson_lower_pct(int(r[1] or 0), int(r[2] or 0)) >= PREDICTIVE_MIN_WILSON_LO:
+            qualifying_trader_addresses.append(r[0])
+    qualifying_traders = len(qualifying_trader_addresses)
+
+    # Distinct markets where a qualifying trader was ever attributed.
+    # Gating by signal_id was wrong: best[mid].id is the strongest signal
+    # per market, while signal_trader_positions records every scan cycle's
+    # attribution, so the two ids almost never matched on production data.
+    # Gate by market, using the covering (trader_address, market_id) index.
+    qualifying_market_ids: set[str] = set()
+    if qualifying_trader_addresses:
+        placeholders = ",".join("?" for _ in qualifying_trader_addresses)
+        cursor = await db.execute(
+            f"""SELECT DISTINCT market_id
+                FROM signal_trader_positions INDEXED BY idx_stp_trader_market
+                WHERE trader_address IN ({placeholders})""",
+            tuple(qualifying_trader_addresses),
+        )
+        qualifying_market_ids = {r[0] for r in await cursor.fetchall()}
 
     by_band: dict[str, dict[str, float]] = {
         b: {"n": 0, "hits": 0, "wagered": 0.0, "returned": 0.0}
@@ -1842,7 +1892,7 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
         base_hits += hit
         base_wagered += 100.0
         base_returned += returned
-        if s["id"] not in qualifying_signal_ids:
+        if s["market_id"] not in qualifying_market_ids:
             continue
         total_n += 1
         total_hits += hit
@@ -1897,44 +1947,55 @@ async def get_methodology_stats(
     db: aiosqlite.Connection, include_predictive_filter: bool = True
 ) -> dict:
     """Live dataset stats for the public methodology page."""
-    # Signal counts and time range
+    # Signal counts, time range, and skew bands in one scan. The public
+    # methodology endpoint is cache-backed, but cold restarts still need
+    # a bounded first load.
     cursor = await db.execute(
-        """SELECT COUNT(*),
-                  SUM(CASE WHEN resolved = 1 THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END),
-                  MIN(timestamp), MAX(timestamp)
-           FROM divergence_signals"""
+        """
+        WITH classified AS (
+            SELECT resolved, outcome_correct, timestamp,
+                   CASE
+                       WHEN market_price >= 0.9 OR market_price <= 0.1 THEN 'very_lopsided'
+                       WHEN market_price >= 0.75 OR market_price <= 0.25 THEN 'lopsided'
+                       WHEN market_price >= 0.6  OR market_price <= 0.4  THEN 'moderate'
+                       ELSE 'tight'
+                   END AS skew
+            FROM divergence_signals
+        )
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN resolved = 1 THEN 1 ELSE 0 END) AS resolved,
+            SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) AS correct,
+            MIN(timestamp) AS first_captured,
+            MAX(timestamp) AS latest_captured,
+            SUM(CASE WHEN resolved = 1 AND skew = 'very_lopsided' THEN 1 ELSE 0 END) AS very_total,
+            SUM(CASE WHEN resolved = 1 AND skew = 'very_lopsided' AND outcome_correct = 1 THEN 1 ELSE 0 END) AS very_correct,
+            SUM(CASE WHEN resolved = 1 AND skew = 'lopsided' THEN 1 ELSE 0 END) AS lopsided_total,
+            SUM(CASE WHEN resolved = 1 AND skew = 'lopsided' AND outcome_correct = 1 THEN 1 ELSE 0 END) AS lopsided_correct,
+            SUM(CASE WHEN resolved = 1 AND skew = 'moderate' THEN 1 ELSE 0 END) AS moderate_total,
+            SUM(CASE WHEN resolved = 1 AND skew = 'moderate' AND outcome_correct = 1 THEN 1 ELSE 0 END) AS moderate_correct,
+            SUM(CASE WHEN resolved = 1 AND skew = 'tight' THEN 1 ELSE 0 END) AS tight_total,
+            SUM(CASE WHEN resolved = 1 AND skew = 'tight' AND outcome_correct = 1 THEN 1 ELSE 0 END) AS tight_correct
+        FROM classified
+        """
     )
     row = await cursor.fetchone()
-    total, resolved, correct, min_ts, max_ts = row
+    total, resolved, correct, min_ts, max_ts = row[:5]
 
     resolved = resolved or 0
     correct = correct or 0
     win_rate = (correct / resolved * 100) if resolved > 0 else None
 
-    # Win rate by market skew (the honest breakdown)
-    cursor = await db.execute(
-        """
-        SELECT
-            CASE
-                WHEN market_price >= 0.9 OR market_price <= 0.1 THEN 'very_lopsided'
-                WHEN market_price >= 0.75 OR market_price <= 0.25 THEN 'lopsided'
-                WHEN market_price >= 0.6  OR market_price <= 0.4  THEN 'moderate'
-                ELSE 'tight'
-            END AS skew,
-            COUNT(*) AS total,
-            SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) AS correct
-        FROM divergence_signals
-        WHERE resolved = 1
-        GROUP BY skew
-        """
-    )
-    skew_rows = await cursor.fetchall()
     skew_breakdown = {}
-    for r in skew_rows:
-        t = r[1] or 0
-        c = r[2] or 0
-        skew_breakdown[r[0]] = {
+    for band, total_idx, correct_idx in (
+        ("very_lopsided", 5, 6),
+        ("lopsided", 7, 8),
+        ("moderate", 9, 10),
+        ("tight", 11, 12),
+    ):
+        t = row[total_idx] or 0
+        c = row[correct_idx] or 0
+        skew_breakdown[band] = {
             "total": t,
             "correct": c,
             "win_rate_pct": (c / t * 100) if t > 0 else None,
@@ -2157,6 +2218,13 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
     a market scanned 100 times counts as 1 signal, not 100.  This gives an
     honest per-market win rate rather than an inflated/deflated per-row rate.
     Excludes expired signals.
+
+    Implementation note: previous version ran six independent CTE-based
+    scans over the full resolved set (~187K rows), each doing GROUP BY
+    market_id. That blew past the 2.0s public-stats deadline and the
+    homepage track-record card silently rendered all-zero fallbacks.
+    This version materializes "best per market" once and computes every
+    bucket via conditional aggregates in a single pass.
     """
     _BEST_PER_MARKET = """
         WITH best AS (
@@ -2173,72 +2241,52 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
         )
     """
 
-    # Overall
     cursor = await db.execute(
         _BEST_PER_MARKET +
         """SELECT
-               COUNT(*) as total,
-               SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct,
-               AVG(signal_strength) as avg_score
+               COUNT(*) AS overall_total,
+               SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) AS overall_correct,
+               AVG(signal_strength) AS overall_avg_score,
+               SUM(CASE WHEN signal_strength >= 70 THEN 1 ELSE 0 END) AS high_total,
+               SUM(CASE WHEN signal_strength >= 70 AND outcome_correct = 1 THEN 1 ELSE 0 END) AS high_correct,
+               SUM(CASE WHEN signal_strength >= 40 AND signal_strength < 70 THEN 1 ELSE 0 END) AS medium_total,
+               SUM(CASE WHEN signal_strength >= 40 AND signal_strength < 70 AND outcome_correct = 1 THEN 1 ELSE 0 END) AS medium_correct,
+               SUM(CASE WHEN signal_strength < 40 THEN 1 ELSE 0 END) AS low_total,
+               SUM(CASE WHEN signal_strength < 40 AND outcome_correct = 1 THEN 1 ELSE 0 END) AS low_correct,
+               SUM(CASE WHEN timestamp >= datetime('now', '-30 days') THEN 1 ELSE 0 END) AS r30_total,
+               SUM(CASE WHEN timestamp >= datetime('now', '-30 days') AND outcome_correct = 1 THEN 1 ELSE 0 END) AS r30_correct
            FROM best"""
     )
     row = await cursor.fetchone()
+
+    def _wr(c, t):
+        return round(c / t, 4) if t > 0 else 0.0
+
     total = row[0] or 0
     correct = row[1] or 0
-    avg_score = row[2] or 0.0
-
     overall = {
         "total_signals": total,
         "correct": correct,
-        "win_rate": round(correct / total, 4) if total > 0 else 0.0,
-        "avg_score": round(avg_score, 2),
+        "win_rate": _wr(correct, total),
+        "avg_score": round(row[2] or 0.0, 2),
     }
-
-    # By tier (high >= 70, medium 40-70, low < 40)
-    by_tier = {}
-    for tier, low, high in [("high", 70, 101), ("medium", 40, 70), ("low", 0, 40)]:
-        cursor = await db.execute(
-            _BEST_PER_MARKET +
-            """SELECT
-                   COUNT(*) as total,
-                   SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct
-               FROM best
-               WHERE signal_strength >= ? AND signal_strength < ?""",
-            (low, high),
-        )
-        r = await cursor.fetchone()
-        t = r[0] or 0
-        c = r[1] or 0
-        by_tier[tier] = {
-            "total": t,
-            "correct": c,
-            "win_rate": round(c / t, 4) if t > 0 else 0.0,
-        }
-
-    # Rolling 30-day
-    cursor = await db.execute(
-        _BEST_PER_MARKET.replace(
-            "WHERE resolved = 1",
-            "WHERE resolved = 1 AND timestamp >= datetime('now', '-30 days')",
-        ) +
-        """SELECT
-               COUNT(*) as total,
-               SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) as correct
-           FROM best"""
-    )
-    r30 = await cursor.fetchone()
-    t30 = r30[0] or 0
-    c30 = r30[1] or 0
-
+    by_tier = {
+        "high": {"total": row[3] or 0, "correct": row[4] or 0,
+                 "win_rate": _wr(row[4] or 0, row[3] or 0)},
+        "medium": {"total": row[5] or 0, "correct": row[6] or 0,
+                   "win_rate": _wr(row[6] or 0, row[5] or 0)},
+        "low": {"total": row[7] or 0, "correct": row[8] or 0,
+                "win_rate": _wr(row[8] or 0, row[7] or 0)},
+    }
     rolling_30d = {
-        "total": t30,
-        "correct": c30,
-        "win_rate": round(c30 / t30, 4) if t30 > 0 else 0.0,
+        "total": row[9] or 0,
+        "correct": row[10] or 0,
+        "win_rate": _wr(row[10] or 0, row[9] or 0),
     }
 
-    # By skew band — the honest breakdown. Composite win rate hides
-    # composition effect (lopsided markets dominate). Tight-band accuracy
-    # is the real test of edge.
+    # By skew band — separate scan because the band classification is
+    # mutually-exclusive overlapping (e.g. price=0.05 is both <=0.1 and
+    # <=0.25); inlining as conditional sums would double-count.
     cursor = await db.execute(
         _BEST_PER_MARKET +
         """SELECT
@@ -2262,11 +2310,7 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
     }
     for r in skew_rows:
         band, t, c = r[0], r[1] or 0, r[2] or 0
-        by_skew[band] = {
-            "total": t,
-            "correct": c,
-            "win_rate": round(c / t, 4) if t > 0 else 0.0,
-        }
+        by_skew[band] = {"total": t, "correct": c, "win_rate": _wr(c, t)}
 
     return {
         "overall": overall,
@@ -2687,6 +2731,42 @@ async def update_builder_order_result(
         (status, clob_order_id, error, raw_response, now, row_id),
     )
     await db.commit()
+
+
+async def mark_stale_pending_builder_orders(
+    db: aiosqlite.Connection, minutes: int = 10
+) -> int:
+    """Move pre-CLOB pending rows past the crash window to timeout."""
+    from datetime import datetime, timedelta, timezone
+
+    await db.execute("PRAGMA busy_timeout=500")
+    last_err: Exception | None = None
+    try:
+        for attempt in range(4):
+            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+            now = datetime.now(timezone.utc).isoformat()
+            try:
+                cursor = await db.execute(
+                    """UPDATE builder_orders
+                       SET status = 'timeout',
+                           error = 'order attempt timed out before CLOB response',
+                           updated_at = ?
+                       WHERE status = 'pending'
+                         AND created_at < ?""",
+                    (now, cutoff),
+                )
+                await db.commit()
+                return cursor.rowcount or 0
+            except sqlite3.OperationalError as e:
+                last_err = e
+                if "locked" not in str(e).lower():
+                    raise
+                await db.rollback()
+                await asyncio.sleep(0.25 * (2 ** attempt))
+        logger.info("mark_stale_pending_builder_orders skipped: %s", last_err)
+        return 0
+    finally:
+        await db.execute("PRAGMA busy_timeout=30000")
 
 
 async def list_builder_orders(
