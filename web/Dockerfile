@@ -1,7 +1,10 @@
+# syntax=docker/dockerfile:1.7
 FROM node:20-alpine AS builder
 WORKDIR /app
+# Cache npm downloads across builds. Layer is invalidated only when
+# package*.json changes; the underlying tarball cache survives.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 
 # NEXT_PUBLIC_* vars are baked at build time. POLYMARKET_BUILDER_CODE is a
@@ -14,7 +17,10 @@ ENV NEXT_PUBLIC_POLYMARKET_BUILDER_CODE=${NEXT_PUBLIC_POLYMARKET_BUILDER_CODE}
 ENV NEXT_PUBLIC_POLYMARKET_CLOB_HOST=${NEXT_PUBLIC_POLYMARKET_CLOB_HOST}
 ENV POLYSCOPE_API_URL=${POLYSCOPE_API_URL}
 
-RUN npm run build
+# .next/cache is the Next build cache — incremental rebuilds reuse it.
+# A BuildKit cache mount keeps it across builds without baking it into
+# the image layers.
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
