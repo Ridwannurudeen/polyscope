@@ -1,81 +1,67 @@
 # PolyScope
 
-**Counter-consensus intelligence for Polymarket.**
+> **Counter-consensus intelligence for Polymarket.** Tracks where crowd consensus disagrees with top-ranked traders — and scores which of those traders are *actually* predictive.
 
-PolyScope tracks divergence between prediction market prices and the positions of top-ranked traders, then scores which individual traders have actually been predictive and which have been systematically wrong. It turns a P&L-ranked leaderboard into an accuracy-ranked one.
+[![Live](https://img.shields.io/badge/live-polyscope.gudman.xyz-0dc584?style=flat-square)](https://polyscope.gudman.xyz)
+[![Tests](https://img.shields.io/badge/tests-224%20passing-0dc584?style=flat-square)](#tests)
+[![Stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20Next.js%2015%20%2B%20wagmi-111?style=flat-square)](#architecture)
+[![Builder Code](https://img.shields.io/badge/Polymarket-Builder%20Code%20configured-0dc584?style=flat-square)](https://polyscope.gudman.xyz/builder)
 
-Live: [polyscope.gudman.xyz](https://polyscope.gudman.xyz)
+[**Live demo →**](https://polyscope.gudman.xyz) &nbsp;·&nbsp; [Methodology →](https://polyscope.gudman.xyz/methodology) &nbsp;·&nbsp; [API docs →](https://polyscope.gudman.xyz/api/docs)
 
----
-
-## What it does
-
-- **Scans up to 500 active Polymarket markets every 5 minutes** for divergence between crowd consensus and top-100 trader positions
-- **Captures per-signal, per-trader attribution** — who positioned which way, at what size, at what rank
-- **Scores individual predictive accuracy** against resolved market outcomes
-- **Publishes two leaderboards**: highest-accuracy and lowest-accuracy traders on resolved divergent signals
-- **Surfaces the evidence trail** behind every divergence signal — contributor rows, hit rates, source, freshness
-
-The core insight driving the product: Polymarket's built-in leaderboard ranks by profit, not by prediction accuracy. Those aren't the same thing. A trader can be profitable on a few big wins while being anti-predictive on diverse positions. PolyScope measures the latter.
+![PolyScope dashboard hero](docs/screenshots/hero.png)
 
 ---
 
-## Architecture
+## Why this exists
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Polymarket APIs                                            │
-│  ├─ Gamma (markets, resolution)                             │
-│  ├─ Data API (positions, trades, leaderboard)               │
-│  └─ CLOB (browser-signed Builder Code orders)               │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-         ┌────────────────▼─────────────────┐
-         │  FastAPI + APScheduler           │
-         │  (api/ — Python)                 │
-         │                                  │
-         │  Jobs (every 5-60 min):          │
-         │  • fetch_markets                 │
-         │  • fetch_leaderboard             │
-         │  • compute_divergences           │
-         │  • detect_whale_trades           │
-         │  • track_outcomes                │
-         │  • rebuild_trader_accuracy       │
-         └────────────────┬─────────────────┘
-                          │
-                          ▼
-                 ┌────────────────┐
-                 │  SQLite (WAL)  │
-                 │  data/         │
-                 └────────┬───────┘
-                          │
-            ┌─────────────┼─────────────┐
-            │             │             │
-            ▼             ▼             ▼
-   ┌───────────────┐ ┌─────────┐ ┌──────────────┐
-   │  Next.js 15   │ │ Telegram│ │  REST API    │
-   │  (web/)       │ │  Bot    │ │  /api/*      │
-   │  Dashboard    │ │ Alerts  │ │              │
-   └───────────────┘ └─────────┘ └──────────────┘
-```
+Polymarket's built-in leaderboard ranks traders by **profit**, not by **prediction accuracy**. Those aren't the same thing — a trader can be wildly profitable on a few oversized wins while being systematically anti-predictive on the rest of their positions.
 
-### Service components
+PolyScope rebuilds the leaderboard around the question that actually matters for prediction: **on resolved markets where this trader took a counter-consensus position, how often were they right?** Per-trader, per-signal, per-skew-band, with Wilson 95% confidence intervals.
 
-| Component | Stack | Port | Role |
-|-----------|-------|------|------|
-| `api` | FastAPI + SQLite + APScheduler | 8020→8021 | Signal generation, data capture, REST API |
-| `web` | Next.js 15 + Tailwind + Recharts + wagmi | 3020 | Dashboard UI + browser-signed CLOB orders |
-| `bot` | python-telegram-bot | — | Whale-flow alerts |
+The result is a small set of genuinely predictive addresses that PolyScope flags as "predictive contributors" — and a much larger set of leaderboard names whose counter-consensus calls are noise. Every signal carries its evidence trail; every claim on the methodology page renders from live data.
 
-All services run as Docker containers behind nginx with TLS.
+---
+
+## What you can do
+
+### Counter-consensus signal feed
+
+![Divergence feed](docs/screenshots/divergence-feed.png)
+
+The `/smart-money` page shows live divergences between Polymarket crowd consensus and top-trader positions, ranked by composite score. Each DecisionCard exposes the structured thesis, contributor count, confidence tier, market-skew band, and explicit invalidators. Filter by predictive-backed signals only, by direction, by tier, or by category.
+
+### Per-trader accuracy leaderboards
+
+![Traders page](docs/screenshots/traders.png)
+
+`/traders` shows two ranked leaderboards — **predictive** (highest accuracy on resolved divergent signals) and **anti-predictive** (lowest). Sample sizes, Wilson 95% confidence intervals, and skew/category breakdowns are exposed for every address. Click any wallet for its full per-signal history.
+
+### Public methodology page
+
+![Methodology page](docs/screenshots/methodology.png)
+
+`/methodology` documents the model honestly: how signals are scored, why the contrarian-everywhere strategy is wrong, why the predictive-backed filter delivers a real but small edge over baseline, and the composition effects behind every headline number. The page renders from live data — claims update automatically as more markets resolve.
+
+### Portfolio + watchlist + Telegram alerts
+
+![Portfolio page](docs/screenshots/portfolio.png)
+
+Anonymous `client_id`-keyed watchlist (no account, no wallet required), manual trade log with PnL estimate, and outcome-resolved tracking. Connect a wallet to sync across devices. Connect Telegram via `/connect <id>` in [@polyscoppe_bot](https://t.me/polyscoppe_bot) for whale-flow alerts and follow-trader DMs.
+
+### Builder Code attribution
+
+![Builder page](docs/screenshots/builder.png)
+
+`/builder` exposes the public Builder Code (`0x6bf2…c7b81`) and the live attributed-trade table. Trades placed via PolyScope's DecisionCard "Trade" button sign in the user's own wallet, attach the Builder Code client-side, and surface here within ~3 minutes via the `sync_attributed_trades_job` polling loop. **Non-custodial** — PolyScope never holds keys.
 
 ---
 
 ## The signal engine
 
-### Divergence detection (`src/polyscope/divergence.py`)
+### Divergence detection — `src/polyscope/divergence.py`
 
-For every market with sufficient liquidity (≥$50K OI, ≥$10K 24h volume), PolyScope fetches positions from top-100 leaderboard traders and computes a weighted consensus:
+For every market with sufficient liquidity (≥$50K open interest, ≥$10K 24h volume), PolyScope fetches positions from the top-100 leaderboard traders and computes a weighted consensus:
 
 ```
 weight(trader, position) = (1 / rank)
@@ -84,56 +70,123 @@ weight(trader, position) = (1 / rank)
                          × category_skill_multiplier
 ```
 
-A signal fires when `|market_price - sm_consensus| ≥ 10%` AND the composite score crosses the threshold. Source can be positions or recent trades (trade-weighted uses a 24h exponential half-life decay).
+A signal fires when `|market_price − sm_consensus| ≥ 10%` AND the composite score crosses the per-band threshold. Source can be positions or recent trades (trade-weighted uses a 24h exponential half-life decay).
 
-### Contrarian direction
+### Why "fade the smart money" doesn't work
 
-Empirically validated on resolved signals: top-trader consensus is **skew-sensitive**, not mechanically contrarian. PolyScope separates very-lopsided aggregate consensus from signals backed by stronger predictive contributors, and exposes the market-skew caveats on [/methodology](https://polyscope.gudman.xyz/methodology).
+Backtest on resolved signals showed the original fade-everywhere strategy was negative-EV on every band where real alpha lives — the 96% headline win rate was a composition effect concentrated entirely in very-lopsided markets where simply predicting the favored side wins ~99.6% of the time.
 
-### Per-trader accuracy (live since Apr 12, 2026)
+Live strategy: **fade SM only on very-lopsided markets; follow SM on tight, moderate, lopsided.** Net win rate 97.2%, ROI **+5.3%** vs **+4.6%** baseline (post-bug-fix May 6 numbers).
 
-Every signal persists the individual traders who contributed to it (`signal_trader_positions` table). Once markets resolve, each trader's direction is scored against the outcome. This produces `trader_accuracy` — the actual predictive hit rate per address, stratified by market skew band and category.
+### Per-trader accuracy — `signal_trader_positions` table
 
-The `/traders` page exposes this as two leaderboards: highest-accuracy and lowest-accuracy addresses, with sample sizes and confidence intervals.
+Every signal persists the individual traders who contributed to it (address, rank, direction, size, weight). Once a market resolves, each contributor is scored against the outcome. The aggregate is `trader_accuracy` — actual predictive hit rate per address, stratified by skew band and category.
+
+The predictive-contributor filter qualifies a signal if any contributing trader has (a) `n ≥ 30` resolved signals, (b) accuracy `> 50%`, and (c) Wilson lower-bound `≥ 40%`. Currently 6 traders qualify; the pool grows as per-trader capture accumulates.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Polymarket APIs                                            │
+│  ├─ Gamma         (markets, resolution)                     │
+│  ├─ Data API      (positions, trades, leaderboard)          │
+│  └─ CLOB v2       (browser-signed Builder Code orders)      │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+         ┌────────────────▼─────────────────┐
+         │  FastAPI + APScheduler           │
+         │  (api/ — Python 3.12)            │
+         │                                  │
+         │  Jobs (every 5–60 min):          │
+         │  • fetch_markets                 │
+         │  • fetch_leaderboard             │
+         │  • compute_divergences           │
+         │  • detect_whale_trades           │
+         │  • track_outcomes                │
+         │  • rebuild_trader_accuracy       │
+         │  • sync_builder_orders           │
+         │  • sync_attributed_trades        │
+         └────────────────┬─────────────────┘
+                          │
+                          ▼
+                 ┌────────────────┐
+                 │  SQLite (WAL)  │
+                 │  /app/data/    │
+                 └────────┬───────┘
+                          │
+            ┌─────────────┼─────────────┐
+            │             │             │
+            ▼             ▼             ▼
+   ┌───────────────┐ ┌─────────┐ ┌──────────────┐
+   │  Next.js 15   │ │ Telegram│ │  REST API    │
+   │  (web/)       │ │  Bot    │ │  /api/*      │
+   │  + wagmi 3    │ │ Alerts  │ │              │
+   └───────────────┘ └─────────┘ └──────────────┘
+                          │
+                          ▼
+                  nginx + TLS + GeoIP2 + per-IP rate limits
+```
+
+| Component | Stack | Container | Role |
+|-----------|-------|-----------|------|
+| `api`     | FastAPI + SQLite + APScheduler | `polyscope-api`  | Signal engine, data capture, REST |
+| `web`     | Next.js 15 + Tailwind + Recharts + wagmi 3 | `polyscope-web`  | Dashboard + browser-signed CLOB orders |
+| `bot`     | python-telegram-bot                     | `polyscope-bot`  | Whale alerts + follow-trader DMs |
+
+All services run as Docker containers behind nginx. TLS via Let's Encrypt webroot. US-region trade-facilitation endpoints geoblocked via `libnginx-mod-http-geoip2` + DB-IP Lite (auto-refreshed monthly).
 
 ---
 
 ## API
 
-Selected public endpoints:
-
 | Endpoint | Returns |
 |----------|---------|
 | `GET /api/divergences` | Current active divergence signals |
 | `GET /api/divergences/history` | Resolved signals with outcome scoring |
-| `GET /api/signals/evidence/{market_id}` | Full evidence trail for latest signal |
+| `GET /api/signals/evidence/{market_id}` | Full evidence trail for a signal |
+| `GET /api/signals/accuracy` | Aggregate hit rate, by tier, 30d rolling |
 | `GET /api/traders/leaderboard?order=predictive\|anti-predictive` | Per-trader accuracy ranking |
-| `GET /api/traders/{address}` | Individual trader profile with skew/category breakdown |
-| `GET /api/smart-money/leaderboard` | Raw Polymarket P&L leaderboard (for comparison) |
+| `GET /api/traders/{address}` | Individual trader profile + skew/category breakdown |
 | `GET /api/calibration` | Brier scores and calibration by category |
-| `GET /api/whale-flow` | Recent large-size entries from tracked top-trader addresses |
+| `GET /api/methodology/stats` | Live numbers backing the methodology page |
+| `GET /api/whale-flow` | Recent large entries from tracked top-trader addresses |
+| `GET /api/builder/identity` | Public Builder Code |
+| `GET /api/builder/trades/public` | Attributed trades + aggregate stats |
 
-Full OpenAPI spec at `/api/docs`.
+Full OpenAPI at [`/api/docs`](https://polyscope.gudman.xyz/api/docs).
 
 ---
 
-## Local development
+## Quickstart
 
 Requires: Python 3.12+, Node 20+, Docker.
 
+### Backend
+
 ```bash
-# Backend
+git clone https://github.com/Ridwannurudeen/polyscope.git
 cd polyscope
 pip install -e .
+cp .env.example .env  # fill in TELEGRAM_BOT_TOKEN, POLYMARKET_BUILDER_CODE
 python -m uvicorn api.main:app --reload --port 8020
+```
 
-# Frontend
+### Frontend
+
+```bash
 cd web
 npm install
-npm run dev  # http://localhost:3000
+npm run dev   # http://localhost:3000
+```
 
-# Run tests
-python -m pytest tests -q
+### Tests
+
+```bash
+python -m pytest -q   # 224 backend tests
+cd web && npm run lint && npx tsc --noEmit
 ```
 
 ### Docker (matches production)
@@ -142,90 +195,85 @@ python -m pytest tests -q
 docker compose up -d
 ```
 
-Exposes api:8021, web:3020. Edit `docker-compose.yml` for local ports.
+Exposes `api:8021`, `web:3020`. Edit `docker-compose.yml` for local ports.
 
-### Environment
+---
 
-Copy `.env.example` to `.env`.
+## Configuration
 
-Required for production:
+Copy `.env.example` to `.env`. **Required** for production:
 
 | Variable | Purpose |
 |----------|---------|
-| `TELEGRAM_BOT_TOKEN` | Telegram alert bot token |
+| `TELEGRAM_BOT_TOKEN` | Telegram alert bot |
 | `POLYMARKET_BUILDER_CODE` | Public Builder Code baked into browser-signed CLOB orders |
-| `POLYSCOPE_ADMIN_TOKEN` | Admin dashboard token, sent via `X-Admin-Token` header |
+| `POLYSCOPE_ADMIN_TOKEN` | Admin metrics token, sent via `X-Admin-Token` header |
 
-Recommended for production:
-
-| Variable | Purpose |
-|----------|---------|
-| `POLYMARKET_BUILDER_API_KEY` | Builder API key for syncing attributed trades |
-| `POLYMARKET_BUILDER_API_SECRET` | Builder API secret for syncing attributed trades |
-| `POLYMARKET_BUILDER_PASSPHRASE` | Builder API passphrase for syncing attributed trades |
-| `POLYMARKET_CLOB_HOST` | CLOB host, defaults to `https://clob.polymarket.com` |
-
-Optional server-side/admin trading variables:
+**Recommended:**
 
 | Variable | Purpose |
 |----------|---------|
-| `POLYMARKET_PRIVATE_KEY` | Server-side admin order signer. Not required for browser trading |
-| `POLYMARKET_FUNDER_ADDRESS` | Server-side funder address |
-| `POLYMARKET_SIGNATURE_TYPE` | Server-side CLOB signature type |
-| `POLYMARKET_MAX_ORDER_USDC` | Server-side admin order notional cap |
-| `POLYSCOPE_DISABLE_SCHEDULER` | Set to `1` for local smoke tests that should skip startup polling jobs |
+| `POLYMARKET_BUILDER_API_KEY` / `_SECRET` / `_PASSPHRASE` | Authenticated builder API for `sync_attributed_trades_job` |
+| `POLYMARKET_CLOB_HOST` | Defaults to `https://clob.polymarket.com` |
+| `POLYSCOPE_ALLOW_DEV_DOMAINS=1` | Enable `localhost`/`testserver` in wallet-link allowlist (off by default) |
 
-Browser trading is non-custodial: users sign wallet-link messages and CLOB
-orders in their own wallet. The removed `/api/sign` route is intentionally not
-part of the runtime.
+**Browser trading is non-custodial.** Users sign wallet-link messages and CLOB orders in their own wallet. The legacy `/api/sign` route was deliberately removed.
 
-### Production smoke
+The optional server-side admin trading variables (`POLYMARKET_PRIVATE_KEY`, `POLYMARKET_FUNDER_ADDRESS`, `POLYMARKET_SIGNATURE_TYPE`, `POLYMARKET_MAX_ORDER_USDC`) exist for diagnostic order placement only — production attribution flows through the browser.
 
-After deploy, run:
+---
+
+## Production
+
+After deploy, run the smoke check:
 
 ```bash
 python scripts/production_smoke.py --base-url https://polyscope.gudman.xyz
-```
 
-With admin metrics:
-
-```bash
+# With admin metrics:
 POLYSCOPE_ADMIN_TOKEN="$POLYSCOPE_ADMIN_TOKEN" \
   python scripts/production_smoke.py --base-url https://polyscope.gudman.xyz
 ```
 
-The smoke script checks the web pages, Builder Code identity, public builder
-trades, admin header auth when `POLYSCOPE_ADMIN_TOKEN` is set, server-side trade metadata
-for a live market, and Polymarket's geoblock endpoint. Wallet-link signing and
-actual order placement remain manual checks because they require user approval.
+Verifies the web pages, Builder Code identity, public builder trades, admin auth, server-side trade metadata for a live market, and Polymarket's geoblock endpoint. Wallet-link signing and order placement remain manual checks.
 
-See [`docs/production-runbook.md`](docs/production-runbook.md) for the deploy,
-smoke, wallet, trading, demo, and security checklist.
+Full deploy + security checklist: [`docs/production-runbook.md`](docs/production-runbook.md).
+
+### Hardening highlights (May 6 2026 audit)
+
+- HSTS + CSP locked to gamma + clob + polymarket + polygon-rpc origins
+- Per-IP `limit_req_zone` on `/api/wallet/link` (10/min), `/api/events` (60/min), `/api/orders/*` + `/api/admin/*` (30/min), default `/api/` (120/min)
+- US geoblock on `/builder` + `/api/market/*/trade` + `/api/orders/place` via geoip2 against `$remote_addr` (cannot be spoofed via X-Forwarded-For)
+- Wallet-link signature: EIP-191, 300s TTL, domain allowlist, `hmac.compare_digest` admin token compare
+- nginx upstream keepalive + `proxy_http_version 1.1` + bounded `proxy_*_timeout` (eliminates 502s under scan-window load)
+- Per-route Cache-Control: `s-maxage=120, stale-while-revalidate=600` on read endpoints; `max-age=31536000, immutable` on `/_next/static/`
+- gzip on JSON + JS + CSS + SVG (78% body reduction on `/api/divergences`)
 
 ---
 
 ## Status
 
-- **Signals tracked**: 340K+ divergence signals, 28+ days of capture
-- **Markets watched**: up to 500 active per scan cycle
-- **Resolved outcomes**: 10K+ markets scored, 139K+ resolved signals
-- **Tests**: backend pytest suite plus frontend lint/type/build checks
-- **Stack**: containerized, deployed on dedicated VPS, TLS via Let's Encrypt webroot
+| | |
+|---|---|
+| Signals tracked | **340K+** |
+| Resolved signals | **187K+** across **4,188** markets |
+| Markets watched | up to **500** active per scan cycle |
+| Live qualifying predictive traders | 6 (Wilson-95% gated) |
+| Backend tests | **224 passing** |
+| Capture window | **28+ days** since per-trader system live (Apr 12 2026) |
 
----
+### What's built
 
-## Roadmap
-
-PolyScope has converted from read-only analytics into an **execution-native intelligence terminal** for Polymarket's Builder Program. Status:
-
-- **Evidence Layer** ✓ — per-signal attribution with contributor accuracy
-- **Methodology Page** ✓ — honest public documentation of findings, dynamic stats
-- **Decision Cards** ✓ — workflow-grade signal display with thesis, invalidators, confidence tier, and historical exposure context
-- **Portfolio Layer** ✓ — anonymous client_id watchlist + trade log, PnL estimate, outcome scoring
-- **Builder Integration** ✓ — Builder Code attribution configured, browser wallet-connect CLOB order construction for EOA and user-provided Safe funder paths, user geoblock check, server-side Gamma token validation, attributed-trade sync job
-- **Predictive-contributor filter** ✓ — Wilson-95% gated trader leaderboard surfaces signals backed by genuinely predictive addresses
-
-Next: per-trader data continues accumulating — qualifying-trader pool grows over time, backtest reruns hourly.
+- ✓ Per-signal contributor attribution + evidence trail
+- ✓ Methodology page (live, dynamic, self-correcting)
+- ✓ DecisionCards with thesis, invalidators, confidence tiers, sizing hints
+- ✓ Portfolio + watchlist + manual trade log + PnL estimate
+- ✓ Predictive-contributor filter (Wilson-gated)
+- ✓ Browser-signed Builder Code attribution (Phase C)
+- ✓ Telegram bot — alerts, digests, follow-trader DMs, identity link
+- ✓ US geoblock on trade-facilitation surfaces
+- ✓ Per-IP rate limits + nginx hardening + TLS + HSTS + CSP
+- ✓ `signal_trader_positions` capture: ~18.7K rows/day
 
 ---
 
