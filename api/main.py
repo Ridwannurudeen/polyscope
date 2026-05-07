@@ -1706,6 +1706,110 @@ async def builder_identity():
     }
 
 
+# ── Safe ownership verification ────────────────────────────
+#
+# Server-side getCode + getOwners against Polygon. The trade modal
+# uses this instead of wagmi's browser-side readContract because
+# public Polygon RPCs frequently fail in browser fetch contexts
+# (CORS edge cases, ISP-level TLS rewriting, regional rate limits)
+# even when they work fine over curl. Hitting our own origin
+# eliminates that surface entirely.
+
+_SAFE_RPC_ENDPOINTS = (
+    "https://polygon-bor-rpc.publicnode.com",
+    "https://polygon.drpc.org",
+)
+# selector for getOwners() on a Gnosis Safe — keccak256("getOwners()")[:4]
+_GET_OWNERS_SELECTOR = "0xa0e67e2b"
+
+
+async def _polygon_rpc_call(method: str, params: list) -> str:
+    """POST a single eth_* call to the first healthy Polygon RPC.
+
+    Returns the ``result`` field as a hex string. Raises HTTPException
+    on transport failure across all endpoints or on JSON-RPC error.
+    """
+    last_err: str | None = None
+    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        for endpoint in _SAFE_RPC_ENDPOINTS:
+            try:
+                resp = await client.post(endpoint, json=payload)
+                resp.raise_for_status()
+                body = resp.json()
+                if "error" in body:
+                    last_err = str(body["error"])[:200]
+                    continue
+                result = body.get("result")
+                if result is None:
+                    last_err = "rpc returned no result"
+                    continue
+                return result
+            except Exception as e:
+                last_err = f"{type(e).__name__}: {str(e)[:150]}"
+                continue
+    raise HTTPException(
+        status_code=502,
+        detail=f"Polygon RPC unreachable: {last_err or 'unknown'}",
+    )
+
+
+def _decode_owner_list(raw: str) -> list[str]:
+    """Decode ABI-encoded ``address[]`` response from getOwners().
+
+    Layout: 32-byte offset (always 0x20) + 32-byte length + N×32-byte addresses.
+    """
+    if not raw or not raw.startswith("0x") or len(raw) < 130:
+        return []
+    data = raw[2:]
+    try:
+        length = int(data[64:128], 16)
+    except ValueError:
+        return []
+    if length > 64:  # sanity cap — Safes never have this many owners
+        return []
+    owners: list[str] = []
+    for i in range(length):
+        start = 128 + i * 64
+        chunk = data[start:start + 64]
+        if len(chunk) != 64:
+            return []
+        owners.append("0x" + chunk[24:].lower())
+    return owners
+
+
+@app.get("/api/safe/{address}/owners")
+async def safe_owners(address: str):
+    """Verify a Polygon address is a Gnosis Safe and return its owners.
+
+    Used by the trade modal's funder-paste verification. Returns
+    ``{address, owners}`` on success, or 4xx with a specific reason.
+    """
+    if not _EVM_ADDR_RE_COMPILED.match(address):
+        raise HTTPException(status_code=400, detail="invalid address format")
+    addr = address.lower()
+
+    code = await _polygon_rpc_call("eth_getCode", [addr, "latest"])
+    if not code or code == "0x":
+        raise HTTPException(
+            status_code=404,
+            detail="No contract at that address on Polygon",
+        )
+
+    raw = await _polygon_rpc_call(
+        "eth_call",
+        [{"to": addr, "data": _GET_OWNERS_SELECTOR}, "latest"],
+    )
+    owners = _decode_owner_list(raw)
+    if not owners:
+        raise HTTPException(
+            status_code=400,
+            detail="Address is a contract but does not expose getOwners() — not a Gnosis Safe",
+        )
+
+    return {"address": addr, "owners": owners}
+
+
 # ── Attributed order submission (Phase B) ──────────────────
 
 import os as _os  # noqa: E402

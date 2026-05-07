@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { getAddress, isAddress } from "viem";
-import { usePublicClient } from "wagmi";
 import {
   usePolymarketTrade,
   type TradeSide,
@@ -11,19 +10,6 @@ import {
   clearSafeFunder,
 } from "@/lib/use-polymarket-trade";
 import { trackEvent } from "@/lib/analytics";
-
-// Minimal Gnosis Safe ABI — only the bits we need to verify ownership
-// before letting a user link a Safe as funder. `getOwners()` is the
-// canonical read on every Safe variant since v1.0.
-const SAFE_ABI = [
-  {
-    type: "function",
-    name: "getOwners",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "address[]" }],
-  },
-] as const;
 
 interface TradeModalProps {
   open: boolean;
@@ -83,7 +69,6 @@ export function TradeModal(props: TradeModalProps) {
   const [funderMode, setFunderMode] = useState<"eoa" | "safe">("eoa");
   const [funderError, setFunderError] = useState<string | null>(null);
   const [funderVerifying, setFunderVerifying] = useState(false);
-  const publicClient = usePublicClient();
 
   // Number of decimals to display for the suggested price, matching the
   // market's tick size. Without this, `toFixed(2)` on a 0.001-tick
@@ -150,47 +135,43 @@ export function TradeModal(props: TradeModalProps) {
       return;
     }
     if (!address) return;
-    if (!publicClient) {
-      setFunderError("Network not ready. Reconnect your wallet.");
-      return;
-    }
 
-    // 3. Verify on-chain that this is a Gnosis Safe whose owner set
-    //    includes the connected EOA. Without this, a clipboard hijack
-    //    or phishing site can swap the Safe with one the attacker
-    //    controls — every subsequent approve/submit signs against
-    //    their funder.
+    // 3. Verify the address is a Gnosis Safe whose owner set includes
+    //    the connected EOA. Server-side via /api/safe/{addr}/owners —
+    //    same-origin so no browser-RPC CORS / TLS / regional fragility.
     setFunderVerifying(true);
     try {
-      const code = await publicClient.getCode({ address: clean as `0x${string}` });
-      if (!code || code === "0x") {
-        setFunderError(
-          "No contract at that address on Polygon. This isn't a Gnosis Safe.",
-        );
+      const resp = await fetch(`/api/safe/${clean}/owners`, {
+        cache: "no-store",
+      });
+      if (!resp.ok) {
+        const body = (await resp.json().catch(() => ({}))) as {
+          detail?: string;
+        };
+        const detail = body.detail || `verify failed (${resp.status})`;
+        if (/not a gnosis safe|getOwners|does not expose/i.test(detail)) {
+          setFunderError(
+            "That contract isn't a Gnosis Safe. Paste your Polymarket Safe.",
+          );
+        } else if (/no contract|not a contract/i.test(detail)) {
+          setFunderError(
+            "No contract at that address on Polygon. This isn't a Gnosis Safe.",
+          );
+        } else {
+          setFunderError(`Couldn't verify Safe ownership: ${detail}`);
+        }
         return;
       }
-      const owners = (await publicClient.readContract({
-        address: clean as `0x${string}`,
-        abi: SAFE_ABI,
-        functionName: "getOwners",
-      })) as readonly string[];
-      const ownerSet = new Set(owners.map((a) => a.toLowerCase()));
+      const data = (await resp.json()) as { owners: string[] };
+      const ownerSet = new Set(data.owners.map((a) => a.toLowerCase()));
       if (!ownerSet.has(address.toLowerCase())) {
         setFunderError(
           "Your wallet isn't listed as an owner of that Safe. Double-check the address.",
         );
         return;
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // ABI mismatch = not a Safe; network failure = transient.
-      if (/getOwners|abi|reverted/i.test(msg)) {
-        setFunderError(
-          "That contract isn't a Gnosis Safe (no getOwners). Paste your Polymarket Safe.",
-        );
-      } else {
-        setFunderError("Couldn't verify Safe ownership — network issue. Try again.");
-      }
+    } catch {
+      setFunderError("Couldn't reach PolyScope API. Try again in a moment.");
       return;
     } finally {
       setFunderVerifying(false);

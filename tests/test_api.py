@@ -861,3 +861,111 @@ async def test_place_order_hides_raw_clob_error_from_response(client, monkeypatc
     assert resp.status_code == 502
     assert resp.json()["detail"] == "CLOB order placement failed"
     assert "deadbeef" not in resp.text
+
+
+# ── /api/safe/{address}/owners ──────────────────────────────
+
+
+def _abi_encode_address_array(addresses: list[str]) -> str:
+    """Encode `address[]` ABI return for tests.
+
+    Layout: 0x + 32-byte offset (0x20) + 32-byte length + N×32-byte addresses.
+    """
+    body = "0" * 62 + "20"  # offset = 0x20
+    body += format(len(addresses), "064x")  # length
+    for a in addresses:
+        body += "0" * 24 + a.lower().replace("0x", "")
+    return "0x" + body
+
+
+@pytest.mark.anyio
+async def test_safe_owners_invalid_address(client):
+    resp = await client.get("/api/safe/notanaddress/owners")
+    assert resp.status_code == 400
+    assert "invalid address" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_safe_owners_no_contract(client, monkeypatch):
+    import api.main as main
+
+    async def fake_rpc(method, params):
+        assert method == "eth_getCode"
+        return "0x"
+
+    monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
+
+    resp = await client.get(
+        "/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners"
+    )
+    assert resp.status_code == 404
+    assert "no contract" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_safe_owners_not_a_safe(client, monkeypatch):
+    """A contract that exists but doesn't expose getOwners() returns 400."""
+    import api.main as main
+
+    calls: list[str] = []
+
+    async def fake_rpc(method, params):
+        calls.append(method)
+        if method == "eth_getCode":
+            return "0x6080604052"  # any non-empty bytecode
+        return "0x"  # getOwners returns empty -> decoder yields []
+
+    monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
+
+    resp = await client.get(
+        "/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners"
+    )
+    assert resp.status_code == 400
+    assert "getOwners" in resp.json()["detail"]
+    assert calls == ["eth_getCode", "eth_call"]
+
+
+@pytest.mark.anyio
+async def test_safe_owners_valid_safe(client, monkeypatch):
+    """A Safe with one EOA owner returns the owner list lowercased."""
+    import api.main as main
+
+    owner = "0xE558169047963411C2A9F46cF7d68Aa01e94c946"
+    encoded = _abi_encode_address_array([owner])
+
+    async def fake_rpc(method, params):
+        if method == "eth_getCode":
+            return "0x6080604052"
+        return encoded
+
+    monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
+
+    resp = await client.get(
+        "/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["address"] == "0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b"
+    assert body["owners"] == [owner.lower()]
+
+
+def test_decode_owner_list_handles_empty():
+    from api.main import _decode_owner_list
+
+    assert _decode_owner_list("0x") == []
+    assert _decode_owner_list("") == []
+
+
+def test_decode_owner_list_decodes_two_owners():
+    from api.main import _decode_owner_list
+
+    encoded = _abi_encode_address_array(
+        [
+            "0x1111111111111111111111111111111111111111",
+            "0x2222222222222222222222222222222222222222",
+        ]
+    )
+    assert _decode_owner_list(encoded) == [
+        "0x1111111111111111111111111111111111111111",
+        "0x2222222222222222222222222222222222222222",
+    ]
