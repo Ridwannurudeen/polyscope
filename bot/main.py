@@ -82,9 +82,9 @@ DISCLAIMER = (
 )
 
 
-async def _api_get(path: str) -> dict | None:
+async def _api_get(path: str, *, timeout: float = 10.0) -> dict | None:
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(f"{API_BASE}{path}")
             resp.raise_for_status()
             return resp.json()
@@ -674,7 +674,7 @@ async def alert_loop(app: Application):
     """Background task: push whale alerts to subscribed chats."""
     while True:
         try:
-            data = await _api_get("/api/whale-flow/pending")
+            data = await _api_get("/api/whale-flow/pending", timeout=60.0)
             if data and data.get("alerts"):
                 from api.database import get_active_subscriptions, get_db, mark_alerts_notified
 
