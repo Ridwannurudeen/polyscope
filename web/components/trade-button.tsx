@@ -52,12 +52,6 @@ export function TradeButton({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Modal handles tick-size clamping + accepting_orders check; this
-  // only filters truly degenerate prices (resolved markets at 0 or 1).
-  if (marketPrice >= 0.999 || marketPrice <= 0.001) {
-    return null;
-  }
-
   const handleClick = async () => {
     setError(null);
     setLoading(true);
