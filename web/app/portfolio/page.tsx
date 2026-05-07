@@ -172,19 +172,22 @@ export default function PortfolioPage() {
     const qs = new URLSearchParams({ client_id: cid });
     if (walletAddress) qs.set("wallet_address", walletAddress);
 
+    const okJson = (r: Response) => (r.ok ? r.json() : null);
     Promise.all([
-      fetch(`/api/watchlist?${qs.toString()}`).then((r) => r.json()),
-      fetch(`/api/portfolio?${qs.toString()}`).then((r) => r.json()),
-      fetch(`/api/follow/list?${qs.toString()}`).then((r) => r.json()),
-      fetch(`/api/follow/alerts?${qs.toString()}&limit=20`).then((r) =>
-        r.json(),
-      ),
+      fetch(`/api/watchlist?${qs.toString()}`).then(okJson).catch(() => null),
+      fetch(`/api/portfolio?${qs.toString()}`).then(okJson).catch(() => null),
+      fetch(`/api/follow/list?${qs.toString()}`).then(okJson).catch(() => null),
+      fetch(`/api/follow/alerts?${qs.toString()}&limit=20`)
+        .then(okJson)
+        .catch(() => null),
     ])
       .then(([w, p, f, a]) => {
-        setWatchlist(w.items || []);
-        setPortfolio(p);
-        setFollowed(f.items || []);
-        setAlerts(a.items || []);
+        setWatchlist(w?.items ?? []);
+        setPortfolio(
+          p && Array.isArray(p.actions) && p.stats ? p : null,
+        );
+        setFollowed(f?.items ?? []);
+        setAlerts(a?.items ?? []);
       })
       .finally(() => setLoading(false));
   }, [walletAddress]);
@@ -232,7 +235,7 @@ export default function PortfolioPage() {
   const unseenCount = alerts.filter((a) => !a.seen_at).length;
   const noData =
     watchlist.length === 0 &&
-    (portfolio?.actions.length ?? 0) === 0 &&
+    (portfolio?.actions?.length ?? 0) === 0 &&
     followed.length === 0 &&
     alerts.length === 0;
 
