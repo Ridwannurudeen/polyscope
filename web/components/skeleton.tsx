@@ -36,33 +36,37 @@ export function SkeletonRow() {
 
 export function DashboardSkeleton() {
   return (
-    <div>
-      <div className="mb-10 pb-10 border-b border-ink-800">
-        <Bar className="h-3 w-24 mb-5" />
-        <Bar className="h-16 md:h-20 w-72 md:w-[28rem] mb-4" />
-        <Bar className="h-5 w-80 md:w-[26rem] opacity-70 mb-8" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-6 border-t border-ink-800">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="surface rounded-lg p-4">
-              <Bar className="h-2.5 w-20 mb-2" />
-              <Bar className="h-7 w-24" />
+    <div className="mb-14">
+      <div className="flex items-end justify-between mb-5 pb-2 border-b border-ink-800">
+        <div>
+          <Bar className="h-5 w-36 mb-2" />
+          <Bar className="h-3 w-64 opacity-70" />
+        </div>
+        <Bar className="h-3 w-14 opacity-70" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {Array.from({ length: 2 }).map((_, group) => (
+          <div key={group} className="surface rounded-lg overflow-hidden">
+            <div className="px-4 py-3 border-b border-ink-800">
+              <Bar className="h-2.5 w-32 mb-3" />
+              <Bar className="h-3 w-44 opacity-70" />
             </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mb-12">
-        <Bar className="h-5 w-52 mb-4" />
-        <Bar className="rounded-lg w-full h-60" />
-      </div>
-
-      <div className="mb-12">
-        <Bar className="h-5 w-48 mb-5" />
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <SkeletonRow key={i} />
-          ))}
-        </div>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div
+                key={i}
+                className="px-4 py-3 border-b border-ink-800/60 last:border-0"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <Bar className="h-3 w-3/4 mb-2" />
+                    <Bar className="h-1 w-1/2 opacity-70" />
+                  </div>
+                  <Bar className="h-4 w-12" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );

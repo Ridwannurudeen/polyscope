@@ -168,8 +168,8 @@ export function SignalTrackRecord() {
           {data.simulation && data.simulation.total_wagered > 0 && (
             <div className="border-t border-ink-800 pt-5 mt-6">
               <div className="eyebrow mb-3">simulated p&amp;l · $100 per signal</div>
-              <div className="grid grid-cols-3 gap-8">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-8">
+                <div className="min-w-0">
                   <p
                     className={`num text-h3 tracking-tighter ${
                       data.simulation.roi_pct >= 0
@@ -184,14 +184,14 @@ export function SignalTrackRecord() {
                     simulated roi
                   </p>
                 </div>
-                <div>
-                  <p className="num text-h3 text-ink-100 tracking-tighter">
+                <div className="min-w-0">
+                  <p className="num text-h3 text-ink-100 tracking-tighter truncate">
                     $
                     {data.simulation.total_return.toLocaleString(undefined, {
                       maximumFractionDigits: 0,
                     })}
                   </p>
-                  <p className="text-micro text-ink-400 font-mono mt-1">
+                  <p className="text-micro text-ink-400 font-mono mt-1 truncate">
                     on{" "}
                     <span className="num text-ink-200">
                       $
@@ -202,7 +202,7 @@ export function SignalTrackRecord() {
                     wagered
                   </p>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="num text-h3 text-fade-500 tracking-tighter">
                     {data.simulation.avg_odds_on_hits.toFixed(1)}x
                   </p>

@@ -119,21 +119,6 @@ export default function Dashboard() {
     [rawDivergences],
   );
 
-  if (loading) return <DashboardSkeleton />;
-
-  if (error && !data) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-        <p className="text-alert-500 font-mono text-body-sm">
-          failed to load dashboard data
-        </p>
-        <button onClick={retry} className="btn-secondary">
-          retry
-        </button>
-      </div>
-    );
-  }
-
   const movers = data?.movers_24h || [];
   const predictiveStrict = predictiveData?.traders || [];
   const fadeStrict = fadeData?.traders || [];
@@ -148,10 +133,23 @@ export default function Dashboard() {
   return (
     <div>
       {/* ── HERO — one declarative line + status strip ── */}
-      <HeroSignature />
+      <HeroSignature scan={data} />
+
+      {error && !data && (
+        <div className="mb-8 border border-alert-500/25 bg-alert-500/5 rounded-md px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <p className="text-alert-500 font-mono text-body-sm">
+            dashboard data unavailable
+          </p>
+          <button onClick={retry} className="btn-secondary w-fit">
+            retry
+          </button>
+        </div>
+      )}
 
       {/* ── LIVE TICKER — pulse of activity, edge-to-edge ── */}
       <LiveTicker />
+
+      {loading && !data && <DashboardSkeleton />}
 
       {/* ── LEADERBOARD — the signature thing this product does. First. ── */}
       {(predictive.length > 0 || fade.length > 0) && (
@@ -199,7 +197,7 @@ export default function Dashboard() {
                   <p className="text-body text-ink-100 font-medium truncate">
                     {d.question}
                   </p>
-                  <div className="flex items-center gap-4 mt-1.5 text-caption font-mono">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-caption font-mono">
                     <span className="text-ink-500">
                       crowd{" "}
                       <span className="text-ink-200 num">
@@ -314,7 +312,7 @@ export default function Dashboard() {
                   <p className="text-body text-ink-100 truncate font-medium">
                     {e.title}
                   </p>
-                  <div className="flex items-center gap-5 mt-1.5 text-caption font-mono">
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-1.5 text-caption font-mono">
                     <span className="text-ink-400">
                       <span className="num text-ink-100">{e.market_count}</span> markets
                     </span>
