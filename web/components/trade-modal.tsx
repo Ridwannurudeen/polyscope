@@ -8,6 +8,9 @@ import {
   loadSafeFunder,
   saveSafeFunder,
   clearSafeFunder,
+  loadDepositWalletFunder,
+  saveDepositWalletFunder,
+  clearDepositWalletFunder,
 } from "@/lib/use-polymarket-trade";
 import { trackEvent } from "@/lib/analytics";
 
@@ -66,7 +69,9 @@ export function TradeModal(props: TradeModalProps) {
   // POLY_GNOSIS_SAFE with the Safe as funder. Otherwise EOA-direct.
   const [funder, setFunder] = useState<string | null>(null);
   const [funderInput, setFunderInput] = useState<string>("");
-  const [funderMode, setFunderMode] = useState<"eoa" | "safe">("eoa");
+  const [funderMode, setFunderMode] = useState<"eoa" | "safe" | "deposit_wallet">(
+    "eoa",
+  );
   const [funderError, setFunderError] = useState<string | null>(null);
   const [funderVerifying, setFunderVerifying] = useState(false);
 
@@ -88,16 +93,26 @@ export function TradeModal(props: TradeModalProps) {
     }
   }, [open, suggestedPrice, suggestedSide, priceDecimals]);
 
-  // Load any cached Safe funder whenever the connected wallet changes.
+  // Load any cached funder whenever the connected wallet changes.
+  // Priority: DepositWallet (Polymarket MetaMask/Rabby signups) over
+  // Gnosis Safe (older Magic-based accounts) — match buildClient's
+  // dispatch order in use-polymarket-trade.ts so the UI mode reflects
+  // which wallet will actually be used at submit time.
   useEffect(() => {
     if (!address) return;
-    const cached = loadSafeFunder(address);
-    if (cached) {
-      setFunder(cached);
-      setFunderMode("safe");
+    const cachedDw = loadDepositWalletFunder(address);
+    if (cachedDw) {
+      setFunder(cachedDw);
+      setFunderMode("deposit_wallet");
     } else {
-      setFunder(null);
-      setFunderMode("eoa");
+      const cached = loadSafeFunder(address);
+      if (cached) {
+        setFunder(cached);
+        setFunderMode("safe");
+      } else {
+        setFunder(null);
+        setFunderMode("eoa");
+      }
     }
     setFunderInput("");
     setFunderError(null);
@@ -186,9 +201,92 @@ export function TradeModal(props: TradeModalProps) {
     trackEvent("polymarket_safe_linked", { safe_short: `${clean.slice(0, 6)}…${clean.slice(-4)}` });
   };
 
+  // Polymarket DepositWallet (ERC-1271 single-owner SCA) — used by
+  // MetaMask/Rabby signups. Verification mirrors the Safe path but
+  // hits /api/polymarket-wallet/{addr}/owner and checks the single
+  // owner against the connected EOA.
+  const handleSaveDepositWallet = async () => {
+    const raw = funderInput.trim();
+    setFunderError(null);
+
+    if (!isAddress(raw)) {
+      setFunderError("Paste a valid 0x… address (40 hex chars after 0x).");
+      return;
+    }
+    const looksChecksummed =
+      raw !== raw.toLowerCase() && raw !== raw.toUpperCase();
+    if (looksChecksummed) {
+      try {
+        getAddress(raw);
+      } catch {
+        setFunderError(
+          "Address checksum is invalid. Re-copy from Polymarket or polygonscan.",
+        );
+        return;
+      }
+    }
+
+    const clean = raw.toLowerCase();
+    if (address && clean === address.toLowerCase()) {
+      setFunderError(
+        "That's your wallet address — Polymarket's DepositWallet is a separate contract address.",
+      );
+      return;
+    }
+    if (!address) return;
+
+    setFunderVerifying(true);
+    try {
+      const resp = await fetch(`/api/polymarket-wallet/${clean}/owner`, {
+        cache: "no-store",
+      });
+      if (!resp.ok) {
+        const body = (await resp.json().catch(() => ({}))) as {
+          detail?: string;
+        };
+        const detail = body.detail || `verify failed (${resp.status})`;
+        if (/no contract|not a contract/i.test(detail)) {
+          setFunderError(
+            "No contract at that address on Polygon. Double-check you copied the DepositWallet, not your wallet.",
+          );
+        } else if (/does not expose owner|not a polymarket/i.test(detail)) {
+          setFunderError(
+            "That contract isn't a Polymarket DepositWallet. If it's a Gnosis Safe, switch to the Polymarket Safe tab.",
+          );
+        } else {
+          setFunderError(`Couldn't verify DepositWallet owner: ${detail}`);
+        }
+        return;
+      }
+      const data = (await resp.json()) as { owner: string };
+      if (data.owner.toLowerCase() !== address.toLowerCase()) {
+        setFunderError(
+          "Your wallet isn't the owner of that DepositWallet. Switch Rabby/MetaMask to the account that owns it.",
+        );
+        return;
+      }
+    } catch {
+      setFunderError("Couldn't reach PolyScope API. Try again in a moment.");
+      return;
+    } finally {
+      setFunderVerifying(false);
+    }
+
+    saveDepositWalletFunder(address, clean);
+    setFunder(clean);
+    setFunderMode("deposit_wallet");
+    setFunderError(null);
+    setNeedsApproval(false);
+    setAllowanceError(null);
+    trackEvent("polymarket_deposit_wallet_linked", {
+      wallet_short: `${clean.slice(0, 6)}…${clean.slice(-4)}`,
+    });
+  };
+
   const handleClearFunder = () => {
     if (!address) return;
     clearSafeFunder(address);
+    clearDepositWalletFunder(address);
     setFunder(null);
     setFunderMode("eoa");
     setFunderInput("");
@@ -362,7 +460,7 @@ export function TradeModal(props: TradeModalProps) {
               <span className="text-xs text-ink-500 uppercase tracking-wide">
                 Fund from
               </span>
-              <div className="flex gap-1 text-xs">
+              <div className="flex flex-wrap gap-1 text-xs">
                 <button
                   onClick={() => {
                     if (funder) handleClearFunder();
@@ -375,6 +473,16 @@ export function TradeModal(props: TradeModalProps) {
                   }`}
                 >
                   My wallet
+                </button>
+                <button
+                  onClick={() => setFunderMode("deposit_wallet")}
+                  className={`px-2 py-1 rounded transition-colors ${
+                    funderMode === "deposit_wallet"
+                      ? "bg-scope-500/20 text-scope-300 border border-scope-500/40"
+                      : "text-ink-400 border border-transparent hover:text-ink-100"
+                  }`}
+                >
+                  Polymarket DepositWallet
                 </button>
                 <button
                   onClick={() => setFunderMode("safe")}
@@ -434,6 +542,48 @@ export function TradeModal(props: TradeModalProps) {
                   wallet. Copy it from polymarket.com → Profile (under your
                   avatar — NOT your wallet address). PolyScope verifies on-chain
                   that your wallet is an owner before linking.
+                </p>
+              </div>
+            )}
+
+            {funderMode === "deposit_wallet" && funder && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-mono text-scope-300">
+                  {funder.slice(0, 6)}…{funder.slice(-4)}
+                </span>
+                <button
+                  onClick={handleClearFunder}
+                  className="text-ink-500 hover:text-alert-500 transition-colors"
+                >
+                  Unlink
+                </button>
+              </div>
+            )}
+
+            {funderMode === "deposit_wallet" && !funder && (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="0x… Polymarket DepositWallet address"
+                  value={funderInput}
+                  onChange={(e) => setFunderInput(e.target.value)}
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="w-full px-3 py-1.5 bg-background border border-ink-700 text-ink-100 text-xs font-mono rounded focus:outline-none focus:border-scope-500/50"
+                />
+                <button
+                  onClick={handleSaveDepositWallet}
+                  disabled={!funderInput.trim() || funderVerifying}
+                  className="w-full py-1.5 text-xs bg-scope-500/15 border border-scope-500/40 text-scope-300 rounded hover:bg-scope-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {funderVerifying ? "Verifying ownership…" : "Link DepositWallet"}
+                </button>
+                <p className="text-[11px] text-ink-500 leading-snug">
+                  MetaMask/Rabby signups land on Polymarket&apos;s DepositWallet
+                  (an ERC-1271 smart wallet). Copy the address shown next to
+                  your username on polymarket.com — NOT your wallet address.
+                  PolyScope verifies on-chain that your wallet is its owner
+                  before linking.
                 </p>
               </div>
             )}

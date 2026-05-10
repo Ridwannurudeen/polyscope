@@ -969,3 +969,96 @@ def test_decode_owner_list_decodes_two_owners():
         "0x1111111111111111111111111111111111111111",
         "0x2222222222222222222222222222222222222222",
     ]
+
+
+# ── /api/polymarket-wallet/{address}/owner ──────────────────
+
+
+def _abi_encode_address(addr: str) -> str:
+    """Encode a single address as a 32-byte ABI return value."""
+    return "0x" + "0" * 24 + addr.lower().replace("0x", "")
+
+
+@pytest.mark.anyio
+async def test_polymarket_wallet_owner_invalid_address(client):
+    resp = await client.get("/api/polymarket-wallet/notanaddress/owner")
+    assert resp.status_code == 400
+    assert "invalid address" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_polymarket_wallet_owner_no_contract(client, monkeypatch):
+    import api.main as main
+
+    async def fake_rpc(method, params):
+        assert method == "eth_getCode"
+        return "0x"
+
+    monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
+
+    resp = await client.get(
+        "/api/polymarket-wallet/0xb9feda4010d2594335c926a71d6ad72646410a03/owner"
+    )
+    assert resp.status_code == 404
+    assert "no contract" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_polymarket_wallet_owner_not_ownable(client, monkeypatch):
+    """A contract that exists but doesn't expose owner() returns 400."""
+    import api.main as main
+
+    async def fake_rpc(method, params):
+        if method == "eth_getCode":
+            return "0x6080604052"
+        return "0x"  # owner() returns empty
+
+    monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
+
+    resp = await client.get(
+        "/api/polymarket-wallet/0xb9feda4010d2594335c926a71d6ad72646410a03/owner"
+    )
+    assert resp.status_code == 400
+    assert "owner()" in resp.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_polymarket_wallet_owner_zero_address(client, monkeypatch):
+    """An uninitialized DepositWallet (owner==0x0) returns 400."""
+    import api.main as main
+
+    async def fake_rpc(method, params):
+        if method == "eth_getCode":
+            return "0x6080604052"
+        return _abi_encode_address("0x0000000000000000000000000000000000000000")
+
+    monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
+
+    resp = await client.get(
+        "/api/polymarket-wallet/0xb9feda4010d2594335c926a71d6ad72646410a03/owner"
+    )
+    assert resp.status_code == 400
+    assert "zero address" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_polymarket_wallet_owner_valid(client, monkeypatch):
+    """A DepositWallet with a real owner returns it lowercased."""
+    import api.main as main
+
+    owner = "0xB2Fae83De08b285CB3D6A77FF520F6aD669D5F33"
+
+    async def fake_rpc(method, params):
+        if method == "eth_getCode":
+            return "0x6080604052"
+        return _abi_encode_address(owner)
+
+    monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
+
+    resp = await client.get(
+        "/api/polymarket-wallet/0xb9feda4010d2594335c926a71d6ad72646410a03/owner"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["address"] == "0xb9feda4010d2594335c926a71d6ad72646410a03"
+    assert body["owner"] == owner.lower()

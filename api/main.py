@@ -1721,6 +1721,10 @@ _SAFE_RPC_ENDPOINTS = (
 )
 # selector for getOwners() on a Gnosis Safe — keccak256("getOwners()")[:4]
 _GET_OWNERS_SELECTOR = "0xa0e67e2b"
+# selector for owner() — keccak256("owner()")[:4]. Used by Polymarket's
+# DepositWallet (a Solady-style Ownable contract) and other ERC-1271 SCAs
+# whose authorized signer is exposed via this getter.
+_OWNER_SELECTOR = "0x8da5cb5b"
 
 
 async def _polygon_rpc_call(method: str, params: list) -> str:
@@ -1808,6 +1812,48 @@ async def safe_owners(address: str):
         )
 
     return {"address": addr, "owners": owners}
+
+
+@app.get("/api/polymarket-wallet/{address}/owner")
+async def polymarket_wallet_owner(address: str):
+    """Return ``owner()`` for a Polymarket DepositWallet (or any Ownable SCA).
+
+    Used by the trade modal's funder-paste verification when the funder
+    is a Polymarket DepositWallet rather than a Gnosis Safe. Polymarket's
+    MetaMask/Rabby signups create an ERC-1271 DepositWallet whose
+    authorized signer is exposed via ``owner()`` — orders signed by the
+    EOA are verified inside the SCA via that owner check, so the trade
+    flow uses ``signatureType=POLY_1271`` and the SCA as ``funder``.
+
+    Returns ``{address, owner}`` on success, 4xx with a specific reason.
+    """
+    if not _EVM_ADDR_RE_COMPILED.match(address):
+        raise HTTPException(status_code=400, detail="invalid address format")
+    addr = address.lower()
+
+    code = await _polygon_rpc_call("eth_getCode", [addr, "latest"])
+    if not code or code == "0x":
+        raise HTTPException(
+            status_code=404,
+            detail="No contract at that address on Polygon",
+        )
+
+    raw = await _polygon_rpc_call(
+        "eth_call",
+        [{"to": addr, "data": _OWNER_SELECTOR}, "latest"],
+    )
+    if not raw or raw == "0x" or len(raw) < 66:
+        raise HTTPException(
+            status_code=400,
+            detail="Address is a contract but does not expose owner() — not a Polymarket DepositWallet",
+        )
+    owner_hex = raw[-40:].lower()
+    if int(owner_hex, 16) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="owner() returned the zero address — wallet not initialized",
+        )
+    return {"address": addr, "owner": "0x" + owner_hex}
 
 
 # ── Attributed order submission (Phase B) ──────────────────

@@ -20,6 +20,7 @@ const CLOB_HOST =
 const BUILDER_CODE = process.env.NEXT_PUBLIC_POLYMARKET_BUILDER_CODE || "";
 
 const FUNDER_KEY_PREFIX = "polyscope.polymarket.funder.";
+const DEPOSIT_WALLET_KEY_PREFIX = "polyscope.polymarket.depositwallet.";
 
 // ── Safe-funder storage ──────────────────────────────────────
 // Per-EOA cache of the Polymarket Safe address the user trades through.
@@ -55,6 +56,42 @@ export function saveSafeFunder(address: string, funder: string) {
 export function clearSafeFunder(address: string) {
   if (typeof window === "undefined") return;
   sessionStorage.removeItem(`${FUNDER_KEY_PREFIX}${address.toLowerCase()}`);
+}
+
+// ── DepositWallet-funder storage ─────────────────────────────
+// Per-EOA cache of the Polymarket DepositWallet address. MetaMask/Rabby
+// signups land on Polymarket's ERC-1271 DepositWallet (deployed by
+// Polymarket Deployer 1, single-owner Ownable). The owner EOA signs
+// orders; the SCA validates via isValidSignature. SDK uses
+// signatureType=POLY_1271 with the SCA as funder.
+
+export function loadDepositWalletFunder(address: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(
+      `${DEPOSIT_WALLET_KEY_PREFIX}${address.toLowerCase()}`,
+    );
+    if (raw && /^0x[0-9a-fA-F]{40}$/.test(raw)) return raw.toLowerCase();
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDepositWalletFunder(address: string, funder: string) {
+  if (typeof window === "undefined") return;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(funder)) return;
+  sessionStorage.setItem(
+    `${DEPOSIT_WALLET_KEY_PREFIX}${address.toLowerCase()}`,
+    funder.toLowerCase(),
+  );
+}
+
+export function clearDepositWalletFunder(address: string) {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(
+    `${DEPOSIT_WALLET_KEY_PREFIX}${address.toLowerCase()}`,
+  );
 }
 
 // User-facing error mapping. Raw axios dumps from clob-client-v2 leak the
@@ -184,6 +221,22 @@ export function usePolymarketTrade() {
   const buildClient = useCallback(
     async (creds: ApiKeyCreds) => {
       if (!walletClient || !address) throw new Error("Wallet client not ready");
+      // Priority: DepositWallet (POLY_1271) > Safe (POLY_GNOSIS_SAFE) > EOA.
+      // A given EOA links at most one funder, but we check the more
+      // specific store first so a left-over Safe entry from an old setup
+      // can't shadow a newer DepositWallet link.
+      const depositWallet = loadDepositWalletFunder(address);
+      if (depositWallet) {
+        return new ClobClient({
+          host: CLOB_HOST,
+          chain: polygon.id,
+          signer: walletClient,
+          creds,
+          signatureType: SignatureTypeV2.POLY_1271,
+          funderAddress: depositWallet,
+          builderConfig: { builderCode: BUILDER_CODE },
+        });
+      }
       const funder = loadSafeFunder(address);
       if (funder) {
         return new ClobClient({
