@@ -53,7 +53,7 @@ Anonymous `client_id`-keyed watchlist (no account, no wallet required), manual t
 
 ![Builder page](docs/screenshots/builder.png)
 
-`/builder` exposes the public Builder Code (`0x6bf2…c7b81`) and the live attributed-trade table. Trades placed via PolyScope's DecisionCard "Trade" button sign in the user's own wallet, attach the Builder Code client-side, and surface here within ~3 minutes via the `sync_attributed_trades_job` polling loop. **Non-custodial** — PolyScope never holds keys.
+`/builder` exposes the public Builder Code (`0x6bf2…c7b81`) and the live attributed-trade table. Trades placed via PolyScope's DecisionCard "Trade" button settle from the user's relayer-deployed Polymarket DepositWallet — the address is derived from the connected EOA and deployed gaslessly through Polymarket's Builder Relayer on first use. Orders sign POLY_1271 with the Builder Code attached, and surface in this table within ~3 minutes via the `sync_attributed_trades_job` polling loop. The Builder API Secret + Passphrase live only on the server: the browser fetches per-request HMAC headers from `POST /api/polymarket/builder/sign`. **Non-custodial** — PolyScope never holds keys.
 
 ---
 
@@ -93,7 +93,8 @@ The predictive-contributor filter qualifies a signal if any contributing trader 
 │  Polymarket APIs                                            │
 │  ├─ Gamma         (markets, resolution)                     │
 │  ├─ Data API      (positions, trades, leaderboard)          │
-│  └─ CLOB v2       (browser-signed Builder Code orders)      │
+│  ├─ CLOB v2       (POLY_1271 orders from DepositWallet)     │
+│  └─ Relayer v2    (gasless DepositWallet deploy + ops)      │
 └─────────────────────────┬───────────────────────────────────┘
                           │
          ┌────────────────▼─────────────────┐
@@ -133,7 +134,7 @@ The predictive-contributor filter qualifies a signal if any contributing trader 
 | Component | Stack | Container | Role |
 |-----------|-------|-----------|------|
 | `api`     | FastAPI + SQLite + APScheduler | `polyscope-api`  | Signal engine, data capture, REST |
-| `web`     | Next.js 15 + Tailwind + Recharts + wagmi 3 | `polyscope-web`  | Dashboard + browser-signed CLOB orders |
+| `web`     | Next.js 15 + Tailwind + Recharts + wagmi 3 | `polyscope-web`  | Dashboard + browser-side RelayClient/ClobClient. DepositWallet auto-derived from connected EOA; gasless deploy via relayer; orders sign POLY_1271 |
 | `bot`     | python-telegram-bot                     | `polyscope-bot`  | Whale alerts + follow-trader DMs |
 
 All services run as Docker containers behind nginx. TLS via Let's Encrypt webroot. US-region trade-facilitation endpoints geoblocked via `libnginx-mod-http-geoip2` + DB-IP Lite (auto-refreshed monthly).
@@ -213,7 +214,8 @@ Copy `.env.example` to `.env`. **Required** for production:
 
 | Variable | Purpose |
 |----------|---------|
-| `POLYMARKET_BUILDER_API_KEY` / `_SECRET` / `_PASSPHRASE` | Authenticated builder API for `sync_attributed_trades_job` |
+| `POLYMARKET_BUILDER_API_KEY` / `_SECRET` / `_PASSPHRASE` | Authenticated builder API. Powers `sync_attributed_trades_job` and the server-side HMAC sign proxy that issues `POLY_BUILDER_*` headers to the browser per request |
+| `POLYMARKET_RELAYER_URL` | Builder Relayer endpoint for gasless DepositWallet deploys + ops (default `https://relayer-v2.polymarket.com/`) |
 | `POLYMARKET_CLOB_HOST` | Defaults to `https://clob.polymarket.com` |
 | `POLYSCOPE_ALLOW_DEV_DOMAINS=1` | Enable `localhost`/`testserver` in wallet-link allowlist (off by default) |
 

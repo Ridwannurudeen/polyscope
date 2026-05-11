@@ -548,6 +548,20 @@ export default function MethodologyPage() {
           </Link>
           .
         </p>
+        <div className="surface rounded-md p-4 mt-3 text-body-sm text-ink-400 leading-relaxed">
+          <div className="eyebrow mb-2">trade architecture</div>
+          <p>
+            Your wallet signs every order locally. The browser builds a
+            ClobClient and a RelayClient bound to your viem signer; the
+            RelayClient deploys a per-EOA DepositWallet (gasless, one-time)
+            and orders settle from there. PolyScope&apos;s backend exposes a
+            single HMAC sign endpoint that returns the four{" "}
+            <code className="text-micro bg-background border border-ink-800 px-1 py-0.5 rounded-sm font-mono text-ink-200">POLY_BUILDER_*</code>{" "}
+            headers per request, so the Builder API Secret and Passphrase
+            never reach the browser. Attribution rides on every order via
+            the public builder code above.
+          </p>
+        </div>
       </Section>
 
       <Section
