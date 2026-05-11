@@ -362,6 +362,89 @@ async def test_builder_status_uses_public_builder_code(client, monkeypatch):
     assert resp.json() == {"configured": True}
 
 
+# ── /api/polymarket/builder/sign ────────────────────────────
+
+
+def _set_builder_api_env(monkeypatch):
+    from api.polymarket_signing import reset_builder_signer_cache
+
+    monkeypatch.setenv("POLYMARKET_BUILDER_API_KEY", "019e1672-test")
+    # base64-shaped secret (URL-safe, length 44, alphabet [A-Za-z0-9_-])
+    monkeypatch.setenv("POLYMARKET_BUILDER_API_SECRET", "a" * 44)
+    monkeypatch.setenv("POLYMARKET_BUILDER_PASSPHRASE", "pass-" + "y" * 20)
+    reset_builder_signer_cache()
+
+
+@pytest.mark.anyio
+async def test_builder_sign_returns_503_when_unconfigured(client, monkeypatch):
+    from api.polymarket_signing import reset_builder_signer_cache
+
+    monkeypatch.delenv("POLYMARKET_BUILDER_API_KEY", raising=False)
+    monkeypatch.delenv("POLYMARKET_BUILDER_API_SECRET", raising=False)
+    monkeypatch.delenv("POLYMARKET_BUILDER_PASSPHRASE", raising=False)
+    reset_builder_signer_cache()
+
+    resp = await client.post(
+        "/api/polymarket/builder/sign",
+        json={"method": "POST", "path": "/order", "body": "{}"},
+    )
+    assert resp.status_code == 503
+    assert "Builder API credentials not configured" in resp.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_builder_sign_returns_422_on_missing_method(client, monkeypatch):
+    _set_builder_api_env(monkeypatch)
+    resp = await client.post(
+        "/api/polymarket/builder/sign",
+        json={"path": "/order", "body": "{}"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_builder_sign_returns_422_on_lowercase_method(client, monkeypatch):
+    """Method must match ^[A-Z]+$ — guards against HTTP smuggling shapes."""
+    _set_builder_api_env(monkeypatch)
+    resp = await client.post(
+        "/api/polymarket/builder/sign",
+        json={"method": "post", "path": "/order", "body": "{}"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_builder_sign_returns_all_four_headers(client, monkeypatch):
+    _set_builder_api_env(monkeypatch)
+    resp = await client.post(
+        "/api/polymarket/builder/sign",
+        json={"method": "POST", "path": "/order", "body": '{"a":1}'},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {
+        "POLY_BUILDER_API_KEY",
+        "POLY_BUILDER_PASSPHRASE",
+        "POLY_BUILDER_SIGNATURE",
+        "POLY_BUILDER_TIMESTAMP",
+    }
+    assert body["POLY_BUILDER_API_KEY"] == "019e1672-test"
+    assert body["POLY_BUILDER_PASSPHRASE"].startswith("pass-")
+    assert len(body["POLY_BUILDER_SIGNATURE"]) > 16
+    assert body["POLY_BUILDER_TIMESTAMP"].isdigit()
+
+
+@pytest.mark.anyio
+async def test_builder_sign_accepts_empty_body_for_get_requests(client, monkeypatch):
+    """GET requests have no payload but still need HMAC headers."""
+    _set_builder_api_env(monkeypatch)
+    resp = await client.post(
+        "/api/polymarket/builder/sign",
+        json={"method": "GET", "path": "/trades", "body": ""},
+    )
+    assert resp.status_code == 200
+
+
 @pytest.mark.anyio
 async def test_admin_metrics_requires_header_not_query_token(client, monkeypatch):
     monkeypatch.setenv("POLYSCOPE_ADMIN_TOKEN", "secret-token")

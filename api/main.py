@@ -1683,6 +1683,7 @@ async def follow_alerts_mark_seen(
 
 from .polymarket_signing import (  # noqa: E402
     get_builder_code,
+    get_builder_signer,
     is_builder_code_configured,
 )
 
@@ -1703,6 +1704,46 @@ async def builder_identity():
     return {
         "configured": is_builder_code_configured(),
         "code": get_builder_code(),
+    }
+
+
+class BuilderSignRequest(BaseModel):
+    method: str = Field(min_length=1, max_length=10, pattern="^[A-Z]+$")
+    path: str = Field(min_length=1, max_length=200)
+    body: str = Field(max_length=65536)
+
+
+@app.post("/api/polymarket/builder/sign")
+async def polymarket_builder_sign(req: BuilderSignRequest):
+    """HMAC-sign a request for Polymarket Relayer / authenticated CLOB auth.
+
+    The browser-side ``RelayClient`` and ``ClobClient`` are configured with
+    ``BuilderConfig({ remoteBuilderConfig: { url: <this endpoint> } })``.
+    On every authenticated call, the SDK POSTs the outgoing request shape
+    here and attaches the four ``POLY_BUILDER_*`` headers we return.
+
+    This keeps the Builder API Secret + Passphrase on the server. The four
+    headers are intentionally short-lived (the SDK requests one per call)
+    and only authenticate ``builder=this account`` to Polymarket — they
+    do not authorize transactions. Per-IP rate limits on ``/api/*`` cap
+    abuse; misuse would still attribute traffic to us, which is the goal.
+    """
+    signer = get_builder_signer()
+    if signer is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Builder API credentials not configured",
+        )
+    payload = signer.create_builder_header_payload(
+        method=req.method,
+        path=req.path,
+        body=req.body,
+    )
+    return {
+        "POLY_BUILDER_API_KEY": payload.POLY_BUILDER_API_KEY,
+        "POLY_BUILDER_PASSPHRASE": payload.POLY_BUILDER_PASSPHRASE,
+        "POLY_BUILDER_SIGNATURE": payload.POLY_BUILDER_SIGNATURE,
+        "POLY_BUILDER_TIMESTAMP": payload.POLY_BUILDER_TIMESTAMP,
     }
 
 
