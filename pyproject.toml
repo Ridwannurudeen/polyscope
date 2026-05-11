@@ -18,6 +18,11 @@ dependencies = [
     # headers, which the /builder/trades endpoint rejects (401). The
     # builder SDK produces the correct POLY_BUILDER_* headers.
     "py-builder-signing-sdk>=0.0.2",
+    # Polymarket Builder Relayer SDK — gasless DepositWallet deployment
+    # and attributed order submission via https://relayer-v2.polymarket.com/.
+    # Required for the user-facing trade flow to work against EOA signups
+    # (MetaMask/Rabby/WalletConnect), which is the bulk of Polymarket users.
+    "py-builder-relayer-client>=0.0.1",
 ]
 
 [project.optional-dependencies]
