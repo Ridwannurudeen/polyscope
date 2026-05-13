@@ -16,6 +16,7 @@ Two distinct concerns live here:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from typing import Any
@@ -63,7 +64,24 @@ def is_builder_api_configured() -> bool:
 
 
 _signer_cache: Any = None
-_signer_fingerprint: tuple | None = None
+_signer_fingerprint: str | None = None
+
+
+def _cred_fingerprint(cfg: dict[str, str]) -> str:
+    """SHA-256 over the full creds — invalidates the cache on any change.
+
+    Earlier this used the last 8 chars of secret + passphrase, which
+    technically allowed a collision (two different secrets sharing the
+    same suffix would reuse the old signer). Astronomically unlikely
+    but easy to make impossible.
+    """
+    h = hashlib.sha256()
+    h.update(cfg["key"].encode("utf-8"))
+    h.update(b"\x00")
+    h.update(cfg["secret"].encode("utf-8"))
+    h.update(b"\x00")
+    h.update(cfg["passphrase"].encode("utf-8"))
+    return h.hexdigest()
 
 
 def get_builder_signer():
@@ -71,7 +89,7 @@ def get_builder_signer():
 
     The signer is a thin wrapper around the API creds — no network
     state — but the cache avoids reconstructing on every sign request.
-    Cache invalidates when any cred suffix changes.
+    Cache invalidates when any cred byte changes (sha256 fingerprint).
     """
     global _signer_cache, _signer_fingerprint
 
@@ -79,7 +97,7 @@ def get_builder_signer():
     if cfg is None:
         return None
 
-    fp = (cfg["key"], cfg["secret"][-8:], cfg["passphrase"][-8:])
+    fp = _cred_fingerprint(cfg)
     if _signer_cache is not None and _signer_fingerprint == fp:
         return _signer_cache
 

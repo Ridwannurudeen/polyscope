@@ -149,3 +149,23 @@ def test_signature_differs_when_body_changes(monkeypatch):
         method="POST", path="/foo", body='{"x":2}', timestamp=1700000000
     )
     assert p1.POLY_BUILDER_SIGNATURE != p2.POLY_BUILDER_SIGNATURE
+
+
+def test_signer_cache_invalidates_on_secrets_sharing_suffix(monkeypatch):
+    """Previously the fingerprint was last 8 chars only, so two secrets
+    sharing the same 8-char suffix would reuse the cached signer despite
+    being different. The sha256 fingerprint closes that gap."""
+    # 44 chars total, identical last 8, different elsewhere
+    secret_a = ("a" * 36) + ("z" * 8)
+    secret_b = ("b" * 36) + ("z" * 8)
+    assert secret_a[-8:] == secret_b[-8:]
+    assert secret_a != secret_b
+
+    monkeypatch.setenv("POLYMARKET_BUILDER_API_KEY", VALID_API_KEY)
+    monkeypatch.setenv("POLYMARKET_BUILDER_API_SECRET", secret_a)
+    monkeypatch.setenv("POLYMARKET_BUILDER_PASSPHRASE", VALID_PASSPHRASE)
+    reset_builder_signer_cache()
+    a = get_builder_signer()
+    monkeypatch.setenv("POLYMARKET_BUILDER_API_SECRET", secret_b)
+    b = get_builder_signer()
+    assert a is not b

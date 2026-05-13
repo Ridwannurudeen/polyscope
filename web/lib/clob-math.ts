@@ -7,12 +7,25 @@
 export const toBaseUnits = (human: number): bigint =>
   BigInt(Math.round(human * 1_000_000));
 
-export const safeBigInt = (s: string | undefined): bigint => {
+/**
+ * Parse a string into a BigInt, returning ``undefined`` if it can't be
+ * parsed (rather than silently returning 0). Callers can distinguish a
+ * true "balance is zero" reading from a "couldn't read the balance"
+ * failure — the latter shouldn't block trading with a misleading
+ * "insufficient balance" message.
+ *
+ * The legacy silent-0 behavior caused users to see "insufficient
+ * balance" when reality was "the CLOB returned junk we couldn't parse."
+ */
+export const safeBigInt = (s: string | undefined): bigint | undefined => {
   if (!s) return BigInt(0);
   try {
     return BigInt(s);
   } catch {
-    return BigInt(0);
+    if (typeof console !== "undefined") {
+      console.warn("safeBigInt: could not parse %o", s);
+    }
+    return undefined;
   }
 };
 

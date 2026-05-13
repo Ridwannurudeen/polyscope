@@ -141,22 +141,27 @@ export function useClobOrder() {
       client: ClobClient,
       input: PlaceOrderInput,
     ): Promise<AllowanceFailure | null> => {
-      if (input.side === "BUY") {
-        const resp = await client.getBalanceAllowance({
-          asset_type: AssetType.COLLATERAL,
-        });
-        const need = toBaseUnits(input.price * input.size);
-        if (safeBigInt(resp.balance) < need) return "insufficient_balance";
-        if (safeBigInt(resp.allowance) < need) return "insufficient_allowance";
-        return null;
-      }
-      const resp = await client.getBalanceAllowance({
-        asset_type: AssetType.CONDITIONAL,
-        token_id: input.tokenId,
-      });
-      const need = toBaseUnits(input.size);
-      if (safeBigInt(resp.balance) < need) return "insufficient_balance";
-      if (safeBigInt(resp.allowance) < need) return "insufficient_allowance";
+      const need =
+        input.side === "BUY"
+          ? toBaseUnits(input.price * input.size)
+          : toBaseUnits(input.size);
+      const resp =
+        input.side === "BUY"
+          ? await client.getBalanceAllowance({
+              asset_type: AssetType.COLLATERAL,
+            })
+          : await client.getBalanceAllowance({
+              asset_type: AssetType.CONDITIONAL,
+              token_id: input.tokenId,
+            });
+      const balance = safeBigInt(resp.balance);
+      const allowance = safeBigInt(resp.allowance);
+      // If parsing failed, let the order through — the CLOB will surface
+      // the real error rather than us blocking on a misread balance.
+      if (balance !== undefined && balance < need)
+        return "insufficient_balance";
+      if (allowance !== undefined && allowance < need)
+        return "insufficient_allowance";
       return null;
     },
     [],

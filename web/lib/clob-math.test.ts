@@ -70,7 +70,7 @@ describe("defaultShareCountForNotional", () => {
 });
 
 describe("safeBigInt", () => {
-  it("returns 0 for undefined or empty string", () => {
+  it("returns 0 for undefined or empty string (an actual zero-balance read)", () => {
     expect(safeBigInt(undefined)).toBe(BigInt(0));
     expect(safeBigInt("")).toBe(BigInt(0));
   });
@@ -80,9 +80,12 @@ describe("safeBigInt", () => {
     expect(safeBigInt("0")).toBe(BigInt(0));
   });
 
-  it("returns 0 on invalid input (rather than throwing)", () => {
-    expect(safeBigInt("not-a-number")).toBe(BigInt(0));
-    expect(safeBigInt("1.5")).toBe(BigInt(0)); // BigInt("1.5") throws
+  it("returns undefined on unparseable input so callers can distinguish 'couldn't read' from 'zero'", () => {
+    // Previous silent-0 behavior misled the trade modal into showing
+    // "insufficient balance" when reality was "we couldn't parse what
+    // the CLOB returned." Returning undefined makes that distinguishable.
+    expect(safeBigInt("not-a-number")).toBeUndefined();
+    expect(safeBigInt("1.5")).toBeUndefined(); // BigInt("1.5") throws
   });
 });
 
