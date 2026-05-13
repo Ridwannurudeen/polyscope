@@ -61,6 +61,7 @@ from .database import (
     unfollow_trader,
     update_builder_order_result,
 )
+from . import wss_runtime
 from .scheduler import (
     cleanup_job,
     close_client,
@@ -69,6 +70,7 @@ from .scheduler import (
     detect_whale_trades_job,
     fetch_leaderboard_job,
     fetch_markets_job,
+    refresh_wss_subscription_job,
     sync_attributed_trades_job,
     sync_builder_orders_job,
     track_outcomes_job,
@@ -138,6 +140,16 @@ async def lifespan(app: FastAPI):
             **_job_kwargs,
         )
         scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup", **_job_kwargs)
+        # WSS subscription is re-evaluated every 10 min to track shifts in
+        # the top-N-by-volume set. Gated on POLYSCOPE_WSS_ENABLED inside
+        # the job itself — registering unconditionally is harmless.
+        scheduler.add_job(
+            refresh_wss_subscription_job,
+            "interval",
+            minutes=10,
+            id="refresh_wss_subscription",
+            **_job_kwargs,
+        )
         scheduler.start()
 
         # Run initial fetch (markets + leaderboard synchronously so API has data)
@@ -145,6 +157,11 @@ async def lifespan(app: FastAPI):
         await fetch_markets_job()
         await fetch_leaderboard_job()
         await _warm_public_stats_caches()
+
+        # Bootstrap the WSS stream immediately if enabled, so prices start
+        # flowing without waiting for the 10-min scheduler tick.
+        if wss_runtime.is_enabled():
+            await refresh_wss_subscription_job()
 
         # Run heavy scans in background so uvicorn starts immediately
         asyncio.create_task(_run_initial_scans())
@@ -154,6 +171,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if scheduler.running:
         scheduler.shutdown(wait=False)
+    await wss_runtime.stop_stream()
     await close_client()
     cache.clear()
 
@@ -2052,6 +2070,36 @@ async def orders_config():
         "trading_configured": is_trading_configured(),
         "max_order_usdc": max_order_usdc(),
         "builder_code": get_builder_code(),
+    }
+
+
+@app.get("/api/wss/live-prices")
+async def wss_live_prices():
+    """Latest WSS-cached prices for subscribed assets.
+
+    Returns the live cache from the Polymarket market-channel stream
+    (gated on ``POLYSCOPE_WSS_ENABLED``). Useful for ops monitoring
+    and as a backing endpoint for future frontend live-odds widgets.
+    """
+    stream = wss_runtime.get_stream()
+    if stream is None:
+        return {
+            "enabled": wss_runtime.is_enabled(),
+            "connected": False,
+            "subscribed": 0,
+            "prices": {},
+        }
+    prices: dict[str, dict] = {}
+    for aid in stream.asset_ids:
+        snap = stream.snapshot(aid)
+        if snap is None:
+            continue
+        prices[aid] = {**snap, "current_price": stream.current_price(aid)}
+    return {
+        "enabled": True,
+        "connected": stream.is_connected,
+        "subscribed": len(stream.asset_ids),
+        "prices": prices,
     }
 
 

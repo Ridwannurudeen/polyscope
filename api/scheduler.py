@@ -549,6 +549,34 @@ async def cleanup_job():
         await db.close()
 
 
+# ── WSS live-price stream ─────────────────────────────────
+
+
+async def refresh_wss_subscription_job():
+    """Re-evaluate top-N markets by 24h volume and update the WSS subscription.
+
+    Gated on ``POLYSCOPE_WSS_ENABLED``. Reads the cached markets list
+    (populated by ``fetch_markets_job``); a missing/empty cache is a
+    no-op. The WSS runtime singleton handles initial-connect vs
+    delta-update internally.
+    """
+    from . import wss_runtime
+
+    if not wss_runtime.is_enabled():
+        return
+    markets = cache.get("markets")
+    if not markets:
+        logger.debug("WSS refresh skipped: no markets cached yet")
+        return
+
+    top = sorted(markets, key=lambda m: m.volume_24h, reverse=True)[: wss_runtime.top_n()]
+    asset_ids = [m.token_id_yes for m in top if getattr(m, "token_id_yes", "")]
+    try:
+        await wss_runtime.refresh_subscription(asset_ids)
+    except Exception:
+        logger.exception("refresh_wss_subscription_job failed")
+
+
 # ── Builder order status polling ──────────────────────────
 
 _TERMINAL_STATUSES = {"filled", "canceled", "cancelled", "rejected", "expired"}
