@@ -97,6 +97,21 @@ describe("userFacingError", () => {
     );
   });
 
+  it("honors a custom fallback for non-order call sites (e.g. approval)", () => {
+    const APPROVAL_FALLBACK =
+      "Approval failed. Refresh the page and try again.";
+    expect(
+      userFacingError(
+        new Error("some weird internal error"),
+        APPROVAL_FALLBACK,
+      ),
+    ).toBe(APPROVAL_FALLBACK);
+    // Matched branches still take precedence over the fallback.
+    expect(userFacingError(new Error("user rejected"), APPROVAL_FALLBACK)).toBe(
+      "Signature rejected in wallet.",
+    );
+  });
+
   it("accepts non-Error values via String() coercion", () => {
     expect(userFacingError("user rejected")).toBe(
       "Signature rejected in wallet.",

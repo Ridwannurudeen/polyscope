@@ -16,7 +16,10 @@ export const safeBigInt = (s: string | undefined): bigint => {
   }
 };
 
-export function userFacingError(raw: unknown): string {
+export function userFacingError(
+  raw: unknown,
+  fallback = "Order could not be placed. Refresh the page and try again.",
+): string {
   const msg = raw instanceof Error ? raw.message : String(raw);
   const lower = msg.toLowerCase();
   if (/could not create api key/.test(lower)) {
@@ -37,5 +40,5 @@ export function userFacingError(raw: unknown): string {
   if (/network|fetch failed|econn/.test(lower)) {
     return "Network error reaching Polymarket. Try again.";
   }
-  return "Order could not be placed. Refresh the page and try again.";
+  return fallback;
 }

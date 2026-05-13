@@ -9,11 +9,11 @@ import {
   SignatureTypeV2,
   type ApiKeyCreds,
 } from "@polymarket/clob-client-v2";
+import { userFacingError } from "./clob-math";
 import { useDepositWalletDeployment } from "./use-deposit-wallet-deployment";
 
 const CLOB_HOST =
-  process.env.NEXT_PUBLIC_POLYMARKET_CLOB_HOST ||
-  "https://clob.polymarket.com";
+  process.env.NEXT_PUBLIC_POLYMARKET_CLOB_HOST || "https://clob.polymarket.com";
 
 const BUILDER_CODE = process.env.NEXT_PUBLIC_POLYMARKET_BUILDER_CODE || "";
 
@@ -24,20 +24,7 @@ export interface ApproveInput {
   tokenId: string;
 }
 
-function userFacingError(raw: unknown): string {
-  const msg = raw instanceof Error ? raw.message : String(raw);
-  const lower = msg.toLowerCase();
-  if (/could not create api key/.test(lower)) {
-    return "This wallet has no Polymarket account. Sign up at polymarket.com with this wallet, then reconnect.";
-  }
-  if (/user (rejected|denied)/.test(lower) || /signature.*rejected/.test(lower)) {
-    return "Signature rejected in wallet.";
-  }
-  if (/network|fetch failed|econn/.test(lower)) {
-    return "Network error reaching Polymarket. Try again.";
-  }
-  return "Approval failed. Refresh the page and try again.";
-}
+const APPROVAL_FALLBACK = "Approval failed. Refresh the page and try again.";
 
 /**
  * Approve USDC.e (BUY) or outcome shares (SELL) for the user's
@@ -77,7 +64,7 @@ export function useTradeApproval() {
         credsByAddress.current[key] = creds;
         return creds;
       } catch (err) {
-        throw new Error(userFacingError(err));
+        throw new Error(userFacingError(err, APPROVAL_FALLBACK));
       }
     },
     [walletClient],
@@ -119,7 +106,7 @@ export function useTradeApproval() {
           });
         }
       } catch (err) {
-        const msg = userFacingError(err);
+        const msg = userFacingError(err, APPROVAL_FALLBACK);
         setError(msg);
         throw new Error(msg);
       } finally {
