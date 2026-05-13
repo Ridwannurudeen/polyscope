@@ -18,6 +18,10 @@ dependencies = [
     # headers, which the /builder/trades endpoint rejects (401). The
     # builder SDK produces the correct POLY_BUILDER_* headers.
     "py-builder-signing-sdk>=0.0.2",
+    # Async WebSocket client for the Polymarket WSS market channel
+    # (wss://ws-subscriptions-clob.polymarket.com/ws/market). httpx does
+    # not support WS; "websockets" is the standard async lib.
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]
