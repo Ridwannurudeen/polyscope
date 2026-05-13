@@ -93,6 +93,55 @@ class PolymarketClient:
         }
         return await self._get(f"{GAMMA_BASE}/events", params) or []
 
+    async def get_active_markets_via_events(self, limit: int = 50, offset: int = 0) -> list[Market]:
+        """Active markets pulled through the ``/events`` traversal so each
+        Market carries event-level tags + negRisk.
+
+        Gamma's ``/markets`` endpoint doesn't surface tags or negRisk —
+        those live on the parent event. Polymarket's own integration
+        guide recommends events-first traversal for exactly this reason.
+
+        Pagination is at the event level; ``limit`` events typically
+        yields ``~limit`` markets but the exact count varies (multi-
+        outcome events have multiple markets per event). Callers using
+        a "stop when batch is short" loop should compare against the
+        EVENT count, but the existing scheduler compares against the
+        market count, which is fine in practice — short event pages
+        also produce short market batches.
+        """
+        params: dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+            "active": "true",
+            "closed": "false",
+            "order": "volume24hr",
+            "ascending": "false",
+        }
+        events = await self._get(f"{GAMMA_BASE}/events", params)
+        if not isinstance(events, list):
+            return []
+        markets: list[Market] = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_tags = PolymarketClient._parse_tags(event.get("tags", []))
+            event_neg_risk = bool(event.get("negRisk", False))
+            for raw in event.get("markets", []) or []:
+                if not isinstance(raw, dict):
+                    continue
+                m = PolymarketClient._parse_market(raw)
+                # Override tags from the event (markets-on-events don't
+                # have their own tags array). Preserve market-level
+                # negRisk if set, otherwise inherit from event.
+                if event_tags:
+                    m.tags = list(event_tags)
+                    if not m.category:
+                        m.category = event_tags[0]
+                if not m.neg_risk and event_neg_risk:
+                    m.neg_risk = True
+                markets.append(m)
+        return markets
+
     async def get_closed_markets(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch closed/resolved markets from Gamma API (raw dicts)."""
         params: dict[str, Any] = {

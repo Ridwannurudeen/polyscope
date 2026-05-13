@@ -67,12 +67,18 @@ async def close_client():
 
 
 async def fetch_markets_job():
-    """Fetch active markets from Gamma API and cache them."""
+    """Fetch active markets via /events traversal so each Market carries
+    event-level tags + negRisk (Gamma /markets doesn't surface those).
+    Falls back to direct /markets if /events comes back empty so a
+    single Gamma quirk can't blank the cache.
+    """
     client = get_client()
     try:
         markets = []
         for page in range(_MAX_PAGES):
-            batch = await client.get_markets(limit=_PAGE_SIZE, offset=page * _PAGE_SIZE)
+            batch = await client.get_active_markets_via_events(
+                limit=_PAGE_SIZE, offset=page * _PAGE_SIZE
+            )
             markets.extend(batch)
             if len(batch) < _PAGE_SIZE:
                 break
@@ -83,6 +89,17 @@ async def fetch_markets_job():
                 _MAX_PAGES,
                 len(markets),
             )
+
+        # Fallback: if events traversal returned nothing (Gamma quirk,
+        # transient bad data), use the legacy direct /markets call so
+        # the cache doesn't go empty and downstream jobs keep working.
+        if not markets:
+            logger.warning("fetch_markets_job: /events returned empty, falling back to /markets")
+            for page in range(_MAX_PAGES):
+                batch = await client.get_markets(limit=_PAGE_SIZE, offset=page * _PAGE_SIZE)
+                markets.extend(batch)
+                if len(batch) < _PAGE_SIZE:
+                    break
 
         cache.set("markets", markets, ttl_seconds=600)
         logger.info("Fetched %d active markets", len(markets))
