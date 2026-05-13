@@ -4,11 +4,52 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from dataclasses import dataclass
 
 from polyscope.models import DivergenceSignal, Market, Position, Trade, Trader
 
 logger = logging.getLogger(__name__)
+
+_MULTI_TAG_ENV_VALUES = {"1", "true", "yes", "on"}
+
+
+def _multi_tag_enabled() -> bool:
+    """Opt-in env gate for multi-tag category-weight lookup.
+
+    Default behavior (off) uses ``market.category`` (= ``tags[0]``) when
+    multiplying by per-trader category weights, matching the historical
+    single-tag scoring. When ``POLYSCOPE_MULTI_TAG_WEIGHTING=true``, the
+    weight is ``max()`` across all of ``market.tags`` — a market tagged
+    "crypto" + "politics" gets credited to whichever category the trader
+    is strongest in. Experimental; no backtest validation yet.
+    """
+    return os.getenv("POLYSCOPE_MULTI_TAG_WEIGHTING", "").strip().lower() in _MULTI_TAG_ENV_VALUES
+
+
+def _category_multiplier(
+    trader_address: str,
+    category: str,
+    tags: list[str] | None,
+    category_weights: dict[str, dict[str, float]] | None,
+) -> float:
+    """Return the trader's category-weight multiplier for this market.
+
+    With ``POLYSCOPE_MULTI_TAG_WEIGHTING=true`` and a non-empty ``tags``
+    list, returns the max trader-weight across all tags (unknown tags
+    default to 1.0). Otherwise falls back to single-category lookup.
+    """
+    if not category_weights:
+        return 1.0
+    trader_cats = category_weights.get(trader_address, {})
+    if not trader_cats:
+        return 1.0
+    if _multi_tag_enabled() and tags:
+        return max((trader_cats.get(c, 1.0) for c in tags), default=1.0)
+    if category:
+        return trader_cats.get(category, 1.0)
+    return 1.0
+
 
 # Minimum thresholds to generate a signal
 MIN_SM_TRADERS = 1
@@ -80,6 +121,7 @@ def compute_divergence(
             traders,
             category=market.category,
             category_weights=category_weights,
+            tags=list(market.tags),
         )
         if sm_consensus is not None:
             signal_source = "trades"
@@ -90,6 +132,7 @@ def compute_divergence(
             traders,
             category=market.category,
             category_weights=category_weights,
+            tags=list(market.tags),
         )
 
     if sm_consensus is None:
@@ -153,6 +196,7 @@ def compute_trader_contributions(
     traders: dict[str, Trader],
     category: str = "",
     category_weights: dict[str, dict[str, float]] | None = None,
+    tags: list[str] | None = None,
 ) -> list[dict]:
     """Produce per-trader attribution records matching the consensus weighting.
 
@@ -171,9 +215,7 @@ def compute_trader_contributions(
         weight *= 1.0 + alpha_ratio * 100
         if pos.size > 0:
             weight *= 1.0 + math.log10(max(pos.size, 1))
-        if category_weights and category:
-            cat_w = category_weights.get(pos.trader_address, {}).get(category, 1.0)
-            weight *= cat_w
+        weight *= _category_multiplier(pos.trader_address, category, tags, category_weights)
 
         records.append(
             {
@@ -193,6 +235,7 @@ def _weighted_consensus(
     traders: dict[str, Trader],
     category: str = "",
     category_weights: dict[str, dict[str, float]] | None = None,
+    tags: list[str] | None = None,
 ) -> float | None:
     """Weighted average of YES probability as seen by smart money.
 
@@ -224,10 +267,7 @@ def _weighted_consensus(
             size_factor = 1.0 + math.log10(max(pos.size, 1))
             weight *= size_factor
 
-        # Category weight multiplier
-        if category_weights and category:
-            cat_w = category_weights.get(pos.trader_address, {}).get(category, 1.0)
-            weight *= cat_w
+        weight *= _category_multiplier(pos.trader_address, category, tags, category_weights)
 
         if pos.side == "YES":
             implied_yes = pos.avg_price if pos.avg_price > 0 else 0.8
@@ -251,6 +291,7 @@ def _trade_weighted_consensus(
     traders: dict[str, Trader],
     category: str = "",
     category_weights: dict[str, dict[str, float]] | None = None,
+    tags: list[str] | None = None,
 ) -> float | None:
     """Trade-weighted consensus using recent SM trades with time decay.
 
@@ -280,10 +321,7 @@ def _trade_weighted_consensus(
         weight = (1.0 / trader.rank) * (1 + alpha_ratio * 100) * time_decay
         weight *= 1.0 + math.log10(max(trade.size, 1))
 
-        # Category weight multiplier
-        if category_weights and category:
-            cat_w = category_weights.get(trade.trader_address, {}).get(category, 1.0)
-            weight *= cat_w
+        weight *= _category_multiplier(trade.trader_address, category, tags, category_weights)
 
         if trade.side == "YES":
             implied_yes = trade.price if trade.price > 0 else 0.8

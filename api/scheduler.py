@@ -198,6 +198,7 @@ async def compute_divergences_job():
                         _traders,
                         category=market.category,
                         category_weights=weights,
+                        tags=list(market.tags),
                     )
                     records = [
                         {
@@ -299,6 +300,7 @@ async def compute_divergences_job():
                                 _traders,
                                 category=market.category,
                                 category_weights=weights,
+                                tags=list(market.tags),
                             )
                             stp_records = [
                                 {
