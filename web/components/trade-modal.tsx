@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAccount, useConnect, useSwitchChain } from "wagmi";
 import { polygon } from "wagmi/chains";
+import { defaultShareCountForNotional } from "@/lib/clob-math";
 import { useDepositWalletDeployment } from "@/lib/use-deposit-wallet-deployment";
 import { useTradeApproval } from "@/lib/use-trade-approval";
 import { useClobOrder, type TradeSide } from "@/lib/use-clob-order";
@@ -34,7 +35,12 @@ export function TradeModal(props: TradeModalProps) {
   } = props;
 
   const { address, isConnected, chainId } = useAccount();
-  const { connectors, connect, status: connectStatus, error: connectError } = useConnect();
+  const {
+    connectors,
+    connect,
+    status: connectStatus,
+    error: connectError,
+  } = useConnect();
   const { switchChain } = useSwitchChain();
 
   const {
@@ -57,7 +63,9 @@ export function TradeModal(props: TradeModalProps) {
 
   const [side, setSide] = useState<TradeSide>(suggestedSide);
   const [price, setPrice] = useState<string>(suggestedPrice.toFixed(2));
-  const [size, setSize] = useState<string>("10");
+  const [size, setSize] = useState<string>(() =>
+    defaultShareCountForNotional(suggestedPrice),
+  );
   const [needsApproval, setNeedsApproval] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
 
@@ -66,8 +74,7 @@ export function TradeModal(props: TradeModalProps) {
     process.env.NEXT_PUBLIC_POLYMARKET_BUILDER_CODE,
   );
 
-  const priceDecimals =
-    tickSize === "0.001" ? 3 : tickSize === "0.1" ? 1 : 2;
+  const priceDecimals = tickSize === "0.001" ? 3 : tickSize === "0.1" ? 1 : 2;
   const tickFloor = Number(tickSize);
   const tickCeil = 1 - tickFloor;
 
@@ -75,6 +82,7 @@ export function TradeModal(props: TradeModalProps) {
     if (open) {
       setSide(suggestedSide);
       setPrice(suggestedPrice.toFixed(priceDecimals));
+      setSize(defaultShareCountForNotional(suggestedPrice));
       setNeedsApproval(false);
       setBalanceError(null);
     }
@@ -134,7 +142,11 @@ export function TradeModal(props: TradeModalProps) {
   };
 
   const handleSubmit = async () => {
-    trackEvent("trade_submit_clicked", { side, price: priceNum, size: sizeNum });
+    trackEvent("trade_submit_clicked", {
+      side,
+      price: priceNum,
+      size: sizeNum,
+    });
     setNeedsApproval(false);
     setBalanceError(null);
     try {
@@ -172,7 +184,9 @@ export function TradeModal(props: TradeModalProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-ink-100">Trade on Polymarket</h2>
+          <h2 className="text-lg font-semibold text-ink-100">
+            Trade on Polymarket
+          </h2>
           <button
             onClick={onClose}
             className="text-ink-500 hover:text-ink-100 text-xl leading-none"
@@ -280,8 +294,8 @@ export function TradeModal(props: TradeModalProps) {
             )}
             {!isLoadingDeployment && isDeployed === false && (
               <p className="text-[11px] text-fade-400/80">
-                Not deployed yet. We&apos;ll deploy a smart wallet for your
-                EOA via Polymarket&apos;s relayer — one signature, no gas.
+                Not deployed yet. We&apos;ll deploy a smart wallet for your EOA
+                via Polymarket&apos;s relayer — one signature, no gas.
               </p>
             )}
           </div>
@@ -313,7 +327,9 @@ export function TradeModal(props: TradeModalProps) {
             disabled={isDeploying}
             className="w-full py-2.5 bg-fade-500/20 border border-fade-500/50 text-fade-400 rounded-lg font-medium hover:bg-fade-500/30 disabled:opacity-60"
           >
-            {isDeploying ? "Deploying smart wallet…" : "Deploy smart wallet (one-time)"}
+            {isDeploying
+              ? "Deploying smart wallet…"
+              : "Deploy smart wallet (one-time)"}
           </button>
         ) : needsApproval ? (
           <button
@@ -324,8 +340,8 @@ export function TradeModal(props: TradeModalProps) {
             {isApproving
               ? "Approving…"
               : side === "BUY"
-              ? "Approve pUSD (one-time)"
-              : "Approve outcome token (one-time)"}
+                ? "Approve pUSD (one-time)"
+                : "Approve outcome token (one-time)"}
           </button>
         ) : (
           <button
@@ -341,8 +357,8 @@ export function TradeModal(props: TradeModalProps) {
 
         {needsApproval && (
           <p className="mt-2 text-[11px] text-fade-400/80">
-            First trade requires approving Polymarket&apos;s exchange contract to
-            move your {side === "BUY" ? "pUSD" : "outcome tokens"}. One-time
+            First trade requires approving Polymarket&apos;s exchange contract
+            to move your {side === "BUY" ? "pUSD" : "outcome tokens"}. One-time
             gasless signature.
           </p>
         )}
@@ -376,7 +392,10 @@ export function TradeModal(props: TradeModalProps) {
         <div className="mt-4 text-[10px] text-ink-500 text-center leading-relaxed">
           {isConnected && address && (
             <p>
-              Connected: <span className="font-mono">{address.slice(0, 6)}…{address.slice(-4)}</span>
+              Connected:{" "}
+              <span className="font-mono">
+                {address.slice(0, 6)}…{address.slice(-4)}
+              </span>
             </p>
           )}
           <p className="mt-1">

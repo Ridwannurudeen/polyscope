@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { safeBigInt, toBaseUnits, userFacingError } from "./clob-math";
+import {
+  DEFAULT_TARGET_NOTIONAL_USDC,
+  defaultShareCountForNotional,
+  safeBigInt,
+  toBaseUnits,
+  userFacingError,
+} from "./clob-math";
 
 describe("toBaseUnits", () => {
   it("handles round-number BUY notionals without IEEE-754 drift", () => {
@@ -26,6 +32,40 @@ describe("toBaseUnits", () => {
     expect(toBaseUnits(0.5)).toBe(BigInt(500_000));
     // Previously Math.ceil(0.5 * 1e6) could return 500001 on some inputs.
     expect(toBaseUnits(0.0005)).toBe(BigInt(500));
+  });
+});
+
+describe("defaultShareCountForNotional", () => {
+  it("targets $10 USDC at common market prices", () => {
+    // 10 / 0.51 ≈ 19.61
+    expect(defaultShareCountForNotional(0.51)).toBe("19.61");
+    // 10 / 0.05 = 200.00
+    expect(defaultShareCountForNotional(0.05)).toBe("200.00");
+    // 10 / 0.99 ≈ 10.10
+    expect(defaultShareCountForNotional(0.99)).toBe("10.10");
+    // 10 / 0.5 = 20.00
+    expect(defaultShareCountForNotional(0.5)).toBe("20.00");
+  });
+
+  it("honors a custom target notional", () => {
+    // 25 / 0.5 = 50.00
+    expect(defaultShareCountForNotional(0.5, 25)).toBe("50.00");
+  });
+
+  it("falls back to 10 for zero/negative/non-finite price", () => {
+    expect(defaultShareCountForNotional(0)).toBe("10");
+    expect(defaultShareCountForNotional(-0.5)).toBe("10");
+    expect(defaultShareCountForNotional(NaN)).toBe("10");
+    expect(defaultShareCountForNotional(Infinity)).toBe("10");
+  });
+
+  it("falls back to 10 for zero/negative notional", () => {
+    expect(defaultShareCountForNotional(0.5, 0)).toBe("10");
+    expect(defaultShareCountForNotional(0.5, -5)).toBe("10");
+  });
+
+  it("default target is $10", () => {
+    expect(DEFAULT_TARGET_NOTIONAL_USDC).toBe(10);
   });
 });
 

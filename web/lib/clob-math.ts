@@ -16,6 +16,28 @@ export const safeBigInt = (s: string | undefined): bigint => {
   }
 };
 
+/**
+ * Initial share count for the trade modal — picks a number that targets
+ * a sane USDC notional given the current market price, instead of always
+ * showing "10 shares" which is meaningless across the 0.01–0.99 range
+ * (≈$0.10 on long-tail markets, ≈$9.90 on near-resolution markets).
+ *
+ * Returns a string rounded to 2 decimals so it fits the `step="0.01"`
+ * size input. Falls back to "10" when price isn't usable yet.
+ */
+export const DEFAULT_TARGET_NOTIONAL_USDC = 10;
+
+export function defaultShareCountForNotional(
+  price: number,
+  notional: number = DEFAULT_TARGET_NOTIONAL_USDC,
+): string {
+  if (!isFinite(price) || price <= 0) return "10";
+  if (!isFinite(notional) || notional <= 0) return "10";
+  const shares = notional / price;
+  // Round to 2 decimals to match input step
+  return (Math.round(shares * 100) / 100).toFixed(2);
+}
+
 export function userFacingError(
   raw: unknown,
   fallback = "Order could not be placed. Refresh the page and try again.",
