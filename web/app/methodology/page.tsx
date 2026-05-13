@@ -70,9 +70,7 @@ function daysBetween(a?: string | null, b?: string | null): number {
   if (!a || !b) return 0;
   return Math.max(
     0,
-    Math.round(
-      (new Date(b).getTime() - new Date(a).getTime()) / 86_400_000,
-    ),
+    Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86_400_000),
   );
 }
 
@@ -178,8 +176,8 @@ export default function MethodologyPage() {
         title="the problem with a P&L leaderboard"
       >
         <p>
-          Polymarket ranks traders publicly by profit. Profit is not the same
-          as being predictive. A trader can be profitable from a handful of
+          Polymarket ranks traders publicly by profit. Profit is not the same as
+          being predictive. A trader can be profitable from a handful of
           oversized wins while being systematically wrong on most of their
           diverse positions — including the ones where they disagree with the
           market.
@@ -198,9 +196,9 @@ export default function MethodologyPage() {
       >
         <ol className="space-y-2 list-decimal list-inside marker:text-ink-500 marker:font-mono">
           <li>
-            Every 5 minutes, scan 500 active Polymarket markets meeting
-            quality thresholds (max open interest or 24h volume ≥$50K, and
-            ≥$10K 24h volume).
+            Every 5 minutes, scan 500 active Polymarket markets meeting quality
+            thresholds (max open interest or 24h volume ≥$50K, and ≥$10K 24h
+            volume).
           </li>
           <li>
             For each market, fetch current positions held by the top-100 ranked
@@ -219,8 +217,8 @@ export default function MethodologyPage() {
           </li>
           <li>
             Persist per-signal, per-trader attribution: who held which
-            direction, at what size, with what weight. This is the foundation
-            of per-trader accuracy scoring.
+            direction, at what size, with what weight. This is the foundation of
+            per-trader accuracy scoring.
           </li>
         </ol>
       </Section>
@@ -231,19 +229,18 @@ export default function MethodologyPage() {
         title="the honest findings"
       >
         <p>
-          The first ~98K resolved signals were where the original strategy
-          was finalized: we flipped the aggregate SM direction universally
-          (after finding raw consensus was anti-predictive at 8.3%). The
-          flipped strategy hit 96% at the headline level — but a follow-up
-          per-skew backtest showed that was almost entirely a composition
-          effect from heavily lopsided markets. (Capture has since grown
-          past 139K resolved signals; the live numbers above always reflect
-          the current dataset.)
+          The first ~98K resolved signals were where the original strategy was
+          finalized: we flipped the aggregate SM direction universally (after
+          finding raw consensus was anti-predictive at 8.3%). The flipped
+          strategy hit 96% at the headline level — but a follow-up per-skew
+          backtest showed that was almost entirely a composition effect from
+          heavily lopsided markets. (Capture has since grown past 139K resolved
+          signals; the live numbers above always reflect the current dataset.)
         </p>
         <p>
           The per-skew breakdown forced a correction. On{" "}
-          <span className="text-ink-100 font-medium">tight 40–60% markets</span>,
-          fading SM lost 0 of 17 unique markets. On moderate, 3 of 21. SM was
+          <span className="text-ink-100 font-medium">tight 40–60% markets</span>
+          , fading SM lost 0 of 17 unique markets. On moderate, 3 of 21. SM was
           actually predictive when it dissented on those bands — going{" "}
           <em>with</em> SM would have won. On very-lopsided markets (≥90% or
           ≤10%), fading gives a near-100% hit rate but ~0% ROI — the favorite
@@ -256,8 +253,8 @@ export default function MethodologyPage() {
             top-trader-side observations.
           </span>{" "}
           On the 1,556-market backtest at finalization, this flipped net ROI
-          from −2.6% to +3.9% at the same 97% headline hit rate. §4 below
-          shows live filter performance against the current dataset.
+          from −2.6% to +3.9% at the same 97% headline hit rate. §4 below shows
+          live filter performance against the current dataset.
         </p>
         <p className="mt-4">The per-band breakdown after correction:</p>
 
@@ -307,9 +304,9 @@ export default function MethodologyPage() {
         )}
 
         <p className="mt-4">
-          Headline hit rate is a misleading summary when the sample is
-          dominated by one skew band. We report it because it is what people
-          ask for; per-band numbers and ROI are what actually matter.
+          Headline hit rate is a misleading summary when the sample is dominated
+          by one skew band. We report it because it is what people ask for;
+          per-band numbers and ROI are what actually matter.
         </p>
       </Section>
 
@@ -321,10 +318,10 @@ export default function MethodologyPage() {
         <p>
           Aggregating top-100 traders into a single consensus hides per-trader
           skill. We score each contributor individually on their resolved
-          divergent positions. A trader qualifies as{" "}
-          <em>predictive</em> when all three hold: at least 30 resolved
-          observations, point accuracy above 50% (genuinely above coin flip),
-          and a Wilson-95%-CI lower bound ≥ 40% (not purely noise).
+          divergent positions. A trader qualifies as <em>predictive</em> when
+          all three hold: at least 30 resolved observations, point accuracy
+          above 50% (genuinely above coin flip), and a Wilson-95%-CI lower bound
+          ≥ 40% (not purely noise).
         </p>
         {data?.predictive_filter ? (
           <p>
@@ -336,22 +333,22 @@ export default function MethodologyPage() {
             predictive contributor leaves{" "}
             <span className="text-ink-100 font-medium num">
               {data.predictive_filter.signals.toLocaleString()} signals at{" "}
-              {data.predictive_filter.win_pct?.toFixed(1) ?? "—"}% hit rate
-              and {fmtRoi(data.predictive_filter.roi_pct)} simulated ROI
-            </span>
-            {" "}— compared to {fmtRoi(data.predictive_filter.baseline.roi_pct)}{" "}
-            ROI on the unfiltered set.
+              {data.predictive_filter.win_pct?.toFixed(1) ?? "—"}% hit rate and{" "}
+              {fmtRoi(data.predictive_filter.roi_pct)} simulated ROI
+            </span>{" "}
+            — compared to {fmtRoi(data.predictive_filter.baseline.roi_pct)} ROI
+            on the unfiltered set.
           </p>
         ) : (
           <p className="text-ink-500">Computing live filter performance…</p>
         )}
         <p>
-          An earlier version used only the CI-lower gate and misreported a
-          much rosier ROI. The issue: high-volume anti-predictive traders
-          (47.5% accuracy on 1,000+ observations) have a Wilson-CI lower bound
-          that still crosses 40%, so they cleared the gate and appeared on
-          nearly every signal. Requiring the point estimate itself to be above
-          50% restores the filter&apos;s meaning.
+          An earlier version used only the CI-lower gate and misreported a much
+          rosier ROI. The issue: high-volume anti-predictive traders (47.5%
+          accuracy on 1,000+ observations) have a Wilson-CI lower bound that
+          still crosses 40%, so they cleared the gate and appeared on nearly
+          every signal. Requiring the point estimate itself to be above 50%
+          restores the filter&apos;s meaning.
         </p>
         {data?.predictive_filter?.by_band &&
         Object.keys(data.predictive_filter.by_band).length > 0 ? (
@@ -403,21 +400,18 @@ export default function MethodologyPage() {
               Polymarket&apos;s P&amp;L leaderboard is not a predictive-skill
               leaderboard.
             </span>{" "}
-            Top-ranked-by-profit traders cluster near 45–55% individual
-            accuracy on divergent signals. Most are not reliably predictive.
+            Top-ranked-by-profit traders cluster near 45–55% individual accuracy
+            on divergent signals. Most are not reliably predictive.
           </li>
           <li>
             <span className="text-ink-100 font-medium">
               A handful of individuals clear a meaningful edge.
             </span>{" "}
             <span className="num text-ink-100">
-              {pluralTraders(
-                data?.predictive_filter?.qualifying_traders ?? 0,
-              )}
+              {pluralTraders(data?.predictive_filter?.qualifying_traders ?? 0)}
             </span>{" "}
             currently have Wilson-CI lower bounds above 40% on 30+ resolved
-            observations. This is the population the predictive filter
-            surfaces.
+            observations. This is the population the predictive filter surfaces.
           </li>
           <li>
             <span className="text-ink-100 font-medium">
@@ -445,9 +439,7 @@ export default function MethodologyPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatBlock
             label="signals"
-            value={
-              loading ? "…" : (data?.signals.total ?? 0).toLocaleString()
-            }
+            value={loading ? "…" : (data?.signals.total ?? 0).toLocaleString()}
           />
           <StatBlock
             label="resolved"
@@ -458,9 +450,7 @@ export default function MethodologyPage() {
           <StatBlock
             label="markets"
             value={
-              loading
-                ? "…"
-                : (data?.resolved_markets ?? 0).toLocaleString()
+              loading ? "…" : (data?.resolved_markets ?? 0).toLocaleString()
             }
           />
           <StatBlock label="span" value={loading ? "…" : `${spanDays}d`} />
@@ -481,9 +471,7 @@ export default function MethodologyPage() {
             }
           />
           <div className="surface rounded-md p-4 col-span-2">
-            <div className="eyebrow mb-2">
-              overall win rate · live strategy
-            </div>
+            <div className="eyebrow mb-2">overall win rate · live strategy</div>
             <p
               className={`num text-h4 tracking-tight ${colorForAccuracy(
                 data?.signals.overall_win_rate_pct ?? null,
@@ -511,7 +499,9 @@ export default function MethodologyPage() {
           The builder identity endpoint reports whether this deployment exposes
           PolyScope&apos;s public Polymarket builder code. When configured,
           orders routed through PolyScope carry a{" "}
-          <code className="text-micro bg-surface border border-ink-800 px-1.5 py-0.5 rounded-sm font-mono text-ink-100">bytes32</code>{" "}
+          <code className="text-micro bg-surface border border-ink-800 px-1.5 py-0.5 rounded-sm font-mono text-ink-100">
+            bytes32
+          </code>{" "}
           identifier and attribute volume to us on-chain.
         </p>
         {identityLoading && !identity ? (
@@ -553,13 +543,29 @@ export default function MethodologyPage() {
           <p>
             Your wallet signs every order locally. The browser builds a
             ClobClient and a RelayClient bound to your viem signer; the
-            RelayClient deploys a per-EOA DepositWallet (gasless, one-time)
-            and orders settle from there. PolyScope&apos;s backend exposes a
-            single HMAC sign endpoint that returns the four{" "}
-            <code className="text-micro bg-background border border-ink-800 px-1 py-0.5 rounded-sm font-mono text-ink-200">POLY_BUILDER_*</code>{" "}
-            headers per request, so the Builder API Secret and Passphrase
-            never reach the browser. Attribution rides on every order via
-            the public builder code above.
+            RelayClient deploys a per-EOA DepositWallet (gasless, one-time) and
+            orders settle from there. PolyScope&apos;s backend exposes a single
+            HMAC sign endpoint that returns the four{" "}
+            <code className="text-micro bg-background border border-ink-800 px-1 py-0.5 rounded-sm font-mono text-ink-200">
+              POLY_BUILDER_*
+            </code>{" "}
+            headers per request, so the Builder API Secret never reaches the
+            browser. Attribution rides on every order via the public builder
+            code above.
+          </p>
+        </div>
+        <div className="surface rounded-md p-4 mt-3 text-body-sm text-ink-400 leading-relaxed">
+          <div className="eyebrow mb-2">live-price streaming</div>
+          <p>
+            When enabled, PolyScope keeps a persistent WebSocket to
+            Polymarket&apos;s market channel for the top-100 markets by 24h
+            volume. Last-trade, best-bid, and best-ask updates feed a per-asset
+            cache; we apply Polymarket&apos;s display rule (midpoint unless
+            spread &gt; $0.10 → last-trade). A 30s job recomputes divergence on
+            fresh prices for these markets against the cached top-trader
+            positions, so high-volume signals refresh much faster than the
+            5-minute scan would allow. The 5-minute scan remains the canonical
+            history written to the database.
           </p>
         </div>
       </Section>
@@ -576,12 +582,14 @@ export default function MethodologyPage() {
           </li>
           <li>
             Resolved-outcome coverage depends on Polymarket&apos;s market-close
-            cadence. Fast-resolution markets (sports, daily prices) dominate
-            the resolved sample; long-horizon markets are underweighted.
+            cadence. Fast-resolution markets (sports, daily prices) dominate the
+            resolved sample; long-horizon markets are underweighted.
           </li>
           <li>
-            Signals are generated every 5 minutes. By construction they cannot
-            capture intraday micro-structure or react faster than that.
+            Canonical signals are generated every 5 minutes. When WSS streaming
+            is enabled, the top-100 markets by volume get a 30s live-overlay
+            recompute on fresh prices; the rest of the market universe still
+            moves at 5-minute cadence.
           </li>
           <li>
             Category labels come from Polymarket&apos;s tags and are
@@ -589,10 +597,9 @@ export default function MethodologyPage() {
           </li>
           <li>
             PolyScope offers an optional non-custodial order-routing UI. Your
-            wallet signs every order locally and submits directly to
-            Polymarket; PolyScope never holds keys or funds. Signals are
-            research, not trading advice. Past accuracy does not imply future
-            performance. See{" "}
+            wallet signs every order locally and submits directly to Polymarket;
+            PolyScope never holds keys or funds. Signals are research, not
+            trading advice. Past accuracy does not imply future performance. See{" "}
             <Link
               href="/terms"
               className="text-scope-500 hover:text-scope-400 underline underline-offset-2"

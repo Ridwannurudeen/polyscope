@@ -682,6 +682,12 @@ _STATUS_ALIAS = {
     "REJECTED": "rejected",
     "UNMATCHED": "live",
     "DELAYED": "live",
+    # Partial fills are NOT terminal — remaining size can still match more.
+    # Map to "live" so the polling job keeps watching until a terminal
+    # state. Names defensively cover both spellings CLOB has been seen
+    # emitting; if neither is ever sent, this is a no-op.
+    "PARTIALLY_FILLED": "live",
+    "MATCHED_PARTIAL": "live",
 }
 
 
