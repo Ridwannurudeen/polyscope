@@ -76,7 +76,8 @@ def compute_divergence(
 
     if trades and len(trades) >= 2:
         sm_consensus = _trade_weighted_consensus(
-            trades, traders,
+            trades,
+            traders,
             category=market.category,
             category_weights=category_weights,
         )
@@ -85,7 +86,8 @@ def compute_divergence(
 
     if sm_consensus is None:
         sm_consensus = _weighted_consensus(
-            sm_positions, traders,
+            sm_positions,
+            traders,
             category=market.category,
             category_weights=category_weights,
         )
@@ -142,6 +144,7 @@ def compute_divergence(
         signal_source=signal_source,
         open_interest=float(market.open_interest or 0.0),
         volume_24h=float(market.volume_24h or 0.0),
+        neg_risk=bool(market.neg_risk),
     )
 
 

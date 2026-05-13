@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS divergence_signals (
     resolved INTEGER DEFAULT 0,
     outcome_correct INTEGER,
     open_interest REAL,
-    volume_24h REAL
+    volume_24h REAL,
+    neg_risk INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sm_trades (
@@ -348,13 +349,19 @@ async def migrate_db(db: aiosqlite.Connection):
     if "expired_at" not in cols:
         await db.execute("ALTER TABLE divergence_signals ADD COLUMN expired_at TEXT")
     if "signal_source" not in cols:
-        await db.execute("ALTER TABLE divergence_signals ADD COLUMN signal_source TEXT DEFAULT 'positions'")
+        await db.execute(
+            "ALTER TABLE divergence_signals ADD COLUMN signal_source TEXT DEFAULT 'positions'"
+        )
     # OI/volume snapshot at signal time. Lets the methodology backtest
     # apply quality gates without aggregating market_snapshots (4M+ rows).
     if "open_interest" not in cols:
         await db.execute("ALTER TABLE divergence_signals ADD COLUMN open_interest REAL")
     if "volume_24h" not in cols:
         await db.execute("ALTER TABLE divergence_signals ADD COLUMN volume_24h REAL")
+    # Polymarket negRisk flag (multi-outcome events) — forwarded from
+    # Market.neg_risk so consumers can filter/weight these signals.
+    if "neg_risk" not in cols:
+        await db.execute("ALTER TABLE divergence_signals ADD COLUMN neg_risk INTEGER DEFAULT 0")
 
     # Wallet-linked identity — watchlist + user_actions get wallet_address.
     # client_id stays for anonymous fallback and as the merge key when a
@@ -369,9 +376,7 @@ async def migrate_db(db: aiosqlite.Connection):
     if "wallet_address" not in ua_cols:
         await db.execute("ALTER TABLE user_actions ADD COLUMN wallet_address TEXT")
 
-    await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_watchlist_wallet ON watchlist(wallet_address)"
-    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_wallet ON watchlist(wallet_address)")
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_actions_wallet ON user_actions(wallet_address)"
     )
@@ -386,9 +391,7 @@ async def migrate_db(db: aiosqlite.Connection):
             last_seen_at TEXT
         )"""
     )
-    await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_wallets_client ON wallets(client_id)"
-    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_wallets_client ON wallets(client_id)")
     await db.execute(
         """CREATE TABLE IF NOT EXISTS wallet_client_links (
             wallet_address TEXT NOT NULL,
@@ -504,8 +507,8 @@ async def save_divergence_signal(db: aiosqlite.Connection, signal: dict) -> int:
         """INSERT INTO divergence_signals
            (market_id, timestamp, market_price, sm_consensus, divergence_pct,
             signal_strength, sm_trader_count, sm_direction, question, category,
-            signal_source, open_interest, volume_24h)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            signal_source, open_interest, volume_24h, neg_risk)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             signal["market_id"],
             signal["timestamp"],
@@ -520,14 +523,13 @@ async def save_divergence_signal(db: aiosqlite.Connection, signal: dict) -> int:
             signal.get("signal_source", "positions"),
             signal.get("open_interest"),
             signal.get("volume_24h"),
+            1 if signal.get("neg_risk") else 0,
         ),
     )
     return cursor.lastrowid or 0
 
 
-async def save_signal_trader_positions(
-    db: aiosqlite.Connection, records: list[dict]
-):
+async def save_signal_trader_positions(db: aiosqlite.Connection, records: list[dict]):
     """Persist per-trader position records for a signal."""
     if not records:
         return
@@ -584,9 +586,7 @@ def _wilson_lower_pct(correct: int, total: int) -> float:
     p = correct / total
     denom = 1 + (z * z) / total
     center = (p + (z * z) / (2 * total)) / denom
-    half = (
-        z * _math.sqrt((p * (1 - p)) / total + (z * z) / (4 * total * total))
-    ) / denom
+    half = (z * _math.sqrt((p * (1 - p)) / total + (z * z) / (4 * total * total))) / denom
     return max(0.0, center - half) * 100.0
 
 
@@ -648,13 +648,7 @@ async def get_predictive_contributors_for_markets(
             denom = 1 + (z * z) / total if total else 1
             center = (p + (z * z) / (2 * total)) / denom if total else 0.0
             half = (
-                (
-                    z
-                    * _math.sqrt(
-                        (p * (1 - p)) / total + (z * z) / (4 * total * total)
-                    )
-                )
-                / denom
+                (z * _math.sqrt((p * (1 - p)) / total + (z * z) / (4 * total * total))) / denom
                 if total
                 else 0.0
             )
@@ -711,9 +705,7 @@ async def get_divergence_signals(
     return [_normalize_signal(r) for r in rows]
 
 
-async def get_divergence_history(
-    db: aiosqlite.Connection, limit: int = 100
-) -> list[dict]:
+async def get_divergence_history(db: aiosqlite.Connection, limit: int = 100) -> list[dict]:
     cursor = await db.execute(
         """SELECT * FROM divergence_signals
            WHERE resolved = 1
@@ -725,9 +717,7 @@ async def get_divergence_history(
 
 
 async def get_resolved_markets(db: aiosqlite.Connection) -> list[dict]:
-    cursor = await db.execute(
-        "SELECT * FROM resolved_markets ORDER BY resolved_at DESC"
-    )
+    cursor = await db.execute("SELECT * FROM resolved_markets ORDER BY resolved_at DESC")
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
 
@@ -742,14 +732,12 @@ async def cleanup_old_snapshots(
     same format for the threshold so string comparison works correctly.
     Returns total rows deleted.
     """
-    threshold = (
-        await (
-            await db.execute(
-                "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)",
-                (f"-{days} days",),
-            )
-        ).fetchone()
-    )
+    threshold = await (
+        await db.execute(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)",
+            (f"-{days} days",),
+        )
+    ).fetchone()
     cutoff = threshold[0] if threshold else None
     if not cutoff:
         return 0
@@ -791,9 +779,7 @@ async def save_resolved_market(db: aiosqlite.Connection, market: dict):
     )
 
 
-async def update_signal_outcomes(
-    db: aiosqlite.Connection, market_id: str, outcome: int
-):
+async def update_signal_outcomes(db: aiosqlite.Connection, market_id: str, outcome: int):
     """Mark all divergence signals for a market as resolved and score correctness.
 
     SM was correct if:
@@ -869,8 +855,7 @@ async def rebuild_trader_accuracy(db: aiosqlite.Connection) -> int:
         trader, direction, price, category, outcome = r[0], r[1], r[2], r[3], r[4]
         correct = (
             1
-            if (direction == "YES" and outcome == 1)
-            or (direction == "NO" and outcome == 0)
+            if (direction == "YES" and outcome == 1) or (direction == "NO" and outcome == 0)
             else 0
         )
 
@@ -886,15 +871,11 @@ async def rebuild_trader_accuracy(db: aiosqlite.Connection) -> int:
             band = "moderate"
         else:
             band = "tight"
-        s = skew_map.setdefault(trader, {}).setdefault(
-            band, {"total": 0, "correct": 0}
-        )
+        s = skew_map.setdefault(trader, {}).setdefault(band, {"total": 0, "correct": 0})
         s["total"] += 1
         s["correct"] += correct
 
-        c = cat_map.setdefault(trader, {}).setdefault(
-            category, {"total": 0, "correct": 0}
-        )
+        c = cat_map.setdefault(trader, {}).setdefault(category, {"total": 0, "correct": 0})
         c["total"] += 1
         c["correct"] += correct
 
@@ -966,9 +947,7 @@ async def get_trader_accuracy_leaderboard(
     result = []
     for r in rows:
         d = dict(r)
-        d["ci"] = accuracy_bounds(
-            d["correct_predictions"], d["total_divergent_signals"]
-        )
+        d["ci"] = accuracy_bounds(d["correct_predictions"], d["total_divergent_signals"])
         result.append(d)
     return result
 
@@ -994,9 +973,7 @@ async def record_event(
     )
 
 
-async def get_metrics_summary(
-    db: aiosqlite.Connection, days: int = 7
-) -> dict:
+async def get_metrics_summary(db: aiosqlite.Connection, days: int = 7) -> dict:
     """Aggregate product metrics for admin dashboard.
 
     Returns DAU/WAU/MAU-ish counts, top events, top routes, conversion
@@ -1058,15 +1035,11 @@ async def get_metrics_summary(
     # Portfolio funnel counts
     cursor = await db.execute("SELECT COUNT(*) FROM watchlist")
     watchlist_total = (await cursor.fetchone())[0] or 0
-    cursor = await db.execute(
-        "SELECT COUNT(DISTINCT client_id) FROM watchlist"
-    )
+    cursor = await db.execute("SELECT COUNT(DISTINCT client_id) FROM watchlist")
     watchlist_clients = (await cursor.fetchone())[0] or 0
     cursor = await db.execute("SELECT COUNT(*) FROM user_actions")
     actions_total = (await cursor.fetchone())[0] or 0
-    cursor = await db.execute(
-        "SELECT COUNT(DISTINCT client_id) FROM user_actions"
-    )
+    cursor = await db.execute("SELECT COUNT(DISTINCT client_id) FROM user_actions")
     actions_clients = (await cursor.fetchone())[0] or 0
 
     return {
@@ -1126,9 +1099,16 @@ async def add_to_watchlist(
                 question, category, added_at, wallet_address)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                client_id, market_id, sig["id"], sig["sm_direction"],
-                sig["market_price"], sig["sm_consensus"],
-                sig["divergence_pct"], sig["question"], sig["category"], now,
+                client_id,
+                market_id,
+                sig["id"],
+                sig["sm_direction"],
+                sig["market_price"],
+                sig["sm_consensus"],
+                sig["divergence_pct"],
+                sig["question"],
+                sig["category"],
+                now,
                 wallet_address,
             ),
         )
@@ -1222,9 +1202,7 @@ def _outcome_matched(d: dict) -> bool | None:
         return None
     direction = d["sm_direction_at_add"]
     outcome = d["resolved_outcome"]
-    return (direction == "YES" and outcome == 1) or (
-        direction == "NO" and outcome == 0
-    )
+    return (direction == "YES" and outcome == 1) or (direction == "NO" and outcome == 0)
 
 
 def _invalidation_state(d: dict) -> dict | None:
@@ -1240,9 +1218,7 @@ def _invalidation_state(d: dict) -> dict | None:
     """
     if d.get("resolved_outcome") is not None and d.get("sm_direction_at_add"):
         return {
-            "reason": "resolved_right"
-            if _outcome_matched(d)
-            else "resolved_wrong",
+            "reason": "resolved_right" if _outcome_matched(d) else "resolved_wrong",
             "label": "Resolved — called it"
             if _outcome_matched(d)
             else "Resolved — wrong direction",
@@ -1357,9 +1333,7 @@ async def is_wallet_linked_to_client(
     return await cursor.fetchone() is not None
 
 
-async def client_has_linked_wallet(
-    db: aiosqlite.Connection, client_id: str
-) -> bool:
+async def client_has_linked_wallet(db: aiosqlite.Connection, client_id: str) -> bool:
     """True if any wallet has been linked to this client_id via /api/wallet/link.
 
     Used to seal off the legacy client_id-only access path once ownership
@@ -1605,8 +1579,7 @@ async def record_user_action(
            (client_id, market_id, watchlist_id, action_direction, size, price,
             acted_at, wallet_address)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (client_id, market_id, watchlist_id, action_direction, size, price, now,
-         wallet_address),
+        (client_id, market_id, watchlist_id, action_direction, size, price, now, wallet_address),
     )
     return cursor.lastrowid or 0
 
@@ -1648,9 +1621,8 @@ async def get_portfolio(
         if d["resolved_outcome"] is not None:
             resolved_actions += 1
             total += 1
-            was_correct = (
-                (d["action_direction"] == "YES" and d["resolved_outcome"] == 1)
-                or (d["action_direction"] == "NO" and d["resolved_outcome"] == 0)
+            was_correct = (d["action_direction"] == "YES" and d["resolved_outcome"] == 1) or (
+                d["action_direction"] == "NO" and d["resolved_outcome"] == 0
             )
             d["action_correct"] = was_correct
             if was_correct:
@@ -1678,9 +1650,7 @@ async def get_portfolio(
     }
 
 
-async def search_universal(
-    db: aiosqlite.Connection, query: str, limit: int = 8
-) -> dict:
+async def search_universal(db: aiosqlite.Connection, query: str, limit: int = 8) -> dict:
     """Search markets (by question) and traders (by address prefix).
 
     Returns up to `limit` of each. Case-insensitive substring match
@@ -1912,9 +1882,7 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
             "n": int(b["n"]),
             "hits": int(b["hits"]),
             "win_pct": round(b["hits"] / b["n"] * 100, 1),
-            "roi_pct": round(
-                (b["returned"] - b["wagered"]) / max(b["wagered"], 1) * 100, 1
-            ),
+            "roi_pct": round((b["returned"] - b["wagered"]) / max(b["wagered"], 1) * 100, 1),
         }
 
     return {
@@ -1933,9 +1901,7 @@ async def _compute_predictive_filter_stats(db: aiosqlite.Connection) -> dict:
             "hits": base_hits,
             "win_pct": round(base_hits / base_n * 100, 1) if base_n else None,
             "roi_pct": (
-                round(
-                    (base_returned - base_wagered) / max(base_wagered, 1) * 100, 1
-                )
+                round((base_returned - base_wagered) / max(base_wagered, 1) * 100, 1)
                 if base_n
                 else None
             ),
@@ -2039,9 +2005,7 @@ async def get_methodology_stats(
     return result
 
 
-async def get_signal_evidence(
-    db: aiosqlite.Connection, market_id: str
-) -> dict | None:
+async def get_signal_evidence(db: aiosqlite.Connection, market_id: str) -> dict | None:
     """Return full evidence trail for the most recent signal on a market.
 
     Includes:
@@ -2153,9 +2117,7 @@ async def get_signal_evidence(
     }
 
 
-async def get_trader_profile(
-    db: aiosqlite.Connection, trader_address: str
-) -> dict | None:
+async def get_trader_profile(db: aiosqlite.Connection, trader_address: str) -> dict | None:
     from polyscope.stats import accuracy_bounds
 
     cursor = await db.execute(
@@ -2242,8 +2204,8 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
     """
 
     cursor = await db.execute(
-        _BEST_PER_MARKET +
-        """SELECT
+        _BEST_PER_MARKET
+        + """SELECT
                COUNT(*) AS overall_total,
                SUM(CASE WHEN outcome_correct = 1 THEN 1 ELSE 0 END) AS overall_correct,
                AVG(signal_strength) AS overall_avg_score,
@@ -2271,12 +2233,21 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
         "avg_score": round(row[2] or 0.0, 2),
     }
     by_tier = {
-        "high": {"total": row[3] or 0, "correct": row[4] or 0,
-                 "win_rate": _wr(row[4] or 0, row[3] or 0)},
-        "medium": {"total": row[5] or 0, "correct": row[6] or 0,
-                   "win_rate": _wr(row[6] or 0, row[5] or 0)},
-        "low": {"total": row[7] or 0, "correct": row[8] or 0,
-                "win_rate": _wr(row[8] or 0, row[7] or 0)},
+        "high": {
+            "total": row[3] or 0,
+            "correct": row[4] or 0,
+            "win_rate": _wr(row[4] or 0, row[3] or 0),
+        },
+        "medium": {
+            "total": row[5] or 0,
+            "correct": row[6] or 0,
+            "win_rate": _wr(row[6] or 0, row[5] or 0),
+        },
+        "low": {
+            "total": row[7] or 0,
+            "correct": row[8] or 0,
+            "win_rate": _wr(row[8] or 0, row[7] or 0),
+        },
     }
     rolling_30d = {
         "total": row[9] or 0,
@@ -2288,8 +2259,8 @@ async def get_signal_accuracy(db: aiosqlite.Connection) -> dict:
     # mutually-exclusive overlapping (e.g. price=0.05 is both <=0.1 and
     # <=0.25); inlining as conditional sums would double-count.
     cursor = await db.execute(
-        _BEST_PER_MARKET +
-        """SELECT
+        _BEST_PER_MARKET
+        + """SELECT
                CASE
                    WHEN market_price >= 0.9 OR market_price <= 0.1 THEN 'very_lopsided'
                    WHEN market_price >= 0.75 OR market_price <= 0.25 THEN 'lopsided'
@@ -2523,9 +2494,7 @@ async def remove_subscription(db: aiosqlite.Connection, chat_id: int):
 
 async def get_active_subscriptions(db: aiosqlite.Connection) -> list[dict]:
     """Get all active bot subscriptions."""
-    cursor = await db.execute(
-        "SELECT * FROM bot_subscriptions WHERE active = 1"
-    )
+    cursor = await db.execute("SELECT * FROM bot_subscriptions WHERE active = 1")
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
 
@@ -2558,18 +2527,12 @@ async def link_bot_identity(
 
 
 async def unlink_bot_identity(db: aiosqlite.Connection, chat_id: int) -> bool:
-    cursor = await db.execute(
-        "DELETE FROM bot_identity_links WHERE chat_id = ?", (chat_id,)
-    )
+    cursor = await db.execute("DELETE FROM bot_identity_links WHERE chat_id = ?", (chat_id,))
     return (cursor.rowcount or 0) > 0
 
 
-async def get_bot_identity(
-    db: aiosqlite.Connection, chat_id: int
-) -> dict | None:
-    cursor = await db.execute(
-        "SELECT * FROM bot_identity_links WHERE chat_id = ?", (chat_id,)
-    )
+async def get_bot_identity(db: aiosqlite.Connection, chat_id: int) -> dict | None:
+    cursor = await db.execute("SELECT * FROM bot_identity_links WHERE chat_id = ?", (chat_id,))
     row = await cursor.fetchone()
     return dict(row) if row else None
 
@@ -2604,9 +2567,7 @@ async def get_pending_follow_alerts_with_chat(
     return [dict(r) for r in await cursor.fetchall()]
 
 
-async def mark_follow_alerts_tg_notified(
-    db: aiosqlite.Connection, alert_ids: list[int]
-) -> int:
+async def mark_follow_alerts_tg_notified(db: aiosqlite.Connection, alert_ids: list[int]) -> int:
     if not alert_ids:
         return 0
     from datetime import datetime, timezone
@@ -2672,9 +2633,7 @@ async def get_category_weights(db: aiosqlite.Connection) -> dict[str, dict[str, 
 
 async def get_expired_signal_count(db: aiosqlite.Connection) -> int:
     """Count expired signals."""
-    cursor = await db.execute(
-        "SELECT COUNT(*) FROM divergence_signals WHERE expired = 1"
-    )
+    cursor = await db.execute("SELECT COUNT(*) FROM divergence_signals WHERE expired = 1")
     row = await cursor.fetchone()
     return row[0] or 0
 
@@ -2703,8 +2662,7 @@ async def record_builder_order_attempt(
            (market_id, token_id, side, price, size, notional_usdc,
             order_type, builder_code, status, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
-        (market_id, token_id, side, price, size, notional,
-         order_type, builder_code, now, now),
+        (market_id, token_id, side, price, size, notional, order_type, builder_code, now, now),
     )
     await db.commit()
     return cursor.lastrowid
@@ -2733,9 +2691,7 @@ async def update_builder_order_result(
     await db.commit()
 
 
-async def mark_stale_pending_builder_orders(
-    db: aiosqlite.Connection, minutes: int = 10
-) -> int:
+async def mark_stale_pending_builder_orders(db: aiosqlite.Connection, minutes: int = 10) -> int:
     """Move pre-CLOB pending rows past the crash window to timeout."""
     from datetime import datetime, timedelta, timezone
 
@@ -2762,16 +2718,14 @@ async def mark_stale_pending_builder_orders(
                 if "locked" not in str(e).lower():
                     raise
                 await db.rollback()
-                await asyncio.sleep(0.25 * (2 ** attempt))
+                await asyncio.sleep(0.25 * (2**attempt))
         logger.info("mark_stale_pending_builder_orders skipped: %s", last_err)
         return 0
     finally:
         await db.execute("PRAGMA busy_timeout=30000")
 
 
-async def list_builder_orders(
-    db: aiosqlite.Connection, limit: int = 50
-) -> list[dict]:
+async def list_builder_orders(db: aiosqlite.Connection, limit: int = 50) -> list[dict]:
     """Return recent builder_orders rows, newest first."""
     cursor = await db.execute(
         """SELECT id, clob_order_id, market_id, token_id, side, price, size,
@@ -2786,9 +2740,7 @@ async def list_builder_orders(
     return [dict(r) for r in rows]
 
 
-async def get_pending_builder_orders(
-    db: aiosqlite.Connection, limit: int = 50
-) -> list[dict]:
+async def get_pending_builder_orders(db: aiosqlite.Connection, limit: int = 50) -> list[dict]:
     """Orders that still need CLOB status sync.
 
     ``submitted`` rows with a clob_order_id are candidates. Terminal
@@ -2828,9 +2780,7 @@ async def apply_builder_order_sync(
     await db.commit()
 
 
-async def upsert_builder_trade(
-    db: aiosqlite.Connection, trade: dict, raw_json: str
-) -> bool:
+async def upsert_builder_trade(db: aiosqlite.Connection, trade: dict, raw_json: str) -> bool:
     """Insert-or-update a builder_trade row keyed by trade_id.
 
     Returns True when a new row was inserted, False on update.
@@ -2838,20 +2788,14 @@ async def upsert_builder_trade(
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).isoformat()
-    trade_id = (
-        trade.get("id")
-        or trade.get("trade_id")
-        or trade.get("tradeID")
-    )
+    trade_id = trade.get("id") or trade.get("trade_id") or trade.get("tradeID")
     if not trade_id:
         return False
     size = float(trade.get("size") or 0)
     price = float(trade.get("price") or 0)
     notional = round(size * price, 6)
 
-    cursor = await db.execute(
-        "SELECT id FROM builder_trades WHERE trade_id = ?", (trade_id,)
-    )
+    cursor = await db.execute("SELECT id FROM builder_trades WHERE trade_id = ?", (trade_id,))
     existing = await cursor.fetchone()
 
     if existing:
@@ -2903,9 +2847,7 @@ async def upsert_builder_trade(
     return True
 
 
-async def list_builder_trades(
-    db: aiosqlite.Connection, limit: int = 50
-) -> list[dict]:
+async def list_builder_trades(db: aiosqlite.Connection, limit: int = 50) -> list[dict]:
     """Return recent builder_trades, newest by match_time first."""
     cursor = await db.execute(
         """SELECT id, trade_id, market_id, token_id, side, size, price,

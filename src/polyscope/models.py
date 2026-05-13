@@ -23,6 +23,10 @@ class Market:
     volume_24h: float = 0.0
     open_interest: float = 0.0
     liquidity: float = 0.0
+    # True for multi-outcome events (3+ candidates) where YES/NO compression
+    # loses signal. Surfaces in DivergenceSignal so consumers can filter or
+    # weight these differently.
+    neg_risk: bool = False
 
 
 @dataclass
@@ -70,6 +74,9 @@ class DivergenceSignal:
     signal_source: str = "positions"  # "positions" or "trades"
     open_interest: float = 0.0
     volume_24h: float = 0.0
+    # Forwarded from Market.neg_risk so downstream consumers can filter or
+    # adjust confidence on multi-outcome events.
+    neg_risk: bool = False
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 

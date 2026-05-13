@@ -518,4 +518,5 @@ class PolymarketClient:
             volume_24h=float(m.get("volume24hr", m.get("volume24h", 0)) or 0),
             open_interest=float(m.get("openInterest", m.get("open_interest", 0)) or 0),
             liquidity=float(m.get("liquidity", 0) or 0),
+            neg_risk=bool(m.get("negRisk", m.get("neg_risk", False))),
         )
