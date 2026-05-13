@@ -74,6 +74,7 @@ class PolymarketWSStream:
         self._max_backoff = max_backoff
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._ws: Any = None
+        self._connected = False
         self._stop_event: asyncio.Event | None = None
 
     @property
@@ -82,7 +83,15 @@ class PolymarketWSStream:
 
     @property
     def is_connected(self) -> bool:
-        return self._ws is not None and not getattr(self._ws, "closed", True)
+        """True between successful subscribe and disconnect.
+
+        Internal flag set in ``run()`` because the ``websockets`` library
+        (13+) no longer exposes a stable ``closed`` attribute — its
+        connection-state enum is internal to the implementation. We track
+        it ourselves so callers (and the ``/api/wss/live-prices``
+        endpoint) get an accurate reading.
+        """
+        return self._connected
 
     def snapshot(self, asset_id: str) -> dict[str, Any] | None:
         snap = self._snapshots.get(asset_id)
@@ -144,6 +153,7 @@ class PolymarketWSStream:
                     self._ws = ws
                     attempt = 0  # reset on a successful connection
                     await self._send_initial_subscribe(ws)
+                    self._connected = True
                     ping_task = asyncio.create_task(self._ping_loop(ws))
                     try:
                         async for raw in ws:
@@ -155,6 +165,7 @@ class PolymarketWSStream:
             except (WebSocketException, OSError, asyncio.TimeoutError) as e:
                 logger.warning("WSS disconnected: %s — will reconnect", e)
             finally:
+                self._connected = False
                 self._ws = None
 
             if self._stop_event.is_set():
