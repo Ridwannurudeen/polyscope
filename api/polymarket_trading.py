@@ -235,11 +235,3 @@ def place_attributed_order(
     if isinstance(resp, dict):
         return resp
     return {"raw": str(resp)}
-
-
-def get_attributed_trades(market: str | None = None) -> list[dict[str, Any]]:
-    """Fetch builder-attributed trades for this deployment's builder code."""
-    client = get_client()
-    kwargs = {"market": market} if market else {}
-    trades = client.get_builder_trades(**kwargs)
-    return [t.__dict__ if hasattr(t, "__dict__") else dict(t) for t in (trades or [])]

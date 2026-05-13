@@ -87,9 +87,6 @@ def fake_clob(monkeypatch):
             self.posted_orders.append((order_args, options, order_type))
             return {"orderID": "clob-xyz-123", "status": "matched"}
 
-        def get_builder_trades(self, market=None):
-            return [{"id": "t1", "market": market, "size": 10, "price": 0.5}]
-
     fake.ClobClient = _Client
     monkeypatch.setitem(sys.modules, "py_clob_client_v2", fake)
     return fake_client_instances
@@ -236,14 +233,6 @@ def test_client_cache_invalidated_when_env_changes(good_env, fake_clob, monkeypa
     monkeypatch.setenv("POLYMARKET_FUNDER_ADDRESS", "0x" + "d" * 40)
     place_attributed_order(token_id="y", side="BUY", price=0.5, size=1)
     assert len(fake_clob) == 4  # 2 L1+full pairs
-
-
-def test_get_attributed_trades(good_env, fake_clob):
-    from api.polymarket_trading import get_attributed_trades
-
-    trades = get_attributed_trades(market="0xabc")
-    assert len(trades) == 1
-    assert trades[0]["market"] == "0xabc"
 
 
 # ── status polling ───────────────────────────────────────
