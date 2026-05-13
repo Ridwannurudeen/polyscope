@@ -218,10 +218,65 @@ Copy `.env.example` to `.env`. **Required** for production:
 | `POLYMARKET_RELAYER_URL` | Builder Relayer endpoint for gasless DepositWallet deploys + ops (default `https://relayer-v2.polymarket.com/`) |
 | `POLYMARKET_CLOB_HOST` | Defaults to `https://clob.polymarket.com` |
 | `POLYSCOPE_ALLOW_DEV_DOMAINS=1` | Enable `localhost`/`testserver` in wallet-link allowlist (off by default) |
+| `POLYSCOPE_CORS_ORIGINS` | Comma-separated CORS allow-list. Unset = `https://polyscope.gudman.xyz` (prod). Add `http://localhost:3020` for local dev |
+
+**WSS live-price streaming (opt-in):**
+
+| Variable | Purpose |
+|----------|---------|
+| `POLYSCOPE_WSS_ENABLED` | Set to `true`/`1`/`yes` to activate the Polymarket WSS stream (default off). Subscribes to top-N markets by 24h volume on `wss://ws-subscriptions-clob.polymarket.com/ws/market` |
+| `POLYSCOPE_WSS_TOP_N` | How many markets to subscribe to (default `100`). Reads `markets` cache, sorted by `volume_24h` descending |
+| `POLYSCOPE_MULTI_TAG_WEIGHTING` | Experimental: weight category-aware divergence by `max()` over all Gamma tags instead of `tags[0]` only. Default off — set to `true` to opt in (no backtest validation yet) |
 
 **Browser trading is non-custodial.** Users sign wallet-link messages and CLOB orders in their own wallet. The legacy `/api/sign` route was deliberately removed.
 
 The optional server-side admin trading variables (`POLYMARKET_PRIVATE_KEY`, `POLYMARKET_FUNDER_ADDRESS`, `POLYMARKET_SIGNATURE_TYPE`, `POLYMARKET_MAX_ORDER_USDC`) exist for diagnostic order placement only — production attribution flows through the browser.
+
+---
+
+## Live data (WSS streaming)
+
+`POLYSCOPE_WSS_ENABLED=true` activates the Polymarket WSS market-channel
+stream. Architecture:
+
+- `src/polyscope/wss_stream.py` — `PolymarketWSStream` holds one
+  persistent connection. Subscribes at `level=1` (top-of-book), sends a
+  literal `"PING"` text frame every 10s (Polymarket's protocol uses
+  text frames, not WS-protocol pings), reconnects with exponential
+  backoff `0.5s → 30s`. Parses `book`, `price_change`,
+  `last_trade_price`, `tick_size_change` events into a per-asset
+  `{best_bid, best_ask, last_trade, tick_size, ts}` cache.
+- `api/wss_runtime.py` — module-level singleton owning the stream +
+  its background task. Top-level `_safe_run` wrapper swallows
+  stream crashes so they can't kill FastAPI.
+- `api/scheduler.py:refresh_wss_subscription_job` — runs every 10 min,
+  takes top-N by `volume_24h` from the cached markets list, diffs
+  against the current subscription, sends `subscribe` /
+  `unsubscribe` ops as needed.
+- `api/scheduler.py:compute_live_divergences_job` — runs every 30s,
+  reads positions cached by the 5-min full scan + live prices from
+  the stream, recomputes `compute_divergence` with the fresh price.
+  Writes to cache `live_divergences` (TTL 90s). No DB writes — the
+  5-min canonical history is unchanged.
+- `GET /api/wss/live-prices` — observability endpoint. Returns
+  `{enabled, connected, subscribed, prices: {token_id: {best_bid,
+  best_ask, last_trade, midpoint, current_price, ts}}}`. The
+  `current_price` field applies Polymarket's display rule (midpoint
+  unless spread > $0.10, then last trade).
+
+**Activation:**
+
+```bash
+# On the VPS
+echo "POLYSCOPE_WSS_ENABLED=true" >> /opt/polyscope/.env
+docker compose up -d api
+# Verify
+curl https://polyscope.gudman.xyz/api/wss/live-prices | jq '.connected,.subscribed'
+docker compose logs api | grep -i wss
+```
+
+The stream is idempotent — disabling it (unsetting the env var +
+restarting api) cleanly stops the connection and clears the cache.
 
 ---
 
@@ -259,9 +314,10 @@ Full deploy + security checklist: [`docs/production-runbook.md`](docs/production
 |---|---|
 | Signals tracked | **340K+** |
 | Resolved signals | **187K+** across **4,188** markets |
-| Markets watched | up to **500** active per scan cycle |
+| Markets watched | paginated until short batch (cap 50 pages = 5,000 active) |
 | Live qualifying predictive traders | 6 (Wilson-95% gated) |
-| Backend tests | **224 passing** |
+| Backend tests | **295+ passing** |
+| Frontend tests | **20+ passing** (Vitest scaffold + clob-math coverage) |
 | Capture window | **28+ days** since per-trader system live (Apr 12 2026) |
 
 ### What's built
@@ -276,6 +332,10 @@ Full deploy + security checklist: [`docs/production-runbook.md`](docs/production
 - ✓ US geoblock on trade-facilitation surfaces
 - ✓ Per-IP rate limits + nginx hardening + TLS + HSTS + CSP
 - ✓ `signal_trader_positions` capture: ~18.7K rows/day
+- ✓ Polymarket WSS live-price streaming (env-gated, top-N by volume)
+- ✓ Neg-risk awareness on signals (forwarded from Gamma `negRisk`)
+- ✓ Multi-tag taxonomy on markets (full Gamma tag list preserved)
+- ✓ HTTP retry/backoff honoring `Retry-After` on 429/5xx
 
 ---
 
