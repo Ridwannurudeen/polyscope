@@ -11,6 +11,7 @@ import { WatchlistButton } from "@/components/watchlist-button";
 import { trackEvent } from "@/lib/analytics";
 import type { DivergenceSignal } from "@/lib/api";
 import { useBandStats } from "@/lib/hooks";
+import { useLivePriceForMarket } from "@/lib/use-live-prices";
 
 /**
  * DecisionCard — terminal row, not a SaaS card.
@@ -33,9 +34,24 @@ function tierFromScore(score: number): {
   tone: "scope" | "fade" | "ink";
   hint: string;
 } {
-  if (score >= 80) return { label: "tier 1", tone: "scope", hint: "large divergence · multi high-rank contributors" };
-  if (score >= 60) return { label: "tier 2", tone: "fade", hint: "meaningful · inspect contributors" };
-  if (score >= 40) return { label: "tier 3", tone: "ink", hint: "low composite · informational" };
+  if (score >= 80)
+    return {
+      label: "tier 1",
+      tone: "scope",
+      hint: "large divergence · multi high-rank contributors",
+    };
+  if (score >= 60)
+    return {
+      label: "tier 2",
+      tone: "fade",
+      hint: "meaningful · inspect contributors",
+    };
+  if (score >= 40)
+    return {
+      label: "tier 3",
+      tone: "ink",
+      hint: "low composite · informational",
+    };
   return { label: "tier 4", tone: "ink", hint: "sub-threshold" };
 }
 
@@ -44,9 +60,12 @@ function skewFromPrice(price: number): {
   label: string;
   skewRisk: boolean;
 } {
-  if (price >= 0.9 || price <= 0.1) return { band: "very_lopsided", label: "very lopsided", skewRisk: true };
-  if (price >= 0.75 || price <= 0.25) return { band: "lopsided", label: "lopsided", skewRisk: false };
-  if (price >= 0.6 || price <= 0.4) return { band: "moderate", label: "moderate", skewRisk: false };
+  if (price >= 0.9 || price <= 0.1)
+    return { band: "very_lopsided", label: "very lopsided", skewRisk: true };
+  if (price >= 0.75 || price <= 0.25)
+    return { band: "lopsided", label: "lopsided", skewRisk: false };
+  if (price >= 0.6 || price <= 0.4)
+    return { band: "moderate", label: "moderate", skewRisk: false };
   return { band: "tight", label: "tight", skewRisk: false };
 }
 
@@ -95,7 +114,7 @@ function ReadoutCell({
   value,
   tone = "ink",
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   tone?: "ink" | "scope" | "fade" | "alert";
 }) {
@@ -103,14 +122,16 @@ function ReadoutCell({
     tone === "scope"
       ? "text-scope-400"
       : tone === "fade"
-      ? "text-fade-500"
-      : tone === "alert"
-      ? "text-alert-500"
-      : "text-ink-100";
+        ? "text-fade-500"
+        : tone === "alert"
+          ? "text-alert-500"
+          : "text-ink-100";
   return (
     <div>
       <div className="eyebrow mb-1">{label}</div>
-      <div className={`num text-h3 leading-none tracking-tighter ${valueClass}`}>
+      <div
+        className={`num text-h3 leading-none tracking-tighter ${valueClass}`}
+      >
         {value}
       </div>
     </div>
@@ -123,7 +144,17 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
   const tier = tierFromScore(signal.score);
   const skew = skewFromPrice(signal.market_price);
   const fresh = freshness(signal.timestamp);
+  // Polymarket WSS-derived current price for this market (null when WSS is
+  // disabled or hasn't seen this market yet). We treat any difference > 1%
+  // from the cached signal price as "moved" — smaller deltas are within
+  // tick-noise and showing them would be visual jitter.
+  const livePrice = useLivePriceForMarket(signal.market_id);
+  const liveDelta =
+    livePrice !== null ? Math.abs(livePrice - signal.market_price) : 0;
+  const liveMoved = livePrice !== null && liveDelta > 0.01;
   const crowdPct = `${(signal.market_price * 100).toFixed(0)}%`;
+  const livePct =
+    livePrice !== null ? `${(livePrice * 100).toFixed(0)}%` : null;
   const smPct = `${(signal.sm_consensus * 100).toFixed(0)}%`;
   const divPct = `${(signal.divergence_pct * 100).toFixed(0)}%`;
   const dirTone: "scope" | "alert" =
@@ -155,7 +186,9 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
             </Tag>
             <Tag tone="ink">
               {signal.sm_trader_count}{" "}
-              <span className="text-ink-500 normal-case ml-0.5">contributors</span>
+              <span className="text-ink-500 normal-case ml-0.5">
+                contributors
+              </span>
             </Tag>
             {skew.band === "very_lopsided" && (
               <Tag tone="fade" title="composition effect on lopsided markets">
@@ -163,7 +196,10 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
               </Tag>
             )}
             {fresh.stale && (
-              <Tag tone="fade" title="signal older than 12h — recheck before acting">
+              <Tag
+                tone="fade"
+                title="signal older than 12h — recheck before acting"
+              >
                 stale
               </Tag>
             )}
@@ -173,7 +209,9 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
             >
               {fresh.label}
               <span className="mx-2 text-ink-700">·</span>
-              {signal.signal_source === "trades" ? "trade-weighted" : "positions"}
+              {signal.signal_source === "trades"
+                ? "trade-weighted"
+                : "positions"}
             </span>
           </div>
           <h3 className="text-h3 text-ink-50 leading-snug font-medium tracking-tight">
@@ -187,7 +225,24 @@ export function DecisionCard({ signal }: { signal: DivergenceSignal }) {
 
       {/* Readout grid — replaces narrated thesis */}
       <div className="px-4 pb-4 grid grid-cols-3 gap-4">
-        <ReadoutCell label="crowd" value={crowdPct} />
+        <ReadoutCell
+          label={
+            liveMoved && livePct ? (
+              <>
+                crowd{" "}
+                <span
+                  className="text-scope-400 font-mono"
+                  title={`Polymarket live (WSS): ${livePct} · cached signal: ${crowdPct}`}
+                >
+                  · live {livePct}
+                </span>
+              </>
+            ) : (
+              "crowd"
+            )
+          }
+          value={crowdPct}
+        />
         <ReadoutCell
           label={`polyscope · ${skew.skewRisk ? "skew risk" : "top-trader side"}`}
           value={`${signal.sm_direction} ${smPct}`}

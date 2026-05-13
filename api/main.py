@@ -2089,8 +2089,9 @@ async def wss_live_prices():
     """Latest WSS-cached prices for subscribed assets.
 
     Returns the live cache from the Polymarket market-channel stream
-    (gated on ``POLYSCOPE_WSS_ENABLED``). Useful for ops monitoring
-    and as a backing endpoint for future frontend live-odds widgets.
+    (gated on ``POLYSCOPE_WSS_ENABLED``). Each price entry includes
+    ``market_id`` (resolved from the cached markets list) so frontend
+    callers don't need an extra lookup to join against signal data.
     """
     stream = wss_runtime.get_stream()
     if stream is None:
@@ -2100,12 +2101,22 @@ async def wss_live_prices():
             "subscribed": 0,
             "prices": {},
         }
+    markets = cache.get("markets") or []
+    token_to_market: dict[str, str] = {}
+    for m in markets:
+        tok = getattr(m, "token_id_yes", "") or ""
+        if tok:
+            token_to_market[tok] = m.condition_id
     prices: dict[str, dict] = {}
     for aid in stream.asset_ids:
         snap = stream.snapshot(aid)
         if snap is None:
             continue
-        prices[aid] = {**snap, "current_price": stream.current_price(aid)}
+        prices[aid] = {
+            **snap,
+            "current_price": stream.current_price(aid),
+            "market_id": token_to_market.get(aid),
+        }
     return {
         "enabled": True,
         "connected": stream.is_connected,
