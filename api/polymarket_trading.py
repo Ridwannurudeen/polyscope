@@ -151,8 +151,11 @@ def get_client():
 
     _client_cache = client
     _client_config_fingerprint = fp
-    logger.info("Polymarket ClobClient initialized (funder=%s, sig_type=%d)",
-                cfg["funder"], cfg["signature_type"])
+    logger.info(
+        "Polymarket ClobClient initialized (funder=%s, sig_type=%d)",
+        cfg["funder"],
+        cfg["signature_type"],
+    )
     return client
 
 
@@ -191,8 +194,7 @@ def place_attributed_order(
     notional = round(price * size, 6)
     if notional > cfg["max_order_usdc"]:
         raise OrderCapExceeded(
-            f"Order notional ${notional:.4f} exceeds cap "
-            f"${cfg['max_order_usdc']:.2f}"
+            f"Order notional ${notional:.4f} exceeds cap ${cfg['max_order_usdc']:.2f}"
         )
 
     from py_clob_client_v2 import (
@@ -204,9 +206,11 @@ def place_attributed_order(
 
     side_enum = Side.BUY if side.upper() == "BUY" else Side.SELL
     order_type_upper = order_type.upper()
-    if not hasattr(OrderType, order_type_upper):
+    # OrderType is an Enum — hasattr() returns True for inherited names like
+    # "NAME", "VALUE", "__CLASS__". Use __members__ for membership.
+    if order_type_upper not in OrderType.__members__:
         raise ValueError(f"Unsupported order_type: {order_type}")
-    ot = getattr(OrderType, order_type_upper)
+    ot = OrderType[order_type_upper]
 
     client = get_client()
     resp = client.create_and_post_order(
@@ -238,7 +242,4 @@ def get_attributed_trades(market: str | None = None) -> list[dict[str, Any]]:
     client = get_client()
     kwargs = {"market": market} if market else {}
     trades = client.get_builder_trades(**kwargs)
-    return [
-        t.__dict__ if hasattr(t, "__dict__") else dict(t)
-        for t in (trades or [])
-    ]
+    return [t.__dict__ if hasattr(t, "__dict__") else dict(t) for t in (trades or [])]

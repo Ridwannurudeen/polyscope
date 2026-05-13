@@ -14,8 +14,7 @@ import {
 import { useDepositWalletDeployment } from "./use-deposit-wallet-deployment";
 
 const CLOB_HOST =
-  process.env.NEXT_PUBLIC_POLYMARKET_CLOB_HOST ||
-  "https://clob.polymarket.com";
+  process.env.NEXT_PUBLIC_POLYMARKET_CLOB_HOST || "https://clob.polymarket.com";
 
 const BUILDER_CODE = process.env.NEXT_PUBLIC_POLYMARKET_BUILDER_CODE || "";
 
@@ -41,9 +40,7 @@ export interface PlaceOrderResult {
   raw: unknown;
 }
 
-type AllowanceFailure =
-  | "insufficient_balance"
-  | "insufficient_allowance";
+type AllowanceFailure = "insufficient_balance" | "insufficient_allowance";
 
 function userFacingError(raw: unknown): string {
   const msg = raw instanceof Error ? raw.message : String(raw);
@@ -51,7 +48,10 @@ function userFacingError(raw: unknown): string {
   if (/could not create api key/.test(lower)) {
     return "This wallet has no Polymarket account. Sign up at polymarket.com with this wallet, then reconnect.";
   }
-  if (/user (rejected|denied)/.test(lower) || /signature.*rejected/.test(lower)) {
+  if (
+    /user (rejected|denied)/.test(lower) ||
+    /signature.*rejected/.test(lower)
+  ) {
     return "Signature rejected in wallet.";
   }
   if (/tick.*size/.test(lower)) {
@@ -66,7 +66,10 @@ function userFacingError(raw: unknown): string {
   return "Order could not be placed. Refresh the page and try again.";
 }
 
-const toBaseUnits = (human: number) => BigInt(Math.ceil(human * 1_000_000));
+// USDC.e and outcome shares are both 6-decimal on Polygon. Math.round
+// defeats IEEE-754 drift (e.g. 0.51 * 10 * 1e6 = 5100000.000000001 in JS,
+// which Math.ceil rounds to 5100001 — a false 1-µunit shortfall).
+const toBaseUnits = (human: number) => BigInt(Math.round(human * 1_000_000));
 
 const safeBigInt = (s: string | undefined): bigint => {
   if (!s) return BigInt(0);
@@ -211,7 +214,9 @@ export function useClobOrder() {
         throw new Error("Builder code not configured on this deployment.");
       }
       if (isLoadingDeployment) {
-        throw new Error("DepositWallet status loading — try again in a moment.");
+        throw new Error(
+          "DepositWallet status loading — try again in a moment.",
+        );
       }
       if (!depositWalletAddress || isDeployed !== true) {
         throw new Error("Deploy your DepositWallet before placing an order.");
@@ -220,7 +225,9 @@ export function useClobOrder() {
       const addrAtStart = address.toLowerCase();
       const guardAccount = () => {
         if (currentAddress.current !== addrAtStart) {
-          throw new Error("Wallet account changed mid-trade — re-open the dialog.");
+          throw new Error(
+            "Wallet account changed mid-trade — re-open the dialog.",
+          );
         }
       };
 

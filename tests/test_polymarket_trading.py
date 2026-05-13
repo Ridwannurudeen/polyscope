@@ -52,6 +52,7 @@ def fake_clob(monkeypatch):
         GTD = "GTD"
         FOK = "FOK"
         FAK = "FAK"
+        __members__ = order_types
 
         def __class_getitem__(cls, key):
             if key not in order_types:
@@ -187,9 +188,7 @@ def test_place_order_cap_enforcement(good_env, fake_clob):
 
     # price*size = 0.5*21 = 10.5 > cap of 10
     with pytest.raises(OrderCapExceeded):
-        place_attributed_order(
-            token_id="x", side="BUY", price=0.5, size=21
-        )
+        place_attributed_order(token_id="x", side="BUY", price=0.5, size=21)
     # No client calls made — cap rejection happens before network
     assert fake_clob == []
 
@@ -198,9 +197,18 @@ def test_place_order_rejects_unknown_order_type(good_env, fake_clob):
     from api.polymarket_trading import place_attributed_order
 
     with pytest.raises(ValueError, match="Unsupported order_type"):
-        place_attributed_order(
-            token_id="x", side="BUY", price=0.5, size=1, order_type="NOPE"
-        )
+        place_attributed_order(token_id="x", side="BUY", price=0.5, size=1, order_type="NOPE")
+
+
+@pytest.mark.parametrize("bad", ["NAME", "VALUE", "__CLASS__", "__MEMBERS__"])
+def test_place_order_rejects_enum_attribute_names(good_env, fake_clob, bad):
+    """hasattr(Enum, x) returns True for inherited dunders and Enum
+    internals — rejection must come from __members__ membership, not
+    attribute existence."""
+    from api.polymarket_trading import place_attributed_order
+
+    with pytest.raises(ValueError, match="Unsupported order_type"):
+        place_attributed_order(token_id="x", side="BUY", price=0.5, size=1, order_type=bad)
 
 
 def test_place_order_raises_when_unconfigured(monkeypatch):
