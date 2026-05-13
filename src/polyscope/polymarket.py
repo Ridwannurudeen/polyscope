@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -17,6 +18,28 @@ CLOB_BASE = "https://clob.polymarket.com"
 
 # Timeout for all API calls
 TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+
+# Retry policy for transient failures (429, 5xx, network errors).
+# 4xx responses other than 429 are terminal — caller gets None.
+_MAX_RETRIES = 3
+_BACKOFF_BASE = 0.5  # seconds — 0.5, 1.0, 2.0 across the three retries
+_RETRY_AFTER_CAP = 30.0  # honor Retry-After but never sleep longer than this
+
+
+def _backoff_for(attempt: int, retry_after_header: str | None) -> float:
+    """Return seconds to sleep before the next retry.
+
+    Honors a numeric Retry-After header (RFC 7231 §7.1.3 — HTTP-date variants
+    are rare from Polymarket Cloudflare and intentionally not parsed here),
+    falling back to exponential backoff. Clamped to _RETRY_AFTER_CAP so a
+    rogue header can't pin a worker.
+    """
+    if retry_after_header:
+        try:
+            return min(float(retry_after_header), _RETRY_AFTER_CAP)
+        except ValueError:
+            pass
+    return min(_BACKOFF_BASE * (2**attempt), _RETRY_AFTER_CAP)
 
 
 class PolymarketClient:
@@ -61,9 +84,7 @@ class PolymarketClient:
         markets_raw = data.get("markets", [])
         return [self._parse_market(m) for m in markets_raw]
 
-    async def get_events(
-        self, limit: int = 50, offset: int = 0, active: bool = True
-    ) -> list[dict]:
+    async def get_events(self, limit: int = 50, offset: int = 0, active: bool = True) -> list[dict]:
         params = {
             "limit": limit,
             "offset": offset,
@@ -72,9 +93,7 @@ class PolymarketClient:
         }
         return await self._get(f"{GAMMA_BASE}/events", params) or []
 
-    async def get_closed_markets(
-        self, limit: int = 100, offset: int = 0
-    ) -> list[dict]:
+    async def get_closed_markets(self, limit: int = 100, offset: int = 0) -> list[dict]:
         """Fetch closed/resolved markets from Gamma API (raw dicts)."""
         params: dict[str, Any] = {
             "limit": limit,
@@ -122,9 +141,7 @@ class PolymarketClient:
 
     # ── Data API ───────────────────────────────────────────────
 
-    async def get_leaderboard(
-        self, limit: int = 100, time_period: str = "all"
-    ) -> list[Trader]:
+    async def get_leaderboard(self, limit: int = 100, time_period: str = "all") -> list[Trader]:
         """Fetch top traders from leaderboard."""
         params = {"limit": limit, "timePeriod": time_period}
         data = await self._get(f"{DATA_BASE}/v1/leaderboard", params)
@@ -172,9 +189,7 @@ class PolymarketClient:
             )
         return positions
 
-    async def get_market_positions(
-        self, market: str, limit: int = 100
-    ) -> list[Position]:
+    async def get_market_positions(self, market: str, limit: int = 100) -> list[Position]:
         """Fetch all positions for a specific market (v1 endpoint).
 
         Response format: [{token: str, positions: [{proxyWallet, size, outcome, ...}]}]
@@ -208,7 +223,9 @@ class PolymarketClient:
                 if size > 0:
                     positions.append(
                         Position(
-                            trader_address=token_group.get("proxyWallet", token_group.get("userAddress", "")),
+                            trader_address=token_group.get(
+                                "proxyWallet", token_group.get("userAddress", "")
+                            ),
                             market_id=market,
                             side=self._infer_side(token_group),
                             size=size,
@@ -245,14 +262,16 @@ class PolymarketClient:
             market_id = t.get("market", t.get("conditionId", market or ""))
             if size <= 0:
                 continue
-            trades.append(Trade(
-                trader_address=trader_addr,
-                market_id=market_id,
-                side=side,
-                size=size,
-                price=price,
-                timestamp=ts,
-            ))
+            trades.append(
+                Trade(
+                    trader_address=trader_addr,
+                    market_id=market_id,
+                    side=side,
+                    size=size,
+                    price=price,
+                    timestamp=ts,
+                )
+            )
         return trades
 
     async def get_sm_recent_trades(
@@ -360,16 +379,58 @@ class PolymarketClient:
     # ── Helpers ─────────────────────────────────────────────────
 
     async def _get(self, url: str, params: dict | None = None) -> Any:
-        try:
-            resp = await self._client.get(url, params=params)
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as e:
-            logger.warning("HTTP %s from %s", e.response.status_code, url)
-            return None
-        except Exception:
-            logger.exception("Request failed: %s", url)
-            return None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                resp = await self._client.get(url, params=params)
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                # 4xx other than 429 are terminal — don't retry.
+                if status < 500 and status != 429:
+                    logger.warning("HTTP %s from %s", status, url)
+                    return None
+                if attempt == _MAX_RETRIES:
+                    logger.warning(
+                        "HTTP %s from %s — gave up after %d retries",
+                        status,
+                        url,
+                        _MAX_RETRIES,
+                    )
+                    return None
+                sleep_s = _backoff_for(attempt, e.response.headers.get("Retry-After"))
+                logger.info(
+                    "HTTP %s from %s — retry %d/%d in %.2fs",
+                    status,
+                    url,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    sleep_s,
+                )
+                await asyncio.sleep(sleep_s)
+            except (httpx.TransportError, httpx.TimeoutException) as e:
+                if attempt == _MAX_RETRIES:
+                    logger.warning(
+                        "%s from %s — gave up after %d retries",
+                        type(e).__name__,
+                        url,
+                        _MAX_RETRIES,
+                    )
+                    return None
+                sleep_s = _backoff_for(attempt, None)
+                logger.info(
+                    "%s from %s — retry %d/%d in %.2fs",
+                    type(e).__name__,
+                    url,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    sleep_s,
+                )
+                await asyncio.sleep(sleep_s)
+            except Exception:
+                logger.exception("Request failed: %s", url)
+                return None
+        return None
 
     @staticmethod
     def _float(val: Any) -> float:
@@ -405,6 +466,7 @@ class PolymarketClient:
         if isinstance(tokens, str):
             # JSON string like '["token1", "token2"]' or comma-separated
             import json as _json
+
             try:
                 tokens = _json.loads(tokens)
             except (ValueError, _json.JSONDecodeError):

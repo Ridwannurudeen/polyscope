@@ -88,6 +88,7 @@ async def _run_initial_scans():
     except Exception:
         logger.exception("Initial scan failed")
 
+
 scheduler = AsyncIOScheduler()
 SCHEDULER_DISABLED_VALUES = {"1", "true", "yes", "on"}
 
@@ -98,8 +99,7 @@ async def lifespan(app: FastAPI):
     await init_db()
 
     scheduler_disabled = (
-        os.getenv("POLYSCOPE_DISABLE_SCHEDULER", "").strip().lower()
-        in SCHEDULER_DISABLED_VALUES
+        os.getenv("POLYSCOPE_DISABLE_SCHEDULER", "").strip().lower() in SCHEDULER_DISABLED_VALUES
     )
     if scheduler_disabled:
         logger.info("Scheduler disabled by POLYSCOPE_DISABLE_SCHEDULER")
@@ -109,14 +109,34 @@ async def lifespan(app: FastAPI):
         # job overruns its interval; misfire_grace_time runs a missed
         # tick if the scheduler was momentarily blocked.
         _job_kwargs = dict(max_instances=1, coalesce=True, misfire_grace_time=60)
-        scheduler.add_job(fetch_markets_job, "interval", minutes=5, id="fetch_markets", **_job_kwargs)
-        scheduler.add_job(fetch_leaderboard_job, "interval", minutes=10, id="fetch_leaderboard", **_job_kwargs)
-        scheduler.add_job(compute_divergences_job, "interval", minutes=5, id="compute_divergences", **_job_kwargs)
-        scheduler.add_job(detect_movers_job, "interval", minutes=5, id="detect_movers", **_job_kwargs)
-        scheduler.add_job(track_outcomes_job, "interval", hours=1, id="track_outcomes", **_job_kwargs)
-        scheduler.add_job(detect_whale_trades_job, "interval", minutes=2, id="detect_whales", **_job_kwargs)
-        scheduler.add_job(sync_builder_orders_job, "interval", seconds=60, id="sync_builder_orders", **_job_kwargs)
-        scheduler.add_job(sync_attributed_trades_job, "interval", minutes=3, id="sync_builder_trades", **_job_kwargs)
+        scheduler.add_job(
+            fetch_markets_job, "interval", minutes=5, id="fetch_markets", **_job_kwargs
+        )
+        scheduler.add_job(
+            fetch_leaderboard_job, "interval", minutes=10, id="fetch_leaderboard", **_job_kwargs
+        )
+        scheduler.add_job(
+            compute_divergences_job, "interval", minutes=5, id="compute_divergences", **_job_kwargs
+        )
+        scheduler.add_job(
+            detect_movers_job, "interval", minutes=5, id="detect_movers", **_job_kwargs
+        )
+        scheduler.add_job(
+            track_outcomes_job, "interval", hours=1, id="track_outcomes", **_job_kwargs
+        )
+        scheduler.add_job(
+            detect_whale_trades_job, "interval", minutes=2, id="detect_whales", **_job_kwargs
+        )
+        scheduler.add_job(
+            sync_builder_orders_job, "interval", seconds=60, id="sync_builder_orders", **_job_kwargs
+        )
+        scheduler.add_job(
+            sync_attributed_trades_job,
+            "interval",
+            minutes=3,
+            id="sync_builder_trades",
+            **_job_kwargs,
+        )
         scheduler.add_job(cleanup_job, "interval", hours=24, id="cleanup", **_job_kwargs)
         scheduler.start()
 
@@ -148,9 +168,18 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+
+def _cors_origins() -> list[str]:
+    """Comma-separated POLYSCOPE_CORS_ORIGINS override, defaulting to prod."""
+    raw = os.getenv("POLYSCOPE_CORS_ORIGINS", "").strip()
+    if not raw:
+        return ["https://polyscope.gudman.xyz"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://polyscope.gudman.xyz"],
+    allow_origins=_cors_origins(),
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -168,10 +197,9 @@ _DEV_DOMAIN_FLAGS = {"1", "true", "yes", "on"}
 
 
 def _dev_wallet_domains_allowed() -> bool:
-    return (
-        os.getenv("POLYSCOPE_ALLOW_DEV_DOMAINS", "").strip().lower()
-        in _DEV_DOMAIN_FLAGS
-    )
+    return os.getenv("POLYSCOPE_ALLOW_DEV_DOMAINS", "").strip().lower() in _DEV_DOMAIN_FLAGS
+
+
 _PUBLIC_READ_BUSY_TIMEOUT_MS = 1000
 _PUBLIC_STATS_TTL_SECONDS = 600
 _PUBLIC_PARTIAL_STATS_TTL_SECONDS = 60
@@ -235,9 +263,7 @@ def _log_background_task_failure(task_name: str, done_task: asyncio.Task) -> Non
         logger.warning("%s failed", task_name, exc_info=True)
 
 
-def _ensure_public_cache_refresh(
-    cache_key: str, loader, ttl_seconds: int
-) -> asyncio.Task:
+def _ensure_public_cache_refresh(cache_key: str, loader, ttl_seconds: int) -> asyncio.Task:
     existing = _PUBLIC_CACHE_REFRESH_TASKS.get(cache_key)
     if existing is not None and not existing.done():
         return existing
@@ -262,9 +288,7 @@ def _ensure_public_cache_refresh(
 async def _load_methodology_stats(include_predictive_filter: bool = True) -> dict:
     db = await _get_public_read_db()
     try:
-        return await get_methodology_stats(
-            db, include_predictive_filter=include_predictive_filter
-        )
+        return await get_methodology_stats(db, include_predictive_filter=include_predictive_filter)
     finally:
         await db.close()
 
@@ -456,9 +480,7 @@ async def scan_latest():
         else:
             task = asyncio.create_task(_load_divergences_from_db())
             try:
-                result = await _wait_for_public_task(
-                    task, _PUBLIC_STATS_DEADLINE_SECONDS
-                )
+                result = await _wait_for_public_task(task, _PUBLIC_STATS_DEADLINE_SECONDS)
             except Exception as e:
                 logger.warning("Latest scan DB fallback failed: %s", e)
                 result = None
@@ -468,7 +490,7 @@ async def scan_latest():
                         lambda done_task: _log_background_task_failure(
                             "Latest scan DB fallback", done_task
                         )
-                )
+                    )
                 divergences = []
                 source = "unavailable"
                 stale = True
@@ -541,9 +563,7 @@ async def get_divergences():
     if result is None:
         if not task.done():
             task.add_done_callback(
-                lambda done_task: _log_background_task_failure(
-                    "Divergence DB fallback", done_task
-                )
+                lambda done_task: _log_background_task_failure("Divergence DB fallback", done_task)
             )
         return _divergences_response(
             [],
@@ -622,9 +642,7 @@ async def get_market(condition_id: str):
         return {"error": "Market not found"}
 
     # Check for divergence signal on this market
-    divergences, _divergence_source, _divergence_stale = _cache_value_with_source(
-        "divergences", []
-    )
+    divergences, _divergence_source, _divergence_stale = _cache_value_with_source("divergences", [])
     signal = next((d for d in divergences if d.market_id == condition_id), None)
 
     # Get price history (cached 5 min to prevent upstream abuse)
@@ -709,9 +727,7 @@ async def _fetch_gamma_market(condition_id: str) -> dict:
 
     gamma = data[0] if isinstance(data, list) and data else None
     gamma_condition = (
-        gamma.get("conditionId")
-        or gamma.get("condition_id")
-        or gamma.get("id")
+        gamma.get("conditionId") or gamma.get("condition_id") or gamma.get("id")
         if isinstance(gamma, dict)
         else None
     )
@@ -848,9 +864,7 @@ async def methodology_stats():
     if stale is not None:
         return _with_public_cache_meta(stale, source="stale_cache", stale=True)
 
-    task = asyncio.create_task(
-        _load_methodology_stats(include_predictive_filter=False)
-    )
+    task = asyncio.create_task(_load_methodology_stats(include_predictive_filter=False))
     try:
         result = await _wait_for_public_task(task, _PUBLIC_STATS_DEADLINE_SECONDS)
     except Exception as e:
@@ -910,17 +924,19 @@ async def search(q: str = Query(..., min_length=1, max_length=128)):
         if market_id in seen_market_ids:
             continue
         seen_market_ids.add(market_id)
-        market_matches.append({
-            "market_id": market_id,
-            "question": record.get("question"),
-            "category": record.get("category"),
-            "sm_direction": record.get("sm_direction"),
-            "market_price": record.get("market_price"),
-            "sm_consensus": record.get("sm_consensus"),
-            "divergence_pct": record.get("divergence_pct"),
-            "signal_strength": record.get("signal_strength"),
-            "latest_ts": record.get("timestamp"),
-        })
+        market_matches.append(
+            {
+                "market_id": market_id,
+                "question": record.get("question"),
+                "category": record.get("category"),
+                "sm_direction": record.get("sm_direction"),
+                "market_price": record.get("market_price"),
+                "sm_consensus": record.get("sm_consensus"),
+                "divergence_pct": record.get("divergence_pct"),
+                "signal_strength": record.get("signal_strength"),
+                "latest_ts": record.get("timestamp"),
+            }
+        )
         if len(market_matches) >= 8:
             break
 
@@ -971,16 +987,12 @@ async def leaderboards_compare(
 
     db = await get_db()
     try:
-        comp = await get_leaderboard_comparison(
-            db, limit=limit, min_signals=min_signals
-        )
+        comp = await get_leaderboard_comparison(db, limit=limit, min_signals=min_signals)
     finally:
         await db.close()
 
     accuracy_top = comp["accuracy_top"]
-    accuracy_top_addresses = {
-        t["trader_address"].lower() for t in accuracy_top
-    }
+    accuracy_top_addresses = {t["trader_address"].lower() for t in accuracy_top}
 
     # Overlap analysis
     overlap_addresses = pl_top_addresses & accuracy_top_addresses
@@ -992,9 +1004,7 @@ async def leaderboards_compare(
 
     # Which P&L leaders are low-accuracy on divergent signals?
     fade_addresses = {t["trader_address"].lower() for t in comp["accuracy_fade"]}
-    pl_in_fade = [
-        t for t in pl_top if t["address"].lower() in fade_addresses
-    ]
+    pl_in_fade = [t for t in pl_top if t["address"].lower() in fade_addresses]
 
     # Which accuracy leaders aren't on P&L top?
     accuracy_missing_from_pl = [
@@ -1199,12 +1209,8 @@ async def calibration_by_category(category: str):
 @app.get("/api/events")
 async def list_events(limit: int = Query(20, le=50)):
     """Group markets by event — aggregate SM sentiment per event cluster."""
-    markets_list, _markets_source, _markets_stale = _cache_value_with_source(
-        "markets", []
-    )
-    divergences, _divergence_source, _divergence_stale = _cache_value_with_source(
-        "divergences", []
-    )
+    markets_list, _markets_source, _markets_stale = _cache_value_with_source("markets", [])
+    divergences, _divergence_source, _divergence_stale = _cache_value_with_source("divergences", [])
 
     def _signal_market_id(signal) -> str | None:
         if isinstance(signal, dict):
@@ -1221,11 +1227,7 @@ async def list_events(limit: int = Query(20, le=50)):
 
     # Build divergence lookup. Startup DB warm-cache stores dict rows;
     # scheduler scans store DivergenceSignal dataclasses.
-    div_map = {
-        market_id: d
-        for d in divergences
-        if (market_id := _signal_market_id(d))
-    }
+    div_map = {market_id: d for d in divergences if (market_id := _signal_market_id(d))}
 
     # Group by question prefix (first 40 chars) as a heuristic
     from collections import defaultdict
@@ -1247,17 +1249,23 @@ async def list_events(limit: int = Query(20, le=50)):
             if div_signals
             else 0
         )
-        events.append({
-            "title": title,
-            "market_count": len(mkts),
-            "total_volume": round(total_vol, 2),
-            "divergence_signals": len(div_signals),
-            "avg_divergence": round(avg_div, 4),
-            "markets": [
-                {"condition_id": m.condition_id, "question": m.question, "price_yes": m.price_yes}
-                for m in mkts[:5]
-            ],
-        })
+        events.append(
+            {
+                "title": title,
+                "market_count": len(mkts),
+                "total_volume": round(total_vol, 2),
+                "divergence_signals": len(div_signals),
+                "avg_divergence": round(avg_div, 4),
+                "markets": [
+                    {
+                        "condition_id": m.condition_id,
+                        "question": m.question,
+                        "price_yes": m.price_yes,
+                    }
+                    for m in mkts[:5]
+                ],
+            }
+        )
 
     events.sort(key=lambda e: e["total_volume"], reverse=True)
     return {"events": events[:limit], "total": len(events)}
@@ -1400,9 +1408,7 @@ async def _require_wallet_link(db, client_id: str, wallet_address: str | None) -
     """
     if wallet_address:
         if not await is_wallet_linked_to_client(db, client_id, wallet_address):
-            raise HTTPException(
-                status_code=401, detail="wallet is not linked to client"
-            )
+            raise HTTPException(status_code=401, detail="wallet is not linked to client")
         return
     if await client_has_linked_wallet(db, client_id):
         raise HTTPException(
@@ -1534,7 +1540,7 @@ async def _retry_on_locked(op_name: str, coro_factory):
             last_err = e
             if "locked" not in str(e).lower():
                 raise
-            await _asyncio.sleep(0.5 * (2 ** attempt))
+            await _asyncio.sleep(0.5 * (2**attempt))
         finally:
             await db.close()
     logger.warning("%s failed after retries: %s", op_name, last_err)
@@ -1554,9 +1560,7 @@ async def wallet_link(body: LinkWalletRequest):
     _verify_wallet_link_signature(body)
     return await _retry_on_locked(
         "wallet_link",
-        lambda db: link_wallet_to_client(
-            db, body.client_id, body.wallet_address.lower()
-        ),
+        lambda db: link_wallet_to_client(db, body.client_id, body.wallet_address.lower()),
     )
 
 
@@ -1601,9 +1605,7 @@ async def unfollow(
     async def _op(db):
         await _require_wallet_link(db, client_id, wallet)
         return {
-            "removed": await unfollow_trader(
-                db, trader_address, client_id, wallet_address=wallet
-            )
+            "removed": await unfollow_trader(db, trader_address, client_id, wallet_address=wallet)
         }
 
     return await _retry_on_locked("unfollow", _op)
@@ -1636,9 +1638,7 @@ async def follow_status(
     db = await get_db()
     try:
         await _require_wallet_link(db, client_id, wallet)
-        following = await is_following(
-            db, trader_address, client_id, wallet_address=wallet
-        )
+        following = await is_following(db, trader_address, client_id, wallet_address=wallet)
     finally:
         await db.close()
     return {"following": following}
@@ -1656,8 +1656,11 @@ async def follow_alerts(
     try:
         await _require_wallet_link(db, client_id, wallet)
         items = await get_follow_alerts(
-            db, client_id, wallet_address=wallet,
-            unseen_only=unseen_only, limit=limit,
+            db,
+            client_id,
+            wallet_address=wallet,
+            unseen_only=unseen_only,
+            limit=limit,
         )
     finally:
         await db.close()
@@ -1816,7 +1819,7 @@ def _decode_owner_list(raw: str) -> list[str]:
     owners: list[str] = []
     for i in range(length):
         start = 128 + i * 64
-        chunk = data[start:start + 64]
+        chunk = data[start : start + 64]
         if len(chunk) != 64:
             return []
         owners.append("0x" + chunk[24:].lower())
@@ -2002,12 +2005,7 @@ async def place_order(
         await _finalize_order(row_id, "failed", error=f"{type(e).__name__}: {e}")
         raise HTTPException(status_code=502, detail="CLOB order placement failed")
 
-    clob_id = (
-        resp.get("orderID")
-        or resp.get("order_id")
-        or resp.get("id")
-        or None
-    )
+    clob_id = resp.get("orderID") or resp.get("order_id") or resp.get("id") or None
     await _finalize_order(
         row_id,
         "submitted",
@@ -2074,20 +2072,22 @@ async def builder_trades_public(limit: int = Query(default=50, ge=1, le=200)):
     redacted: list[dict] = []
     for t in trades:
         owner = t.get("owner") or ""
-        redacted.append({
-            "trade_id": t.get("trade_id"),
-            "market_id": t.get("market_id"),
-            "side": t.get("side"),
-            "size": t.get("size"),
-            "price": t.get("price"),
-            "notional_usdc": t.get("notional_usdc"),
-            "status": t.get("status"),
-            "outcome": t.get("outcome"),
-            # Short-form owner for display; full addr is on-chain anyway
-            "owner_short": (owner[:6] + "…" + owner[-4:]) if len(owner) > 10 else owner,
-            "transaction_hash": t.get("transaction_hash"),
-            "match_time": t.get("match_time"),
-        })
+        redacted.append(
+            {
+                "trade_id": t.get("trade_id"),
+                "market_id": t.get("market_id"),
+                "side": t.get("side"),
+                "size": t.get("size"),
+                "price": t.get("price"),
+                "notional_usdc": t.get("notional_usdc"),
+                "status": t.get("status"),
+                "outcome": t.get("outcome"),
+                # Short-form owner for display; full addr is on-chain anyway
+                "owner_short": (owner[:6] + "…" + owner[-4:]) if len(owner) > 10 else owner,
+                "transaction_hash": t.get("transaction_hash"),
+                "match_time": t.get("match_time"),
+            }
+        )
     return {"trades": redacted, "stats": stats}
 
 
@@ -2116,19 +2116,21 @@ async def orders_public(limit: int = Query(default=20, ge=1, le=100)):
         stats["by_status"][status] = stats["by_status"].get(status, 0) + 1
         if status not in {"rejected", "failed"}:
             stats["total_notional_usdc"] += float(r.get("notional_usdc") or 0)
-        redacted.append({
-            "id": r["id"],
-            "market_id": r["market_id"],
-            "token_id": r["token_id"],
-            "side": r["side"],
-            "price": r["price"],
-            "size": r["size"],
-            "notional_usdc": r["notional_usdc"],
-            "order_type": r["order_type"],
-            "status": r["status"],
-            "created_at": r["created_at"],
-            "updated_at": r["updated_at"],
-        })
+        redacted.append(
+            {
+                "id": r["id"],
+                "market_id": r["market_id"],
+                "token_id": r["token_id"],
+                "side": r["side"],
+                "price": r["price"],
+                "size": r["size"],
+                "notional_usdc": r["notional_usdc"],
+                "order_type": r["order_type"],
+                "status": r["status"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+        )
     stats["total_notional_usdc"] = round(stats["total_notional_usdc"], 4)
     return {"orders": redacted, "stats": stats}
 

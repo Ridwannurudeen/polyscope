@@ -46,6 +46,11 @@ _traders: dict[str, Trader] = {}
 _divergence_config = DivergenceConfig()
 _category_weights: dict[str, dict[str, float]] = {}
 
+# Sanity cap on pagination — Polymarket has thousands of active markets, but
+# this protects against an upstream loop bug returning the same page forever.
+_MAX_PAGES = 50
+_PAGE_SIZE = 100
+
 
 def get_client() -> PolymarketClient:
     global _client
@@ -66,11 +71,18 @@ async def fetch_markets_job():
     client = get_client()
     try:
         markets = []
-        for offset in range(0, 500, 100):
-            batch = await client.get_markets(limit=100, offset=offset)
+        for page in range(_MAX_PAGES):
+            batch = await client.get_markets(limit=_PAGE_SIZE, offset=page * _PAGE_SIZE)
             markets.extend(batch)
-            if len(batch) < 100:
+            if len(batch) < _PAGE_SIZE:
                 break
+        else:
+            logger.warning(
+                "fetch_markets_job hit %d-page cap (%d markets) — "
+                "raise _MAX_PAGES if Polymarket has grown",
+                _MAX_PAGES,
+                len(markets),
+            )
 
         cache.set("markets", markets, ttl_seconds=600)
         logger.info("Fetched %d active markets", len(markets))
@@ -131,24 +143,29 @@ async def compute_divergences_job():
 
             positions = []
             try:
-                market_positions = await client.get_market_positions(
-                    market.condition_id, limit=200
-                )
-                positions = [
-                    p for p in market_positions if p.trader_address in _traders
-                ]
+                market_positions = await client.get_market_positions(market.condition_id, limit=200)
+                positions = [p for p in market_positions if p.trader_address in _traders]
                 if positions:
                     total_sm_matches += len(positions)
                     markets_with_sm += 1
             except Exception:
+                logger.warning(
+                    "Position fetch failed for market %s — skipping",
+                    market.condition_id,
+                    exc_info=True,
+                )
                 continue
 
             signal = compute_divergence(
-                market, positions, _traders, _divergence_config,
+                market,
+                positions,
+                _traders,
+                _divergence_config,
                 category_weights=weights,
             )
             if positions and not signal and len(positions) >= 1:
                 from polyscope.divergence import _weighted_consensus
+
                 sm_c = _weighted_consensus(positions, _traders)
                 if sm_c is not None:
                     div = abs(market.price_yes - sm_c)
@@ -156,7 +173,11 @@ async def compute_divergences_job():
                     if div > 0.05:
                         logger.debug(
                             "Near-miss: %s | price=%.2f sm=%.2f div=%.2f traders=%d",
-                            market.question[:40], market.price_yes, sm_c, div, len(positions),
+                            market.question[:40],
+                            market.price_yes,
+                            sm_c,
+                            div,
+                            len(positions),
                         )
 
             if signal:
@@ -168,7 +189,8 @@ async def compute_divergences_job():
                 # Persist per-trader attribution for accuracy scoring
                 if signal_id and positions:
                     contributions = compute_trader_contributions(
-                        positions, _traders,
+                        positions,
+                        _traders,
                         category=market.category,
                         category_weights=weights,
                     )
@@ -244,7 +266,10 @@ async def compute_divergences_job():
 
                     # Recompute with trade data
                     trade_signal = compute_divergence(
-                        market, positions, _traders, _divergence_config,
+                        market,
+                        positions,
+                        _traders,
+                        _divergence_config,
                         trades=sm_trades,
                         category_weights=weights,
                     )
@@ -260,14 +285,13 @@ async def compute_divergences_job():
                                 )
                         else:
                             signals_by_market[market.condition_id] = trade_signal
-                            trade_signal_id = await save_divergence_signal(
-                                db, asdict(trade_signal)
-                            )
+                            trade_signal_id = await save_divergence_signal(db, asdict(trade_signal))
                             divergences_map[market.condition_id] = trade_signal.divergence_pct
 
                         if trade_signal_id and positions:
                             contributions = compute_trader_contributions(
-                                positions, _traders,
+                                positions,
+                                _traders,
                                 category=market.category,
                                 category_weights=weights,
                             )
@@ -282,12 +306,19 @@ async def compute_divergences_job():
                             ]
                             await save_signal_trader_positions(db, stp_records)
                             await emit_follow_alerts_for_signal(
-                                db, trade_signal_id, market.condition_id,
+                                db,
+                                trade_signal_id,
+                                market.condition_id,
                                 contributions,
                             )
 
                 await asyncio.sleep(0.2)
             except Exception:
+                logger.warning(
+                    "Trade-based refinement failed for market %s — skipping",
+                    market.condition_id,
+                    exc_info=True,
+                )
                 continue
 
         # ── Expire converged signals ──
@@ -297,13 +328,9 @@ async def compute_divergences_job():
         signals = list(signals_by_market.values())
         signal_market_ids = [s.market_id for s in signals if s.market_id]
         try:
-            predictive = await get_predictive_contributors_for_markets(
-                db, signal_market_ids
-            )
+            predictive = await get_predictive_contributors_for_markets(db, signal_market_ids)
         except Exception:
-            logger.warning(
-                "predictive contributor cache refresh failed", exc_info=True
-            )
+            logger.warning("predictive contributor cache refresh failed", exc_info=True)
             predictive = {}
         cache.set("divergences", signals, ttl_seconds=600)
         cache.set(
@@ -361,8 +388,8 @@ async def track_outcomes_job():
     db = await get_db()
     saved = 0
     try:
-        for offset in range(0, 500, 100):
-            batch = await client.get_closed_markets(limit=100, offset=offset)
+        for page in range(_MAX_PAGES):
+            batch = await client.get_closed_markets(limit=_PAGE_SIZE, offset=page * _PAGE_SIZE)
             if not batch:
                 break
 
@@ -386,20 +413,29 @@ async def track_outcomes_job():
                     first = tags_raw[0]
                     category = first.get("label", first) if isinstance(first, dict) else str(first)
 
-                await save_resolved_market(db, {
-                    "market_id": market_id,
-                    "question": raw.get("question", raw.get("title", "")),
-                    "category": category or raw.get("groupItemTitle", ""),
-                    "final_price": final_price,
-                    "outcome": outcome,
-                    "resolved_at": raw.get("endDate", raw.get("end_date_iso", "")),
-                    "brier_score": round(bs, 6),
-                })
+                await save_resolved_market(
+                    db,
+                    {
+                        "market_id": market_id,
+                        "question": raw.get("question", raw.get("title", "")),
+                        "category": category or raw.get("groupItemTitle", ""),
+                        "final_price": final_price,
+                        "outcome": outcome,
+                        "resolved_at": raw.get("endDate", raw.get("end_date_iso", "")),
+                        "brier_score": round(bs, 6),
+                    },
+                )
                 await update_signal_outcomes(db, market_id, outcome)
                 saved += 1
 
-            if len(batch) < 100:
+            if len(batch) < _PAGE_SIZE:
                 break
+        else:
+            logger.warning(
+                "track_outcomes_job hit %d-page cap (%d resolved saved this run)",
+                _MAX_PAGES,
+                saved,
+            )
 
         # Rebuild category stats after processing outcomes
         await rebuild_trader_category_stats(db)
@@ -465,21 +501,29 @@ async def detect_whale_trades_job():
                     if row[0] > 0:
                         continue
 
-                    await save_whale_alert(db, {
-                        "trader_address": trade.trader_address,
-                        "trader_rank": trader.rank,
-                        "market_id": market.condition_id,
-                        "question": market.question,
-                        "side": trade.side,
-                        "size": trade.size,
-                        "price": trade.price,
-                        "trade_timestamp": trade.timestamp,
-                        "detected_at": now,
-                    })
+                    await save_whale_alert(
+                        db,
+                        {
+                            "trader_address": trade.trader_address,
+                            "trader_rank": trader.rank,
+                            "market_id": market.condition_id,
+                            "question": market.question,
+                            "side": trade.side,
+                            "size": trade.size,
+                            "price": trade.price,
+                            "trade_timestamp": trade.timestamp,
+                            "detected_at": now,
+                        },
+                    )
                     new_alerts += 1
 
                 await asyncio.sleep(0.2)
             except Exception:
+                logger.warning(
+                    "Whale scan failed for market %s — skipping",
+                    market.condition_id,
+                    exc_info=True,
+                )
                 continue
 
         await db.commit()
@@ -586,11 +630,7 @@ async def sync_builder_orders_job():
             # CLOB returns a dict; status field varies across schemas.
             status_raw = None
             if isinstance(resp, dict):
-                status_raw = (
-                    resp.get("status")
-                    or resp.get("state")
-                    or resp.get("order_status")
-                )
+                status_raw = resp.get("status") or resp.get("state") or resp.get("order_status")
             normalized = _normalize_status(status_raw)
 
             await apply_builder_order_sync(
@@ -602,8 +642,7 @@ async def sync_builder_orders_job():
             synced += 1
 
             if normalized in _TERMINAL_STATUSES:
-                logger.info("Order %s reached terminal status: %s",
-                            clob_id, normalized)
+                logger.info("Order %s reached terminal status: %s", clob_id, normalized)
 
         if synced:
             logger.info("sync_builder_orders_job: %d orders synced", synced)
@@ -645,9 +684,7 @@ async def sync_attributed_trades_job():
     builder_secret = os.getenv("POLYMARKET_BUILDER_API_SECRET", "").strip()
     builder_passphrase = os.getenv("POLYMARKET_BUILDER_PASSPHRASE", "").strip()
     if not (builder_key and builder_secret and builder_passphrase):
-        logger.warning(
-            "sync_attributed_trades_job: builder creds not configured; skipping"
-        )
+        logger.warning("sync_attributed_trades_job: builder creds not configured; skipping")
         return
 
     try:
@@ -739,7 +776,8 @@ async def sync_attributed_trades_job():
         if total_inserted or total_updated:
             logger.info(
                 "sync_attributed_trades_job: %d new, %d updated",
-                total_inserted, total_updated,
+                total_inserted,
+                total_updated,
             )
     except Exception:
         logger.exception("sync_attributed_trades_job failed")
