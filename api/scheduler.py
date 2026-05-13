@@ -132,6 +132,10 @@ async def compute_divergences_job():
     # Track candidates for trade-based pass
     trade_candidates = []
 
+    # Per-market positions are also stashed here so the WSS live
+    # divergence job can recompute on fresh prices without re-fetching.
+    positions_by_market: dict[str, list] = {}
+
     try:
         # ── Pass 1: Position-based scan ──
         trader_addresses = set(_traders.keys())
@@ -148,6 +152,7 @@ async def compute_divergences_job():
                 if positions:
                     total_sm_matches += len(positions)
                     markets_with_sm += 1
+                positions_by_market[market.condition_id] = positions
             except Exception:
                 logger.warning(
                     "Position fetch failed for market %s — skipping",
@@ -338,6 +343,10 @@ async def compute_divergences_job():
             predictive,
             ttl_seconds=600,
         )
+        # Position snapshot for the WSS live-divergence job. TTL covers a
+        # full 5-min scan interval plus margin so the live job always has
+        # data even right around a refresh boundary.
+        cache.set("positions_by_market", positions_by_market, ttl_seconds=600)
         logger.info(
             "Divergence scan complete: %d signals from %d markets "
             "(%d markets with SM positions, %d total SM matches, %d trade candidates)",
@@ -575,6 +584,87 @@ async def refresh_wss_subscription_job():
         await wss_runtime.refresh_subscription(asset_ids)
     except Exception:
         logger.exception("refresh_wss_subscription_job failed")
+
+
+async def compute_live_divergences_job():
+    """Recompute divergence on fresh WSS prices for the subscribed top-N markets.
+
+    Reads positions cached by ``compute_divergences_job`` pass-1 (no
+    network calls on this path). For each WSS-subscribed asset that has
+    a live ``current_price``, builds a refreshed Market with the live
+    price and runs ``compute_divergence``. Result is stashed in cache
+    key ``live_divergences`` (dict market_id → DivergenceSignal) for
+    the API layer to surface as a real-time overlay on the 5-min
+    canonical signals.
+
+    Does NOT write to the database — the 5-min full scan remains the
+    historical record. This is purely a freshness overlay.
+    """
+    from dataclasses import replace as _replace
+    from typing import Any
+
+    from . import wss_runtime
+
+    if not wss_runtime.is_enabled():
+        return
+    stream = wss_runtime.get_stream()
+    if stream is None:
+        return
+    markets = cache.get("markets")
+    positions_by_market = cache.get("positions_by_market")
+    if not markets or not positions_by_market:
+        return
+    if not _traders:
+        return
+
+    # token_id_yes → Market lookup (one-time per job tick)
+    market_by_token: dict[str, Any] = {}
+    for m in markets:
+        tok = getattr(m, "token_id_yes", "") or ""
+        if tok:
+            market_by_token[tok] = m
+
+    live_signals: dict[str, Any] = {}
+    refreshed = 0
+    for asset_id in stream.asset_ids:
+        market = market_by_token.get(asset_id)
+        if market is None:
+            continue
+        positions = positions_by_market.get(market.condition_id)
+        if not positions:
+            continue
+        live_price = stream.current_price(asset_id)
+        if live_price is None or live_price <= 0:
+            continue
+        live_market = _replace(market, price_yes=float(live_price))
+        try:
+            signal = compute_divergence(
+                live_market,
+                positions,
+                _traders,
+                _divergence_config,
+                category_weights=_category_weights,
+            )
+        except Exception:
+            logger.warning(
+                "live divergence recompute failed for %s",
+                market.condition_id,
+                exc_info=True,
+            )
+            continue
+        if signal is not None:
+            live_signals[market.condition_id] = signal
+        refreshed += 1
+
+    # TTL > job cadence (30s) so stale data lingers briefly during a
+    # transient WSS reconnect rather than dropping the overlay entirely.
+    cache.set("live_divergences", live_signals, ttl_seconds=90)
+    if refreshed:
+        logger.debug(
+            "Live divergence recompute: %d markets evaluated, %d signals",
+            refreshed,
+            len(live_signals),
+        )
 
 
 # ── Builder order status polling ──────────────────────────

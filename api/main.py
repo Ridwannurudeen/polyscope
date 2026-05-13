@@ -66,6 +66,7 @@ from .scheduler import (
     cleanup_job,
     close_client,
     compute_divergences_job,
+    compute_live_divergences_job,
     detect_movers_job,
     detect_whale_trades_job,
     fetch_leaderboard_job,
@@ -148,6 +149,16 @@ async def lifespan(app: FastAPI):
             "interval",
             minutes=10,
             id="refresh_wss_subscription",
+            **_job_kwargs,
+        )
+        # Live divergence recompute on WSS prices, 30s cadence. Internally
+        # gated on POLYSCOPE_WSS_ENABLED + a populated positions cache, so
+        # registering unconditionally is harmless.
+        scheduler.add_job(
+            compute_live_divergences_job,
+            "interval",
+            seconds=30,
+            id="compute_live_divergences",
             **_job_kwargs,
         )
         scheduler.start()
