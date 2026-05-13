@@ -156,7 +156,11 @@ async def test_get_gives_up_after_max_retries(monkeypatch):
 
 
 async def test_fetch_markets_paginates_past_500(monkeypatch):
-    """fetch_markets_job paginates until a short page, not at a hardcoded 500."""
+    """fetch_markets_job paginates until a short page, not at a hardcoded 500.
+
+    Production path is via the /events traversal as of PR I; legacy
+    /markets is the fallback when events returns empty.
+    """
     from api import scheduler
 
     # 7 full pages of 100 + one short page of 50 = 750 markets
@@ -164,12 +168,14 @@ async def test_fetch_markets_paginates_past_500(monkeypatch):
     pages.append([MagicMock(condition_id=f"m7-{i}") for i in range(50)])
 
     fake = MagicMock()
-    fake.get_markets = AsyncMock(side_effect=pages)
+    fake.get_active_markets_via_events = AsyncMock(side_effect=pages)
+    fake.get_markets = AsyncMock(return_value=[])  # fallback not invoked
     monkeypatch.setattr(scheduler, "_client", fake)
 
     await scheduler.fetch_markets_job()
 
-    assert fake.get_markets.call_count == 8
+    assert fake.get_active_markets_via_events.call_count == 8
+    assert fake.get_markets.call_count == 0
     cached = scheduler.cache.get("markets")
     assert cached is not None
     assert len(cached) == 750
@@ -182,14 +188,37 @@ async def test_fetch_markets_warns_at_page_cap(monkeypatch, caplog):
     # Always-full page — break condition (`len(batch) < _PAGE_SIZE`) never fires
     full_page = [MagicMock(condition_id=f"m-{i}") for i in range(scheduler._PAGE_SIZE)]
     fake = MagicMock()
-    fake.get_markets = AsyncMock(return_value=full_page)
+    fake.get_active_markets_via_events = AsyncMock(return_value=full_page)
+    fake.get_markets = AsyncMock(return_value=[])
     monkeypatch.setattr(scheduler, "_client", fake)
 
     with caplog.at_level("WARNING", logger="api.scheduler"):
         await scheduler.fetch_markets_job()
 
-    assert fake.get_markets.call_count == scheduler._MAX_PAGES
+    assert fake.get_active_markets_via_events.call_count == scheduler._MAX_PAGES
     assert any("page cap" in r.message for r in caplog.records)
+
+
+async def test_fetch_markets_falls_back_to_markets_when_events_empty(monkeypatch):
+    """If /events traversal returns empty, the fallback /markets path runs."""
+    from api import scheduler
+
+    fallback_pages = [
+        [MagicMock(condition_id=f"f-{i}") for i in range(100)],
+        [MagicMock(condition_id=f"f-{i}") for i in range(40)],
+    ]
+
+    fake = MagicMock()
+    fake.get_active_markets_via_events = AsyncMock(return_value=[])  # empty
+    fake.get_markets = AsyncMock(side_effect=fallback_pages)
+    monkeypatch.setattr(scheduler, "_client", fake)
+
+    await scheduler.fetch_markets_job()
+
+    cached = scheduler.cache.get("markets")
+    assert cached is not None
+    assert len(cached) == 140
+    assert fake.get_markets.call_count == 2
 
 
 # ── CORS env ──────────────────────────────────────────────
