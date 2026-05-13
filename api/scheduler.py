@@ -416,11 +416,8 @@ async def track_outcomes_job():
                 final_price = last_trade if last_trade > 0 else _resolved_price
                 bs = brier_score(final_price, outcome)
 
-                tags_raw = raw.get("tags", [])
-                category = ""
-                if isinstance(tags_raw, list) and tags_raw:
-                    first = tags_raw[0]
-                    category = first.get("label", first) if isinstance(first, dict) else str(first)
+                tags = PolymarketClient._parse_tags(raw.get("tags", []))
+                category = tags[0] if tags else ""
 
                 await save_resolved_market(
                     db,

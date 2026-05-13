@@ -459,6 +459,27 @@ class PolymarketClient:
         return "YES"  # default assumption
 
     @staticmethod
+    def _parse_tags(tags_raw: Any) -> list[str]:
+        """Normalize Gamma's heterogeneous tags shape to ``list[str]``.
+
+        Gamma returns tags as either a list of ``{label, slug, id, ...}``
+        dicts or as a list of strings, depending on endpoint. Older docs
+        also document a comma-string variant. This unifies all three.
+        """
+        out: list[str] = []
+        if isinstance(tags_raw, list):
+            for t in tags_raw:
+                if isinstance(t, dict):
+                    label = t.get("label") or t.get("slug") or t.get("id") or ""
+                    if label:
+                        out.append(str(label))
+                elif t:
+                    out.append(str(t))
+        elif isinstance(tags_raw, str) and tags_raw:
+            out = [tags_raw]
+        return out
+
+    @staticmethod
     def _parse_market(m: dict) -> Market:
         tokens = m.get("clobTokenIds", m.get("tokens", []))
         token_yes = ""
@@ -495,13 +516,10 @@ class PolymarketClient:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        tags_raw = m.get("tags", [])
-        category = ""
-        if isinstance(tags_raw, list) and tags_raw:
-            first = tags_raw[0]
-            category = first.get("label", first) if isinstance(first, dict) else str(first)
-        elif isinstance(tags_raw, str):
-            category = tags_raw
+        tags = PolymarketClient._parse_tags(m.get("tags", []))
+        # category stays as tags[0] for backward compat with category-weight
+        # logic in divergence.py; new code can use the full tags list.
+        category = tags[0] if tags else ""
 
         return Market(
             condition_id=m.get("conditionId", m.get("condition_id", m.get("id", ""))),
@@ -519,4 +537,5 @@ class PolymarketClient:
             open_interest=float(m.get("openInterest", m.get("open_interest", 0)) or 0),
             liquidity=float(m.get("liquidity", 0) or 0),
             neg_risk=bool(m.get("negRisk", m.get("neg_risk", False))),
+            tags=tags,
         )

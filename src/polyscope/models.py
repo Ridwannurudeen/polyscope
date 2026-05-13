@@ -27,6 +27,10 @@ class Market:
     # loses signal. Surfaces in DivergenceSignal so consumers can filter or
     # weight these differently.
     neg_risk: bool = False
+    # All Gamma tags, not just the first one. `category` stays as tags[0]
+    # for backward compat with existing divergence/category-weight code; new
+    # consumers can use the full list (e.g. for cross-category signal).
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
