@@ -299,10 +299,13 @@ export function useClobOrder() {
     ],
   );
 
+  const clearError = useCallback(() => setError(null), []);
+
   return {
     isReady,
     isPlacing,
     error,
+    clearError,
     lastResult,
     depositWalletAddress,
     placeOrder,

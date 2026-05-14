@@ -191,6 +191,7 @@ export function useTradeApproval() {
           });
         }
       } catch (err) {
+        console.error("PolyScope: approval failed:", err);
         const msg = userFacingError(err, APPROVAL_FALLBACK);
         setError(msg);
         throw new Error(msg);

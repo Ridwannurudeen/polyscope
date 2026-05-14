@@ -59,6 +59,7 @@ export function TradeModal(props: TradeModalProps) {
     error: orderError,
     lastResult,
     placeOrder,
+    clearError,
   } = useClobOrder();
 
   const [side, setSide] = useState<TradeSide>(suggestedSide);
@@ -132,6 +133,10 @@ export function TradeModal(props: TradeModalProps) {
 
   const handleApprove = async () => {
     trackEvent("trade_approve_clicked", { side });
+    // Clear the stale order error so a failed approval surfaces its own
+    // message instead of being masked behind it in `visibleError`.
+    clearError();
+    setBalanceError(null);
     try {
       await approve({ side, tokenId });
       setNeedsApproval(false);
