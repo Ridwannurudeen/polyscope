@@ -161,6 +161,14 @@ async def compute_divergences_job():
             if not market.condition_id or market.price_yes <= 0:
                 continue
 
+            # Volume floor before the per-market HTTP call. compute_divergence()
+            # already rejects anything under min_volume_24h, so scanning
+            # sub-threshold markets only burns a get_market_positions round-trip
+            # each. Of ~30k open markets only ~1.1k clear $10k — gating here is
+            # what lets the full scan finish inside its 5-minute interval.
+            if market.volume_24h < _divergence_config.min_volume_24h:
+                continue
+
             positions = []
             try:
                 market_positions = await client.get_market_positions(market.condition_id, limit=200)
