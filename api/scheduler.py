@@ -156,7 +156,6 @@ async def compute_divergences_job():
     try:
         # ── Pass 1: Position-based scan ──
         trader_addresses = set(_traders.keys())
-        _markets_since_commit = 0
 
         for market in markets:
             if not market.condition_id or market.price_yes <= 0:
@@ -253,13 +252,11 @@ async def compute_divergences_job():
             }
             await save_snapshot(db, snapshot)
 
-            # Commit every 25 markets so user-facing writes (portfolio,
-            # follow, wallet-link) aren't starved by the 5-minute scan
-            # holding a single transaction open.
-            _markets_since_commit += 1
-            if _markets_since_commit >= 25:
-                await db.commit()
-                _markets_since_commit = 0
+            # Commit after every market so the write lock is released
+            # before the next position fetch. Holding one transaction
+            # open across the scan's HTTP calls starves user-facing
+            # writes (portfolio, follow, wallet-link) into 504s.
+            await db.commit()
 
             await asyncio.sleep(0.1)
 
@@ -336,6 +333,9 @@ async def compute_divergences_job():
                                 contributions,
                             )
 
+                # Release the write lock before the next candidate's
+                # trade fetch — same starvation hazard as pass 1.
+                await db.commit()
                 await asyncio.sleep(0.2)
             except Exception:
                 logger.warning(
@@ -453,6 +453,10 @@ async def track_outcomes_job():
                 await update_signal_outcomes(db, market_id, outcome)
                 saved += 1
 
+            # Commit each page before the next HTTP fetch so the write
+            # lock isn't held across the multi-page closed-markets scan.
+            await db.commit()
+
             if len(batch) < _PAGE_SIZE:
                 break
         else:
@@ -542,6 +546,9 @@ async def detect_whale_trades_job():
                     )
                     new_alerts += 1
 
+                # Release the write lock before the next market's trade
+                # fetch instead of holding it across the 50-market scan.
+                await db.commit()
                 await asyncio.sleep(0.2)
             except Exception:
                 logger.warning(
