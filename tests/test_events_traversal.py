@@ -151,6 +151,30 @@ async def test_events_traversal_skips_non_dict_events_and_markets(client, monkey
     assert markets[0].tags == ["X"]
 
 
+async def test_events_traversal_skips_closed_and_inactive_child_markets(client, monkeypatch):
+    """A live event keeps carrying child markets that have already closed
+    (e.g. a finished match inside an ongoing tournament). The event-level
+    active=true/closed=false query filter does not catch those — they must
+    be filtered per-market."""
+    open_market = _market("0xopen", "to-y", "to-n")
+    closed_market = {**_market("0xclosed", "tc-y", "tc-n"), "closed": True}
+    inactive_market = {**_market("0xinactive", "ti-y", "ti-n"), "active": False}
+    payload = [
+        _event(
+            tags=[{"label": "Sports"}],
+            markets=[open_market, closed_market, inactive_market],
+        )
+    ]
+
+    async def fake_get(_url, _params=None):
+        return payload
+
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    markets = await client.get_active_markets_via_events()
+    assert [m.condition_id for m in markets] == ["0xopen"]
+
+
 async def test_events_traversal_does_not_overwrite_existing_category(client, monkeypatch):
     """If a market dict has its own category/groupItemTitle, the event
     tags are still added BUT category isn't forced to tags[0]."""

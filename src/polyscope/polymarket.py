@@ -130,6 +130,13 @@ class PolymarketClient:
                 if not isinstance(raw, dict):
                     continue
                 m = PolymarketClient._parse_market(raw)
+                # The active/closed query filter applies at the EVENT
+                # level — a still-open event keeps carrying child markets
+                # that have already closed (a finished match inside an
+                # ongoing tournament). Filter per-market so the scanner
+                # never scores, and the UI never surfaces, a closed market.
+                if m.closed or not m.active:
+                    continue
                 # Override tags from the event (markets-on-events don't
                 # have their own tags array). Preserve market-level
                 # negRisk if set, otherwise inherit from event.
