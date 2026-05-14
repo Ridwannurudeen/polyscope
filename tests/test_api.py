@@ -342,6 +342,45 @@ async def test_trade_market_detail_validates_gamma_tokens(client, monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_trade_market_detail_falls_back_to_gamma_on_cache_miss(client, monkeypatch):
+    """A market backing a live signal can rotate out of the top-N "markets"
+    cache; the trade endpoint must still serve it from Gamma, not 404."""
+    from api.cache import cache
+    import api.main as main
+
+    cache.set("markets", [], ttl_seconds=60)  # market deliberately absent
+
+    async def fake_fetch_gamma_market(condition_id: str):
+        assert condition_id == "0xdef456"
+        return {
+            "conditionId": "0xdef456",
+            "question": "Uncached market?",
+            "slug": "uncached-market",
+            "clobTokenIds": '["yes-tok","no-tok"]',
+            "outcomePrices": '["0.73","0.27"]',
+            "orderPriceMinTickSize": 0.01,
+            "negRisk": True,
+            "acceptingOrders": True,
+            "enableOrderBook": True,
+            "closed": False,
+        }
+
+    monkeypatch.setattr(main, "_fetch_gamma_market", fake_fetch_gamma_market)
+    try:
+        resp = await client.get("/api/market/0xdef456/trade")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tokens"] == {"YES": "yes-tok", "NO": "no-tok"}
+    assert data["tick_size"] == "0.01"
+    assert data["neg_risk"] is True
+    assert data["market"]["price_yes"] == 0.73
+    assert data["market"]["condition_id"] == "0xdef456"
+
+
+@pytest.mark.anyio
 async def test_public_signing_oracle_is_removed(client):
     resp = await client.post(
         "/api/sign",
@@ -978,9 +1017,7 @@ async def test_safe_owners_no_contract(client, monkeypatch):
 
     monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
 
-    resp = await client.get(
-        "/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners"
-    )
+    resp = await client.get("/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners")
     assert resp.status_code == 404
     assert "no contract" in resp.json()["detail"].lower()
 
@@ -1000,9 +1037,7 @@ async def test_safe_owners_not_a_safe(client, monkeypatch):
 
     monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
 
-    resp = await client.get(
-        "/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners"
-    )
+    resp = await client.get("/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners")
     assert resp.status_code == 400
     assert "getOwners" in resp.json()["detail"]
     assert calls == ["eth_getCode", "eth_call"]
@@ -1023,9 +1058,7 @@ async def test_safe_owners_valid_safe(client, monkeypatch):
 
     monkeypatch.setattr(main, "_polygon_rpc_call", fake_rpc)
 
-    resp = await client.get(
-        "/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners"
-    )
+    resp = await client.get("/api/safe/0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b/owners")
     assert resp.status_code == 200
     body = resp.json()
     assert body["address"] == "0x68c274fd46c9f1fd70f89d8231c6cd74f0661c5b"

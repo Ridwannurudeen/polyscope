@@ -770,20 +770,17 @@ async def get_market_trade(condition_id: str):
     """Server-side Polymarket trade metadata for the order modal.
 
     The browser cannot safely call Gamma directly because production CORS
-    blocks it. This endpoint fetches Gamma from the server, validates the
-    token IDs against PolyScope's cached market, and returns only the fields
-    needed for non-custodial CLOB order construction.
+    blocks it. This endpoint fetches Gamma from the server and returns only
+    the fields needed for non-custodial CLOB order construction.
+
+    The cached "markets" list is top-N-by-volume with a short TTL, so a
+    market backing a still-live signal can rotate out of it. Every
+    trade-critical field comes from the fresh Gamma fetch below, so a cache
+    miss is not fatal: fall back to a Gamma-derived Market. When the market
+    IS cached, its token IDs are cross-checked against Gamma as a guard.
     """
     if not _CONDITION_ID_RE.fullmatch(condition_id):
         raise HTTPException(status_code=400, detail="Invalid condition ID")
-
-    markets, _source, _stale = _cache_value_with_source("markets", [])
-    market = next(
-        (m for m in markets if m.condition_id.lower() == condition_id.lower()),
-        None,
-    )
-    if not market:
-        raise HTTPException(status_code=404, detail="Market not found")
 
     gamma = await _fetch_gamma_market(condition_id)
     if gamma.get("closed"):
@@ -795,10 +792,21 @@ async def get_market_trade(condition_id: str):
         )
 
     yes_token, no_token = _parse_clob_token_ids(gamma.get("clobTokenIds"))
-    if market.token_id_yes and market.token_id_yes != yes_token:
-        raise HTTPException(status_code=409, detail="YES token mismatch")
-    if market.token_id_no and market.token_id_no != no_token:
-        raise HTTPException(status_code=409, detail="NO token mismatch")
+
+    markets, _source, _stale = _cache_value_with_source("markets", [])
+    market = next(
+        (m for m in markets if m.condition_id.lower() == condition_id.lower()),
+        None,
+    )
+    if market is None:
+        from polyscope.polymarket import PolymarketClient
+
+        market = PolymarketClient._parse_market(gamma)
+    else:
+        if market.token_id_yes and market.token_id_yes != yes_token:
+            raise HTTPException(status_code=409, detail="YES token mismatch")
+        if market.token_id_no and market.token_id_no != no_token:
+            raise HTTPException(status_code=409, detail="NO token mismatch")
 
     return {
         "market": asdict(market),
