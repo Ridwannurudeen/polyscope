@@ -5,7 +5,6 @@ import { TradeModal } from "@/components/trade-modal";
 import { trackEvent } from "@/lib/analytics";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
-const POLYMARKET_GEOBLOCK_URL = "https://polymarket.com/api/geoblock";
 
 interface TradeButtonProps {
   marketId: string;
@@ -25,17 +24,6 @@ interface MarketTradeResp {
   tick_size: "0.001" | "0.01" | "0.1";
   neg_risk: boolean;
   accepting_orders: boolean;
-}
-
-async function assertGeoEligible() {
-  const res = await fetch(POLYMARKET_GEOBLOCK_URL, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error("Could not verify whether trading is available in your region");
-  }
-  const data: { blocked?: boolean } = await res.json();
-  if (data.blocked) {
-    throw new Error("Polymarket trading is not available in your region");
-  }
 }
 
 export function TradeButton({
@@ -60,8 +48,7 @@ export function TradeButton({
       direction,
     });
     try {
-      await assertGeoEligible();
-
+      // No pre-flight geoblock check — Polymarket removed that endpoint; the CLOB enforces geo at order placement.
       const res = await fetch(
         `${API_BASE}/api/market/${encodeURIComponent(marketId)}/trade`,
         { cache: "no-store" },
