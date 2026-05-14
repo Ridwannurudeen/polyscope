@@ -154,6 +154,19 @@ export function useClobOrder() {
               asset_type: AssetType.CONDITIONAL,
               token_id: input.tokenId,
             });
+      // A failed balance/allowance fetch comes back as `{ error }` with no
+      // balance field. Without this guard `safeBigInt(undefined)` returns
+      // 0n and the order is rejected as "insufficient balance" — masking
+      // the real failure (bad creds, geo block, unrecognised DepositWallet).
+      const fetchError = (resp as { error?: unknown }).error;
+      if (fetchError) {
+        console.error("PolyScope: balance/allowance fetch failed:", resp);
+        throw new Error(
+          typeof fetchError === "string"
+            ? fetchError
+            : JSON.stringify(fetchError),
+        );
+      }
       const balance = safeBigInt(resp.balance);
       const allowance = safeBigInt(resp.allowance);
       // If parsing failed, let the order through — the CLOB will surface
@@ -233,20 +246,39 @@ export function useClobOrder() {
           orderTypeEnum,
         );
 
+        // The CLOB v2 client returns business rejections as `{ error }`
+        // (not `errorMsg`), and only throws when `throwOnError` is set —
+        // which this client doesn't. Read `error`, keep `errorMsg` as a
+        // fallback for any path that still uses it.
+        const rawError = resp?.error ?? resp?.errorMsg;
+        const errText =
+          typeof rawError === "string"
+            ? rawError
+            : rawError != null
+              ? JSON.stringify(rawError)
+              : undefined;
         const result: PlaceOrderResult = {
           orderID: resp?.orderID ?? "",
           status: resp?.status ?? "unknown",
           success: resp?.success ?? false,
-          errorMsg: resp?.errorMsg ? userFacingError(resp.errorMsg) : undefined,
+          errorMsg: errText ? userFacingError(errText) : undefined,
           transactionsHashes: resp?.transactionsHashes,
           raw: resp,
         };
         setLastResult(result);
-        if (!result.success && result.errorMsg) {
-          setError(result.errorMsg);
+        if (!result.success) {
+          console.error(
+            "PolyScope: order not placed — raw CLOB response:",
+            resp,
+          );
+          setError(
+            result.errorMsg ??
+              "Order could not be placed. Refresh the page and try again.",
+          );
         }
         return result;
       } catch (err) {
+        console.error("PolyScope: placeOrder threw:", err);
         setError(userFacingError(err));
         throw err;
       } finally {

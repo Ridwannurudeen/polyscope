@@ -134,9 +134,22 @@ describe("userFacingError", () => {
     );
   });
 
-  it("falls back to a generic message for unknown errors", () => {
+  it("maps balance/allowance rejections to a deposit+approve hint", () => {
+    // The CLOB rejects with this exact string; "Refresh the page" advice
+    // was actively misleading for what is really a funding/approval gap.
+    expect(
+      userFacingError(new Error("not enough balance / allowance")),
+    ).toMatch(/deposit usdc\.e and approve/i);
+    expect(userFacingError(new Error("insufficient allowance"))).toMatch(
+      /deposit usdc\.e and approve/i,
+    );
+  });
+
+  it("surfaces the real detail for unknown errors instead of hiding it", () => {
+    // Regression: the old `return fallback` discarded the CLOB's actual
+    // rejection reason, collapsing every failure to a dead-end message.
     expect(userFacingError(new Error("some weird internal error"))).toBe(
-      "Order could not be placed. Refresh the page and try again.",
+      "Order could not be placed. Refresh the page and try again. (some weird internal error)",
     );
   });
 
@@ -148,7 +161,7 @@ describe("userFacingError", () => {
         new Error("some weird internal error"),
         APPROVAL_FALLBACK,
       ),
-    ).toBe(APPROVAL_FALLBACK);
+    ).toBe(`${APPROVAL_FALLBACK} (some weird internal error)`);
     // Matched branches still take precedence over the fallback.
     expect(userFacingError(new Error("user rejected"), APPROVAL_FALLBACK)).toBe(
       "Signature rejected in wallet.",

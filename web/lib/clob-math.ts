@@ -55,7 +55,8 @@ export function userFacingError(
   raw: unknown,
   fallback = "Order could not be placed. Refresh the page and try again.",
 ): string {
-  const msg = raw instanceof Error ? raw.message : String(raw);
+  const msg =
+    raw instanceof Error ? raw.message : typeof raw === "string" ? raw : "";
   const lower = msg.toLowerCase();
   if (/could not create api key/.test(lower)) {
     return "This wallet has no Polymarket account. Sign up at polymarket.com with this wallet, then reconnect.";
@@ -66,6 +67,13 @@ export function userFacingError(
   ) {
     return "Signature rejected in wallet.";
   }
+  if (
+    /not enough (balance|allowance)|insufficient (balance|allowance)/.test(
+      lower,
+    )
+  ) {
+    return "Polymarket rejected the order: not enough balance or allowance. Deposit USDC.e and approve it for trading, then retry.";
+  }
   if (/tick.*size/.test(lower)) {
     return "Price doesn't match this market's tick size. Adjust and retry.";
   }
@@ -75,5 +83,7 @@ export function userFacingError(
   if (/network|fetch failed|econn/.test(lower)) {
     return "Network error reaching Polymarket. Try again.";
   }
-  return fallback;
+  // Don't discard unrecognized errors — surface the real detail so the
+  // failure stays diagnosable instead of a dead-end generic message.
+  return msg ? `${fallback} (${msg})` : fallback;
 }
