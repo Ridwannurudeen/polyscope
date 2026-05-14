@@ -9,7 +9,7 @@ import { fallback, http } from "viem";
 
 const wagmiConfig = createConfig({
   chains: [polygon],
-  connectors: [injected()],
+  connectors: [injected({ target: "metaMask" })],
   transports: {
     // wagmi's default Polygon transport (polygon-rpc.com) returns
     // 403 "tenant disabled" — Safe getOwners checks fail with
@@ -29,9 +29,7 @@ export function Web3Provider({ children }: { children: ReactNode }) {
 
   return (
     <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        {children}
-      </QueryClientProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </WagmiProvider>
   );
 }
