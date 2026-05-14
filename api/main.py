@@ -734,35 +734,43 @@ def _tick_size_from_gamma(value: object) -> str:
 
 
 async def _fetch_gamma_market(condition_id: str) -> dict:
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                _GAMMA_MARKETS_URL,
-                params={"condition_ids": condition_id, "limit": 1},
-                headers={"User-Agent": "PolyScope/0.3"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-    except httpx.HTTPError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Polymarket market lookup failed: {type(e).__name__}",
-        ) from e
-    except ValueError as e:
-        raise HTTPException(
-            status_code=502,
-            detail="Polymarket returned invalid JSON",
-        ) from e
+    # Gamma's /markets?condition_ids= filter returns only open markets by
+    # default; closed markets only come back with closed=true. Query the open
+    # set first (the common case), then fall back to the closed set, so a
+    # closed market reaches the caller's "Market is closed" branch instead of
+    # a misleading "Market not found" 404.
+    base = {"condition_ids": condition_id, "limit": 1}
+    for params in (base, {**base, "closed": "true"}):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    _GAMMA_MARKETS_URL,
+                    params=params,
+                    headers={"User-Agent": "PolyScope/0.3"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Polymarket market lookup failed: {type(e).__name__}",
+            ) from e
+        except ValueError as e:
+            raise HTTPException(
+                status_code=502,
+                detail="Polymarket returned invalid JSON",
+            ) from e
 
-    gamma = data[0] if isinstance(data, list) and data else None
-    gamma_condition = (
-        gamma.get("conditionId") or gamma.get("condition_id") or gamma.get("id")
-        if isinstance(gamma, dict)
-        else None
-    )
-    if not isinstance(gamma, dict) or str(gamma_condition).lower() != condition_id.lower():
-        raise HTTPException(status_code=404, detail="Market not found on Polymarket")
-    return gamma
+        gamma = data[0] if isinstance(data, list) and data else None
+        gamma_condition = (
+            gamma.get("conditionId") or gamma.get("condition_id") or gamma.get("id")
+            if isinstance(gamma, dict)
+            else None
+        )
+        if isinstance(gamma, dict) and str(gamma_condition).lower() == condition_id.lower():
+            return gamma
+
+    raise HTTPException(status_code=404, detail="Market not found on Polymarket")
 
 
 @app.get("/api/market/{condition_id}/trade")

@@ -381,6 +381,87 @@ async def test_trade_market_detail_falls_back_to_gamma_on_cache_miss(client, mon
 
 
 @pytest.mark.anyio
+async def test_trade_market_detail_closed_market_returns_409(client, monkeypatch):
+    """Gamma's condition_ids filter hides closed markets unless closed=true is
+    passed. _fetch_gamma_market must fall back to the closed set, so a closed
+    market surfaces as a clear 409 instead of a misleading 404."""
+    import httpx
+
+    import api.main as main
+    from api.cache import cache
+
+    cache.set("markets", [], ttl_seconds=60)
+    calls: list[dict] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, params=None, headers=None):
+            params = params or {}
+            calls.append(params)
+            body = (
+                [{"conditionId": "0xclosed1", "closed": True}]
+                if params.get("closed") == "true"
+                else []
+            )
+            return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+    try:
+        resp = await client.get("/api/market/0xclosed1/trade")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Market is closed"
+    # open-set query first, then the closed-set fallback
+    assert len(calls) == 2
+    assert "closed" not in calls[0]
+    assert calls[1]["closed"] == "true"
+
+
+@pytest.mark.anyio
+async def test_trade_market_detail_truly_absent_returns_404(client, monkeypatch):
+    """When neither the open nor the closed Gamma query has the market, the
+    trade endpoint returns a 404."""
+    import httpx
+
+    import api.main as main
+    from api.cache import cache
+
+    cache.set("markets", [], ttl_seconds=60)
+
+    class FakeAsyncClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, params=None, headers=None):
+            return httpx.Response(200, json=[], request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+    try:
+        resp = await client.get("/api/market/0xabsent9/trade")
+    finally:
+        cache.clear()
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Market not found on Polymarket"
+
+
+@pytest.mark.anyio
 async def test_public_signing_oracle_is_removed(client):
     resp = await client.post(
         "/api/sign",
