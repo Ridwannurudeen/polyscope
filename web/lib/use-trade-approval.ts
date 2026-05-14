@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount, usePublicClient, useWalletClient } from "wagmi";
 import { polygon } from "wagmi/chains";
 import { encodeFunctionData, maxUint256 } from "viem";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@polymarket/clob-client-v2";
 import type { DepositWalletCall } from "@polymarket/builder-relayer-client";
 import { userFacingError } from "./clob-math";
+import { readTradeAllowance } from "./onchain-allowance";
 import { useDepositWalletDeployment } from "./use-deposit-wallet-deployment";
 import { useRelayClient } from "./use-relay-client";
 
@@ -28,6 +29,8 @@ export type ApprovalSide = "BUY" | "SELL";
 export interface ApproveInput {
   side: ApprovalSide;
   tokenId: string;
+  /** Whether the order being approved for trades a neg-risk market. */
+  negRisk: boolean;
 }
 
 const ERC20_APPROVE_ABI = [
@@ -103,6 +106,7 @@ function buildApprovalCalls(chainId: number): DepositWalletCall[] {
 export function useTradeApproval() {
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient({ chainId: polygon.id });
+  const publicClient = usePublicClient({ chainId: polygon.id });
   const { depositWalletAddress, isDeployed } = useDepositWalletDeployment();
   const { relayClient } = useRelayClient();
 
@@ -168,7 +172,27 @@ export function useTradeApproval() {
           throw new Error("Relayer reported the approval batch failed.");
         }
 
-        // 2. Refresh the CLOB's cached allowance view so the next order
+        // 2. Verify the approval actually landed on chain. The relayer's
+        //    `.wait()` only confirms its own meta-transaction was mined —
+        //    not that the inner approve / setApprovalForAll calls executed
+        //    without reverting. Without this check a silently-reverted
+        //    batch looks like success and the user bounces straight back
+        //    to "allowance too low" on the next order.
+        if (publicClient) {
+          const onchain = await readTradeAllowance(publicClient, {
+            chainId: polygon.id,
+            side: input.side,
+            negRisk: input.negRisk,
+            owner: depositWalletAddress as `0x${string}`,
+          });
+          if (onchain <= BigInt(0)) {
+            throw new Error(
+              "Approval didn't take effect on chain. Try again, or approve directly on polymarket.com.",
+            );
+          }
+        }
+
+        // 3. Refresh the CLOB's cached allowance view so the next order
         //    check sees the approval we just set on chain.
         const creds = await deriveOrLoadCreds(address.toLowerCase());
         const client = new ClobClient({
@@ -205,6 +229,7 @@ export function useTradeApproval() {
       deriveOrLoadCreds,
       isConnected,
       isDeployed,
+      publicClient,
       relayClient,
       walletClient,
     ],

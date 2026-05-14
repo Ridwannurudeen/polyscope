@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount, usePublicClient, useWalletClient } from "wagmi";
 import { polygon } from "wagmi/chains";
 import {
   AssetType,
@@ -12,6 +12,7 @@ import {
   type ApiKeyCreds,
 } from "@polymarket/clob-client-v2";
 import { safeBigInt, toBaseUnits, userFacingError } from "./clob-math";
+import { readTradeAllowance } from "./onchain-allowance";
 import { useDepositWalletDeployment } from "./use-deposit-wallet-deployment";
 
 const CLOB_HOST =
@@ -60,6 +61,7 @@ type AllowanceFailure = "insufficient_balance" | "insufficient_allowance";
 export function useClobOrder() {
   const { address, isConnected, chainId } = useAccount();
   const { data: walletClient } = useWalletClient({ chainId: polygon.id });
+  const publicClient = usePublicClient({ chainId: polygon.id });
   const {
     depositWalletAddress,
     isDeployed,
@@ -145,6 +147,9 @@ export function useClobOrder() {
         input.side === "BUY"
           ? toBaseUnits(input.price * input.size)
           : toBaseUnits(input.size);
+
+      // Balance still comes from the CLOB — its `balance` field is stable
+      // across client versions and needs no wallet RPC.
       const resp =
         input.side === "BUY"
           ? await client.getBalanceAllowance({
@@ -154,13 +159,13 @@ export function useClobOrder() {
               asset_type: AssetType.CONDITIONAL,
               token_id: input.tokenId,
             });
-      // A failed balance/allowance fetch comes back as `{ error }` with no
-      // balance field. Without this guard `safeBigInt(undefined)` returns
-      // 0n and the order is rejected as "insufficient balance" — masking
-      // the real failure (bad creds, geo block, unrecognised DepositWallet).
+      // A failed balance fetch comes back as `{ error }` with no balance
+      // field. Without this guard `safeBigInt(undefined)` returns 0n and
+      // the order is rejected as "insufficient balance" — masking the real
+      // failure (bad creds, geo block, unrecognised DepositWallet).
       const fetchError = (resp as { error?: unknown }).error;
       if (fetchError) {
-        console.error("PolyScope: balance/allowance fetch failed:", resp);
+        console.error("PolyScope: balance fetch failed:", resp);
         throw new Error(
           typeof fetchError === "string"
             ? fetchError
@@ -168,16 +173,32 @@ export function useClobOrder() {
         );
       }
       const balance = safeBigInt(resp.balance);
-      const allowance = safeBigInt(resp.allowance);
       // If parsing failed, let the order through — the CLOB will surface
       // the real error rather than us blocking on a misread balance.
       if (balance !== undefined && balance < need)
         return "insufficient_balance";
-      if (allowance !== undefined && allowance < need)
-        return "insufficient_allowance";
+
+      // Allowance is read straight from chain. clob-client-v2@1.0.0 types
+      // the /balance-allowance response with a scalar `allowance`, but CLOB
+      // V2 returns an `allowances` map keyed by spender — so `resp.allowance`
+      // is `undefined`, `safeBigInt` coerces it to 0n, and every order is
+      // blocked with "allowance too low" however many times the user
+      // approves. The chain is the authoritative source regardless.
+      if (!publicClient || !depositWalletAddress) {
+        // No RPC to verify with — let the order through; the CLOB enforces
+        // allowance server-side and will surface the real rejection.
+        return null;
+      }
+      const allowance = await readTradeAllowance(publicClient, {
+        chainId: polygon.id,
+        side: input.side,
+        negRisk: input.negRisk ?? false,
+        owner: depositWalletAddress as `0x${string}`,
+      });
+      if (allowance < need) return "insufficient_allowance";
       return null;
     },
-    [],
+    [publicClient, depositWalletAddress],
   );
 
   const placeOrder = useCallback(

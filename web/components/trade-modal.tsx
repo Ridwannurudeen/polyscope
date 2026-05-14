@@ -138,7 +138,7 @@ export function TradeModal(props: TradeModalProps) {
     clearError();
     setBalanceError(null);
     try {
-      await approve({ side, tokenId });
+      await approve({ side, tokenId, negRisk });
       setNeedsApproval(false);
       trackEvent("trade_approve_result", { success: true });
     } catch {

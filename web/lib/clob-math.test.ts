@@ -145,6 +145,16 @@ describe("userFacingError", () => {
     );
   });
 
+  it("surfaces the client-side allowance pre-check message verbatim", () => {
+    // use-clob-order's ensureAllowance throws this exact phrasing; it is
+    // already actionable, so it must not be wrapped in the generic
+    // fallback — which produced the confusing doubled message
+    // "Order could not be placed... (Allowance too low. Approve...)".
+    expect(
+      userFacingError(new Error("Allowance too low. Approve and try again.")),
+    ).toBe("Allowance too low. Approve and try again.");
+  });
+
   it("surfaces the real detail for unknown errors instead of hiding it", () => {
     // Regression: the old `return fallback` discarded the CLOB's actual
     // rejection reason, collapsing every failure to a dead-end message.

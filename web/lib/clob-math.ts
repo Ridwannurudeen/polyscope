@@ -67,6 +67,13 @@ export function userFacingError(
   ) {
     return "Signature rejected in wallet.";
   }
+  // use-clob-order's client-side pre-check throws this exact phrasing when
+  // the DepositWallet hasn't approved the exchange yet. It's already a
+  // clean, actionable message — surface it as-is instead of burying it in
+  // the generic "order could not be placed" fallback.
+  if (/allowance too low/.test(lower)) {
+    return msg;
+  }
   if (
     /not enough (balance|allowance)|insufficient (balance|allowance)/.test(
       lower,
