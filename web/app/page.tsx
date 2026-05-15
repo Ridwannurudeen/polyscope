@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { AccBar } from "@/components/acc-bar";
 import { Disclaimer } from "@/components/disclaimer";
 import { DivergenceBar } from "@/components/divergence-bar";
+import { FollowButton } from "@/components/follow-button";
 import { HeroSignature } from "@/components/hero-signature";
 import { LiveTicker } from "@/components/live-ticker";
 import { ScoreBadge } from "@/components/score-badge";
@@ -51,7 +52,6 @@ interface TradersLeaderboardResponse {
 function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
-
 
 /* ── Section header ──
    Restrained: title at h3, optional one-line sub, optional small cta.
@@ -101,10 +101,11 @@ export default function Dashboard() {
     "/api/traders/leaderboard?order=predictive&min_signals=30&limit=6",
     120_000,
   );
-  const { data: predictiveFallback } = usePollingFetch<TradersLeaderboardResponse>(
-    "/api/traders/leaderboard?order=predictive&min_signals=5&limit=6",
-    120_000,
-  );
+  const { data: predictiveFallback } =
+    usePollingFetch<TradersLeaderboardResponse>(
+      "/api/traders/leaderboard?order=predictive&min_signals=5&limit=6",
+      120_000,
+    );
   const { data: fadeData } = usePollingFetch<TradersLeaderboardResponse>(
     "/api/traders/leaderboard?order=anti-predictive&min_signals=30&limit=6",
     120_000,
@@ -126,8 +127,7 @@ export default function Dashboard() {
     predictiveStrict.length > 0
       ? predictiveStrict
       : predictiveFallback?.traders || [];
-  const fade =
-    fadeStrict.length > 0 ? fadeStrict : fadeFallback?.traders || [];
+  const fade = fadeStrict.length > 0 ? fadeStrict : fadeFallback?.traders || [];
   const strictLeaderboardReady = predictiveStrict.length > 0;
 
   return (
@@ -165,7 +165,11 @@ export default function Dashboard() {
             cta="full"
           />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <TraderBoard side="predictive" title="highest accuracy" rows={predictive} />
+            <TraderBoard
+              side="predictive"
+              title="highest accuracy"
+              rows={predictive}
+            />
             <TraderBoard side="fade" title="lowest accuracy" rows={fade} />
           </div>
         </section>
@@ -314,12 +318,16 @@ export default function Dashboard() {
                   </p>
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-1.5 text-caption font-mono">
                     <span className="text-ink-400">
-                      <span className="num text-ink-100">{e.market_count}</span> markets
+                      <span className="num text-ink-100">{e.market_count}</span>{" "}
+                      markets
                     </span>
                     <span className="text-ink-400">
                       vol{" "}
                       <span className="text-ink-100 num">
-                        ${e.total_volume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        $
+                        {e.total_volume.toLocaleString(undefined, {
+                          maximumFractionDigits: 0,
+                        })}
                       </span>
                     </span>
                     {e.divergence_signals > 0 && (
@@ -366,9 +374,7 @@ function TraderBoard({
     <div>
       <div className="flex items-center justify-between mb-3">
         <div className="eyebrow">{title}</div>
-        <div className="text-micro text-ink-500 font-mono">
-          n={rows.length}
-        </div>
+        <div className="text-micro text-ink-500 font-mono">n={rows.length}</div>
       </div>
       <div className="surface rounded-lg overflow-hidden">
         <table className="w-full text-body-sm">
@@ -410,6 +416,9 @@ function TraderBoard({
                 </td>
                 <td className="pr-4 py-3 text-right text-micro text-ink-500 num w-20 align-top">
                   {t.correct_predictions}/{t.total_divergent_signals}
+                </td>
+                <td className="pr-4 py-3 text-right align-top">
+                  <FollowButton traderAddress={t.trader_address} size="sm" />
                 </td>
               </tr>
             ))}
