@@ -8,6 +8,7 @@ import { useDepositWalletDeployment } from "@/lib/use-deposit-wallet-deployment"
 import { useTradeApproval } from "@/lib/use-trade-approval";
 import { useClobOrder, type TradeSide } from "@/lib/use-clob-order";
 import { trackEvent } from "@/lib/analytics";
+import { preferredInjectedConnector } from "@/lib/wallet-connectors";
 
 interface TradeModalProps {
   open: boolean;
@@ -37,7 +38,7 @@ export function TradeModal(props: TradeModalProps) {
   const { address, isConnected, chainId } = useAccount();
   const {
     connectors,
-    connect,
+    connectAsync,
     status: connectStatus,
     error: connectError,
   } = useConnect();
@@ -69,6 +70,9 @@ export function TradeModal(props: TradeModalProps) {
   );
   const [needsApproval, setNeedsApproval] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [walletConnectError, setWalletConnectError] = useState<string | null>(
+    null,
+  );
 
   const onWrongChain = isConnected && chainId !== polygon.id;
   const builderCodeConfigured = Boolean(
@@ -86,13 +90,26 @@ export function TradeModal(props: TradeModalProps) {
       setSize(defaultShareCountForNotional(suggestedPrice));
       setNeedsApproval(false);
       setBalanceError(null);
+      setWalletConnectError(null);
     }
   }, [open, suggestedPrice, suggestedSide, priceDecimals]);
 
-  const connectInjected = () => {
-    const injected = connectors.find((c) => c.type === "injected");
-    if (!injected) return;
-    connect({ connector: injected });
+  const connectInjected = async () => {
+    setWalletConnectError(null);
+    const injected = await preferredInjectedConnector(connectors);
+    if (!injected) {
+      setWalletConnectError(
+        "Install or unlock a browser wallet, then try again",
+      );
+      return;
+    }
+    try {
+      await connectAsync({ connector: injected });
+    } catch (err) {
+      setWalletConnectError(
+        err instanceof Error ? err.message : "connect failed",
+      );
+    }
   };
 
   const priceNum = Number.parseFloat(price) || 0;
@@ -374,8 +391,10 @@ export function TradeModal(props: TradeModalProps) {
         )}
 
         {/* Connect error */}
-        {connectError && (
-          <p className="mt-3 text-xs text-alert-500">{connectError.message}</p>
+        {(walletConnectError || connectError) && (
+          <p className="mt-3 text-xs text-alert-500">
+            {walletConnectError || connectError?.message}
+          </p>
         )}
 
         {/* Hook errors (deployment / approval / order) */}

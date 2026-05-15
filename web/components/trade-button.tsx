@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { TradeModal } from "@/components/trade-modal";
 import { trackEvent } from "@/lib/analytics";
+import { fetchWithTimeout } from "@/lib/fetch-timeout";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -48,10 +49,11 @@ export function TradeButton({
       direction,
     });
     try {
-      // No pre-flight geoblock check — Polymarket removed that endpoint; the CLOB enforces geo at order placement.
-      const res = await fetch(
+      // No pre-flight geoblock check: Polymarket removed that endpoint; the CLOB enforces geo at order placement.
+      const res = await fetchWithTimeout(
         `${API_BASE}/api/market/${encodeURIComponent(marketId)}/trade`,
         { cache: "no-store" },
+        12_000,
       );
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -60,7 +62,9 @@ export function TradeButton({
 
       const data: MarketTradeResp = await res.json();
       if (!data.accepting_orders) {
-        throw new Error("Polymarket is not accepting orders on this market right now");
+        throw new Error(
+          "Polymarket is not accepting orders on this market right now",
+        );
       }
 
       const tickFloor = Number(data.tick_size);
