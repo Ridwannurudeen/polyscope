@@ -43,6 +43,7 @@ from .database import (
     get_signal_history_for_market,
     get_trader_accuracy_leaderboard,
     get_trader_profile,
+    get_trader_recent_positions,
     get_watchlist,
     get_whale_alerts,
     init_db,
@@ -1120,6 +1121,24 @@ async def trader_profile(trader_address: str):
             profile["accuracy_by_category"] = {}
 
     return profile
+
+
+@app.get("/api/traders/{trader_address}/positions")
+async def trader_positions(
+    trader_address: str,
+    limit: int = Query(default=30, ge=1, le=100),
+):
+    """Recent divergent positions held by a trader, joined with signal + outcome."""
+    db = await get_db()
+    try:
+        positions = await get_trader_recent_positions(db, trader_address, limit=limit)
+    finally:
+        await db.close()
+    return {
+        "trader_address": trader_address,
+        "positions": positions,
+        "count": len(positions),
+    }
 
 
 @app.get("/api/calibration")

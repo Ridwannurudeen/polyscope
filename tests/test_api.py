@@ -1259,3 +1259,79 @@ async def test_polymarket_wallet_owner_valid(client, monkeypatch):
     body = resp.json()
     assert body["address"] == "0xb9feda4010d2594335c926a71d6ad72646410a03"
     assert body["owner"] == owner.lower()
+
+
+@pytest.mark.anyio
+async def test_trader_positions_empty(client):
+    resp = await client.get("/api/traders/0xunknown/positions")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trader_address"] == "0xunknown"
+    assert body["positions"] == []
+    assert body["count"] == 0
+
+
+@pytest.mark.anyio
+async def test_trader_positions_returns_recent(client):
+    """Endpoint surfaces the dedup-by-market timeline for a trader."""
+    from api.database import (
+        get_db,
+        save_divergence_signal,
+        save_signal_trader_positions,
+    )
+
+    db = await get_db()
+    try:
+        sid = await save_divergence_signal(
+            db,
+            {
+                "market_id": "m-api",
+                "timestamp": "2026-05-10T12:00:00Z",
+                "market_price": 0.30,
+                "sm_consensus": 0.80,
+                "divergence_pct": 0.50,
+                "score": 70.0,
+                "sm_trader_count": 3,
+                "sm_direction": "YES",
+                "question": "Question m-api?",
+                "category": "crypto",
+                "signal_source": "positions",
+                "neg_risk": 0,
+            },
+        )
+        await save_signal_trader_positions(
+            db,
+            [
+                {
+                    "signal_id": sid,
+                    "market_id": "m-api",
+                    "trader_address": "0xtrader1",
+                    "position_direction": "NO",
+                    "position_size": 5_000.0,
+                    "avg_price": 0.18,
+                    "timestamp": "2026-05-10T12:00:00Z",
+                }
+            ],
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    resp = await client.get("/api/traders/0xtrader1/positions?limit=5")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["count"] == 1
+    pos = body["positions"][0]
+    assert pos["market_id"] == "m-api"
+    assert pos["position_direction"] == "NO"
+    assert pos["question"] == "Question m-api?"
+    assert pos["resolved"] is False
+    assert pos["correct"] is None
+
+
+@pytest.mark.anyio
+async def test_trader_positions_rejects_invalid_limit(client):
+    resp = await client.get("/api/traders/0xt/positions?limit=0")
+    assert resp.status_code == 422
+    resp = await client.get("/api/traders/0xt/positions?limit=999")
+    assert resp.status_code == 422
