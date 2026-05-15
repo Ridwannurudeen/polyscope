@@ -99,7 +99,8 @@ export function FollowButton({
     };
   }, [normalizedTrader, walletAddress, identityVersion]);
 
-  const sizeClass = size === "sm" ? "h-7 px-2 text-eyebrow" : "h-8 px-3 text-eyebrow";
+  const sizeClass =
+    size === "sm" ? "h-7 px-2 text-eyebrow" : "h-8 px-3 text-eyebrow";
 
   const toggle = async () => {
     const cid = getClientId();
@@ -170,6 +171,7 @@ export function FollowButton({
       <button
         onClick={toggle}
         disabled={loading}
+        title="Subscribed — you'll get an alert when this trader takes a new divergent position. Trades are not copied automatically."
         className={`${sizeClass} font-mono uppercase tracking-wider inline-flex items-center justify-center bg-scope-500/14 text-scope-300 border border-scope-500/40 rounded-md hover:bg-scope-500/20 disabled:opacity-40 transition-colors duration-120`}
       >
         {loading ? "..." : "following"}
@@ -181,6 +183,7 @@ export function FollowButton({
     <button
       onClick={toggle}
       disabled={loading}
+      title="Subscribe to alerts when this trader takes a new divergent position. Trades are not copied automatically."
       className={`${sizeClass} font-mono uppercase tracking-wider inline-flex items-center justify-center bg-transparent text-ink-300 border border-ink-700 rounded-md hover:text-ink-100 hover:border-ink-600 disabled:opacity-40 transition-colors duration-120`}
     >
       {loading ? "..." : "follow"}

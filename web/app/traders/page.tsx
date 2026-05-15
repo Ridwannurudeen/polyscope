@@ -182,9 +182,7 @@ function TraderTable({
                 accuracy · 95% ci
               </th>
               <th className="eyebrow text-right px-3 py-3">signals</th>
-              {side === "predictive" && (
-                <th className="eyebrow text-right px-3 py-3"></th>
-              )}
+              <th className="eyebrow text-right px-3 py-3">alerts</th>
             </tr>
           </thead>
           <tbody>
@@ -227,14 +225,9 @@ function TraderTable({
                 <td className="px-3 py-3 text-right text-caption text-ink-400 font-mono num">
                   {t.correct_predictions}/{t.total_divergent_signals}
                 </td>
-                {side === "predictive" && (
-                  <td className="px-3 py-3 text-right">
-                    <FollowButton
-                      traderAddress={t.trader_address}
-                      size="sm"
-                    />
-                  </td>
-                )}
+                <td className="px-3 py-3 text-right">
+                  <FollowButton traderAddress={t.trader_address} size="sm" />
+                </td>
               </tr>
             ))}
           </tbody>
