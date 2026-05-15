@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { FollowButton } from "@/components/follow-button";
 import { TableSkeleton } from "@/components/skeleton";
@@ -32,6 +32,41 @@ interface TraderProfile {
   error?: string;
 }
 
+interface TraderPosition {
+  signal_id: number;
+  market_id: string;
+  question: string;
+  category: string;
+  position_direction: "YES" | "NO" | string;
+  position_size: number;
+  avg_price: number;
+  signal_timestamp: string;
+  market_price_at_signal: number;
+  sm_consensus: number;
+  divergence_pct: number;
+  sm_direction: string;
+  neg_risk: number;
+  resolved: boolean;
+  correct: boolean | null;
+  outcome: number | null;
+}
+
+interface TraderPositionsResponse {
+  trader_address: string;
+  positions: TraderPosition[];
+  count: number;
+}
+
+function timeAgo(ts: string): string {
+  const diff = Date.now() - new Date(ts).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 const SKEW_LABELS: Record<string, string> = {
   very_lopsided: "very lopsided · ≥90 or ≤10",
   lopsided: "lopsided · 75–90 or 10–25",
@@ -55,8 +90,10 @@ export default function TraderProfilePage() {
     }
   }, [address]);
 
-  const { data, loading, error, retry } =
-    usePollingFetch<TraderProfile>(`/api/traders/${address}`, 60_000);
+  const { data, loading, error, retry } = usePollingFetch<TraderProfile>(
+    `/api/traders/${address}`,
+    60_000,
+  );
 
   if (loading) {
     return (
@@ -169,6 +206,9 @@ export default function TraderProfilePage() {
           </p>
         </div>
       </div>
+
+      {/* Recent counter-consensus positions */}
+      <RecentPositions address={data.trader_address} />
 
       {/* Accuracy by skew */}
       {skewEntries.length > 0 && (
@@ -293,5 +333,99 @@ export default function TraderProfilePage() {
 
       <Disclaimer />
     </div>
+  );
+}
+
+function RecentPositions({ address }: { address: string }) {
+  const { data } = usePollingFetch<TraderPositionsResponse>(
+    `/api/traders/${address}/positions?limit=20`,
+    120_000,
+  );
+
+  if (!data || data.positions.length === 0) return null;
+
+  return (
+    <section className="mb-12">
+      <div className="mb-5 pb-3 border-b border-ink-800">
+        <div className="eyebrow mb-2">
+          activity · counter-consensus positions
+        </div>
+        <h2 className="text-h3 text-ink-100 tracking-tight">
+          recent divergent positions
+          <span className="num text-ink-500 font-normal text-caption ml-2 tracking-normal">
+            most recent {data.positions.length}
+          </span>
+        </h2>
+        <p className="text-caption text-ink-500 mt-2">
+          Each row is a market where this trader took a position counter to
+          aggregate consensus. Click through to the market for full context.
+        </p>
+      </div>
+      <div className="surface rounded-lg overflow-hidden divide-y divide-ink-800">
+        {data.positions.map((p) => (
+          <RecentPositionRow key={`${p.market_id}-${p.signal_id}`} p={p} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecentPositionRow({ p }: { p: TraderPosition }) {
+  const sideColor =
+    p.position_direction === "YES" ? "text-scope-400" : "text-alert-500";
+  const notional = p.position_size * p.avg_price;
+  const traderPct = (p.avg_price * 100).toFixed(0);
+  const marketPct = (p.market_price_at_signal * 100).toFixed(0);
+
+  let outcomeBadge: ReactNode = (
+    <span className="text-micro font-mono text-ink-500">pending</span>
+  );
+  if (p.resolved && p.correct === true) {
+    outcomeBadge = (
+      <span
+        className="text-micro font-mono text-scope-400"
+        title="trader's direction matched the resolved outcome"
+      >
+        ✓ correct
+      </span>
+    );
+  } else if (p.resolved && p.correct === false) {
+    outcomeBadge = (
+      <span
+        className="text-micro font-mono text-alert-500"
+        title="trader's direction did not match the resolved outcome"
+      >
+        ✗ wrong
+      </span>
+    );
+  }
+
+  return (
+    <Link
+      href={`/market/${p.market_id}`}
+      className="flex items-center gap-5 px-5 py-4 row-hover transition-colors"
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-body text-ink-100 truncate font-medium">
+          {p.question || p.market_id}
+        </p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-caption font-mono">
+          <span className={`num ${sideColor}`}>{p.position_direction}</span>
+          <span className="text-ink-400 num">
+            @ <span className="text-ink-100">{traderPct}%</span>
+            <span className="text-ink-600"> · market </span>
+            <span className="text-ink-300">{marketPct}%</span>
+          </span>
+          {p.category && <span className="text-ink-500">{p.category}</span>}
+          <span className="text-ink-500">{timeAgo(p.signal_timestamp)}</span>
+        </div>
+      </div>
+      <div className="text-right whitespace-nowrap">
+        <div className="num text-body text-ink-100 tracking-tight">
+          ${notional.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+        </div>
+        <div className="mt-1">{outcomeBadge}</div>
+      </div>
+    </Link>
   );
 }

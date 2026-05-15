@@ -2147,6 +2147,71 @@ async def get_trader_profile(db: aiosqlite.Connection, trader_address: str) -> d
     return d
 
 
+async def get_trader_recent_positions(
+    db: aiosqlite.Connection,
+    trader_address: str,
+    limit: int = 30,
+) -> list[dict]:
+    """Recent divergent positions held by a specific trader.
+
+    Dedupes by (trader, market_id) on the earliest signal_trader_positions
+    row, matching `rebuild_trader_accuracy` — so each market the trader
+    took a counter-consensus position on appears once, and the timeline
+    reconciles with the headline accuracy stat.
+    """
+    cursor = await db.execute(
+        """
+        WITH first_position AS (
+            SELECT MIN(stp.id) AS stp_id,
+                   stp.trader_address,
+                   stp.market_id
+            FROM signal_trader_positions stp
+            WHERE stp.trader_address = ?
+            GROUP BY stp.trader_address, stp.market_id
+        )
+        SELECT stp.signal_id,
+               stp.market_id,
+               stp.position_direction,
+               stp.position_size,
+               stp.avg_price,
+               ds.timestamp                AS signal_timestamp,
+               ds.market_price             AS market_price_at_signal,
+               ds.sm_consensus,
+               ds.divergence_pct,
+               ds.sm_direction,
+               COALESCE(ds.question, '')   AS question,
+               COALESCE(ds.category, '')   AS category,
+               COALESCE(ds.neg_risk, 0)    AS neg_risk,
+               COALESCE(ds.resolved, 0)    AS resolved,
+               rm.outcome                  AS outcome
+        FROM first_position fp
+        JOIN signal_trader_positions stp ON stp.id = fp.stp_id
+        JOIN divergence_signals ds       ON ds.id = stp.signal_id
+        LEFT JOIN resolved_markets rm    ON rm.market_id = stp.market_id
+        ORDER BY ds.timestamp DESC
+        LIMIT ?
+        """,
+        (trader_address, limit),
+    )
+    rows = await cursor.fetchall()
+
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        outcome = d.get("outcome")
+        direction = d.get("position_direction")
+        if d.get("resolved") and outcome in (0, 1) and direction in ("YES", "NO"):
+            d["correct"] = bool(
+                (direction == "YES" and outcome == 1) or (direction == "NO" and outcome == 0)
+            )
+        else:
+            d["correct"] = None
+        d["resolved"] = bool(d.get("resolved"))
+        d["neg_risk"] = int(d.get("neg_risk") or 0)
+        out.append(d)
+    return out
+
+
 # ── Signal Expiration ──────────────────────────────────────
 
 
