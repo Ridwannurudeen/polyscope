@@ -10,6 +10,7 @@ import {
 } from "@/lib/identity";
 import { getClientId } from "@/lib/client-id";
 import { trackEvent } from "@/lib/analytics";
+import { preferredInjectedConnector } from "@/lib/wallet-connectors";
 
 export function ConnectWallet() {
   const { clientId, walletAddress, linkWallet, unlinkWallet, linking } =
@@ -37,7 +38,7 @@ export function ConnectWallet() {
     try {
       let wallet = address;
       if (!isConnected || !wallet) {
-        const injected = connectors.find((c) => c.type === "injected");
+        const injected = await preferredInjectedConnector(connectors);
         if (!injected) {
           throw new Error("Install or unlock a browser wallet, then try again");
         }
@@ -86,7 +87,8 @@ export function ConnectWallet() {
               {walletAddress}
             </p>
             <p className="text-micro text-ink-400 mb-4 leading-relaxed">
-              Your watchlist and portfolio history is tied to this verified wallet.
+              Your watchlist and portfolio history is tied to this verified
+              wallet.
             </p>
             <button
               onClick={() => {

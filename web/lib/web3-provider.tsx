@@ -5,11 +5,21 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider, createConfig } from "wagmi";
 import { polygon } from "wagmi/chains";
 import { injected } from "wagmi/connectors";
-import { fallback, http } from "viem";
+import { fallback, http, type EIP1193Provider } from "viem";
+import { findMetaMaskProvider } from "./wallet-provider";
 
 const wagmiConfig = createConfig({
   chains: [polygon],
-  connectors: [injected({ target: "metaMask" })],
+  connectors: [
+    injected({
+      target: {
+        id: "metaMask",
+        name: "MetaMask",
+        provider: (windowRef) =>
+          findMetaMaskProvider(windowRef) as EIP1193Provider | undefined,
+      },
+    }),
+  ],
   transports: {
     // wagmi's default Polygon transport (polygon-rpc.com) returns
     // 403 "tenant disabled" — Safe getOwners checks fail with
