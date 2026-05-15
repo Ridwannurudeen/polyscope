@@ -11,11 +11,15 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { Disclaimer } from "@/components/disclaimer";
+import { LogTrade } from "@/components/log-trade";
 import { PageHeader } from "@/components/page-header";
 import { ScoreBadge } from "@/components/score-badge";
+import { ShareButton } from "@/components/share-button";
 import { SignalEvidence } from "@/components/signal-evidence";
 import { SkeletonCard } from "@/components/skeleton";
 import { StatCard } from "@/components/stat-card";
+import { TradeButton } from "@/components/trade-button";
+import { WatchlistButton } from "@/components/watchlist-button";
 import { usePollingFetch } from "@/lib/hooks";
 
 interface SignalHistoryEntry {
@@ -58,8 +62,10 @@ export default function MarketPage() {
   const params = useParams();
   const id = params.id as string;
 
-  const { data, loading, error, retry } =
-    usePollingFetch<MarketDetail>(`/api/market/${id}`, 120_000);
+  const { data, loading, error, retry } = usePollingFetch<MarketDetail>(
+    `/api/market/${id}`,
+    120_000,
+  );
 
   if (loading) {
     return (
@@ -101,10 +107,12 @@ export default function MarketPage() {
 
   const { market, divergence, price_history, signal_history } = data;
 
-  const chartData = (price_history || []).map((p: { t: number; p: number }) => ({
-    time: new Date(p.t * 1000).toLocaleDateString(),
-    price: parseFloat((p.p * 100).toFixed(1)),
-  }));
+  const chartData = (price_history || []).map(
+    (p: { t: number; p: number }) => ({
+      time: new Date(p.t * 1000).toLocaleDateString(),
+      price: parseFloat((p.p * 100).toFixed(1)),
+    }),
+  );
 
   return (
     <div>
@@ -186,6 +194,39 @@ export default function MarketPage() {
         </div>
       )}
 
+      {/* Action bar — attributed trade flow */}
+      <div className="mb-12 flex items-center gap-2 flex-wrap">
+        <TradeButton
+          marketId={market.condition_id}
+          question={market.question}
+          direction={
+            divergence ? (divergence.sm_direction as "YES" | "NO") : "YES"
+          }
+          marketPrice={market.price_yes}
+        />
+        <WatchlistButton marketId={market.condition_id} />
+        <LogTrade
+          marketId={market.condition_id}
+          defaultDirection={divergence?.sm_direction ?? "YES"}
+          defaultPrice={
+            divergence
+              ? divergence.sm_direction === "YES"
+                ? market.price_yes
+                : 1 - market.price_yes
+              : market.price_yes
+          }
+        />
+        {divergence && (
+          <ShareButton
+            marketId={market.condition_id}
+            question={market.question}
+            direction={divergence.sm_direction}
+            divergencePct={divergence.divergence_pct}
+            marketPrice={divergence.market_price}
+          />
+        )}
+      </div>
+
       {/* Price History */}
       <section className="mb-12">
         <div className="mb-5 pb-3 border-b border-ink-800">
@@ -195,7 +236,10 @@ export default function MarketPage() {
         <div className="surface rounded-lg p-6">
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart
+                data={chartData}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              >
                 <defs>
                   <linearGradient id="scopeGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#00E5A0" stopOpacity={0.32} />
@@ -260,7 +304,9 @@ export default function MarketPage() {
         <section className="mb-12">
           <div className="mb-5 pb-3 border-b border-ink-800">
             <div className="eyebrow mb-2">log · per-scan</div>
-            <h2 className="text-h3 text-ink-100 tracking-tight">signal history</h2>
+            <h2 className="text-h3 text-ink-100 tracking-tight">
+              signal history
+            </h2>
           </div>
           <div className="surface rounded-lg overflow-x-auto">
             <table className="w-full text-body-sm">
@@ -269,7 +315,9 @@ export default function MarketPage() {
                   <th className="eyebrow text-left px-3 py-3">date</th>
                   <th className="eyebrow text-center px-3 py-3">sm dir</th>
                   <th className="eyebrow text-center px-3 py-3">market</th>
-                  <th className="eyebrow text-center px-3 py-3">sm consensus</th>
+                  <th className="eyebrow text-center px-3 py-3">
+                    sm consensus
+                  </th>
                   <th className="eyebrow text-center px-3 py-3">divergence</th>
                   <th className="eyebrow text-center px-3 py-3">score</th>
                   <th className="eyebrow text-center px-3 py-3">result</th>

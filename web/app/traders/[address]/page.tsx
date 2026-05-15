@@ -6,6 +6,7 @@ import { useEffect, type ReactNode } from "react";
 import { Disclaimer } from "@/components/disclaimer";
 import { FollowButton } from "@/components/follow-button";
 import { TableSkeleton } from "@/components/skeleton";
+import { TradeButton } from "@/components/trade-button";
 import { trackEvent } from "@/lib/analytics";
 import { usePollingFetch } from "@/lib/hooks";
 
@@ -401,12 +402,9 @@ function RecentPositionRow({ p }: { p: TraderPosition }) {
   }
 
   return (
-    <Link
-      href={`/market/${p.market_id}`}
-      className="flex items-center gap-5 px-5 py-4 row-hover transition-colors"
-    >
-      <div className="flex-1 min-w-0">
-        <p className="text-body text-ink-100 truncate font-medium">
+    <div className="flex items-center gap-5 px-5 py-4 row-hover transition-colors">
+      <Link href={`/market/${p.market_id}`} className="flex-1 min-w-0 group">
+        <p className="text-body text-ink-100 truncate font-medium group-hover:text-scope-400">
           {p.question || p.market_id}
         </p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-caption font-mono">
@@ -419,13 +417,21 @@ function RecentPositionRow({ p }: { p: TraderPosition }) {
           {p.category && <span className="text-ink-500">{p.category}</span>}
           <span className="text-ink-500">{timeAgo(p.signal_timestamp)}</span>
         </div>
-      </div>
+      </Link>
       <div className="text-right whitespace-nowrap">
         <div className="num text-body text-ink-100 tracking-tight">
           ${notional.toLocaleString(undefined, { maximumFractionDigits: 0 })}
         </div>
         <div className="mt-1">{outcomeBadge}</div>
       </div>
-    </Link>
+      <div className="shrink-0">
+        <TradeButton
+          marketId={p.market_id}
+          question={p.question || p.market_id}
+          direction={p.position_direction as "YES" | "NO"}
+          marketPrice={p.market_price_at_signal}
+        />
+      </div>
+    </div>
   );
 }
