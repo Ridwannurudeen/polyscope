@@ -56,6 +56,11 @@ export function TradeButton({
         12_000,
       );
       if (!res.ok) {
+        if (res.status === 451) {
+          throw new Error(
+            "Trading isn't available from your region — connect a non-US VPN (CH/BR/MX/AE) and reload.",
+          );
+        }
         const text = await res.text().catch(() => "");
         throw new Error(text || `PolyScope API ${res.status}`);
       }
